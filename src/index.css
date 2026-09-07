@@ -1,0 +1,106 @@
+/* LAN Workbench — Tailwind 入口与全局基础样式 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* -------------------------------------------------------------------------- */
+/*  全局基础                                                                  */
+/* -------------------------------------------------------------------------- */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  /* 大屏教室一体机基线 18px（与 tailwind.config fontSize.base 一致） */
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+  color: #0f172a;          /* ink.DEFAULT */
+  background-color: #f1f5f9; /* surface.sunken */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* 让按钮/链接在 macOS WebView 里也有可点击光标 */
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* 滚动条轻量化（macOS 风格），大屏滚动更顺 */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(15, 23, 42, 0.18);
+  border-radius: 6px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(15, 23, 42, 0.32);
+}
+
+/* 触控目标兜底：避免某些第三方控件 < 44px */
+button,
+[role='button'] {
+  min-height: 2.75rem; /* touch */
+}
+
+/* -------------------------------------------------------------------------- */
+/*  通用组件层（components）                                                  */
+/* -------------------------------------------------------------------------- */
+@layer components {
+  /* 卡片 */
+  .card {
+    @apply bg-surface-raised rounded-card shadow-card border border-surface-border;
+  }
+  /* 主按钮 */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600
+           text-white px-4 min-h-touch text-base font-medium
+           hover:bg-brand-700 active:bg-brand-800
+           disabled:bg-ink-muted disabled:opacity-60 transition-colors;
+  }
+  /* 次按钮 */
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-white
+           text-ink px-4 min-h-touch text-base font-medium border border-surface-border
+           hover:bg-slate-50 active:bg-slate-100 transition-colors;
+  }
+  /* 危险按钮 */
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-state-absent
+           text-white px-4 min-h-touch text-base font-medium
+           hover:bg-red-700 active:bg-red-800 transition-colors;
+  }
+  /* 输入框 */
+  .input {
+    @apply w-full rounded-lg border border-surface-border bg-white px-3 min-h-touch
+           text-base text-ink placeholder:text-ink-muted
+           focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200;
+  }
+  /* 状态徽标（present/leave/absent/late） */
+  .badge-present {
+    @apply inline-flex items-center px-2 py-0.5 rounded-md text-2xs font-semibold
+           bg-green-50 text-state-present border border-green-200;
+  }
+  .badge-leave {
+    @apply inline-flex items-center px-2 py-0.5 rounded-md text-2xs font-semibold
+           bg-amber-50 text-state-leave border border-amber-200;
+  }
+  .badge-absent {
+    @apply inline-flex items-center px-2 py-0.5 rounded-md text-2xs font-semibold
+           bg-red-50 text-state-absent border border-red-200;
+  }
+  .badge-late {
+    @apply inline-flex items-center px-2 py-0.5 rounded-md text-2xs font-semibold
+           bg-orange-50 text-state-late border border-orange-200;
+  }
+}

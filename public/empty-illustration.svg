@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160" width="240" height="160" role="img" aria-label="暂无数据">
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#e2e8f0" />
+    </linearGradient>
+  </defs>
+  <ellipse cx="120" cy="140" rx="76" ry="10" fill="#cbd5e1" opacity="0.45" />
+  <rect x="62" y="26" width="116" height="100" rx="10" fill="url(#paper)" stroke="#94a3b8" stroke-width="2.5" />
+  <rect x="78" y="46" width="84" height="7" rx="3.5" fill="#cbd5e1" />
+  <rect x="78" y="64" width="60" height="7" rx="3.5" fill="#cbd5e1" />
+  <rect x="78" y="82" width="72" height="7" rx="3.5" fill="#cbd5e1" />
+  <rect x="78" y="100" width="42" height="7" rx="3.5" fill="#cbd5e1" />
+  <circle cx="150" cy="104" r="26" fill="#eff8ff" stroke="#2579eb" stroke-width="3" />
+  <path d="M140 104 h20" stroke="#2579eb" stroke-width="4" stroke-linecap="round" />
+</svg>

@@ -1,0 +1,43 @@
+# 依赖
+node_modules/
+.pnp
+.pnp.js
+
+# 构建产物
+dist/
+dist-ssr/
+*.local
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/
+src-tauri/icons/*.png.bak
+
+# 数据库与离线包（本地数据，禁止入库）
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sch
+*.schkey
+
+# 日志
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+Thumbs.db
+
+# 环境变量
+.env
+.env.local
+.env.*.local
