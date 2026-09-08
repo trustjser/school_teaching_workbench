@@ -589,6 +589,7 @@ fn preview(statement: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::models::Student;
 
     #[tokio::test]
     async fn migration_adds_class_id_idempotently() {
@@ -973,6 +974,83 @@ CREATE TABLE pending_queue (
         insert_sync_log_row(&pool, "log-1", "q-school-year")
             .await
             .expect("sync_log 写入应成功（外键不得悬空）");
+
+        pool.close().await;
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 回归：编辑学生时若 status 走到空串，不应触发
+    /// `NOT NULL constraint failed: students.status`（或 CHECK 失败）。
+    ///
+    /// 历史缺陷：`school_year` 迁移给 `students` 加了 `status TEXT NOT NULL DEFAULT 'active'`，
+    /// 编辑时若 status 以空串进入 `INSERT...ON CONFLICT UPDATE`，空串既触发不了默认值又违反
+    /// NOT NULL。修复后 upsert 把空串（或字面量 "null"）按 NULL 绑定，交由 DB 的
+    /// DEFAULT 'active' 接管；存量行保留原值、新行落 'active'。
+    #[tokio::test]
+    async fn upsert_empty_status_defaults_to_active() {
+        let (dir, pool) = temp_pool("student_empty_status").await;
+        run_migrations(&pool).await.expect("迁移");
+
+        // 1) 先用合法 status 建一条学生（CHECK 约束原本就禁止空串进库，空串只可能来自编辑路径）。
+        crate::db::repo::student_repo::upsert(
+            &pool,
+            Student {
+                id: "stu-1".into(),
+                student_no: "001".into(),
+                name: "学生".into(),
+                gender: "unknown".into(),
+                grade: Some("一年级".into()),
+                class_name: Some("一班".into()),
+                class_id: None,
+                seat_no: Some(1),
+                status: "active".into(),
+                status_since: None,
+                note: None,
+                phone: None,
+                import_batch_id: None,
+                created_at: 1,
+                updated_at: 1,
+                deleted_at: None,
+                sync_state: String::new(),
+                dirty: true,
+            },
+        )
+        .await
+        .expect("建表后首插");
+
+        // 2) 模拟「编辑时 status 为空串」重新 upsert（用户报错的精确路径）。
+        crate::db::repo::student_repo::upsert(
+            &pool,
+            Student {
+                id: "stu-1".into(),
+                student_no: "001".into(),
+                name: "学生（已编辑）".into(),
+                gender: "unknown".into(),
+                grade: Some("一年级".into()),
+                class_name: Some("一班".into()),
+                class_id: None,
+                seat_no: Some(1),
+                status: String::new(), // 空串：编辑回传常见
+                status_since: None,
+                note: None,
+                phone: None,
+                import_batch_id: None,
+                created_at: 1,
+                updated_at: 2,
+                deleted_at: None,
+                sync_state: String::new(),
+                dirty: true,
+            },
+        )
+        .await
+        .expect("空 status 编辑不应失败");
+
+        // 3) 落库后 status 必须是 'active'（DEFAULT 接管），而非空串、也未触发 NOT NULL。
+        let saved: String = sqlx::query_scalar("SELECT status FROM students WHERE id = 'stu-1'")
+            .fetch_one(&pool)
+            .await
+            .expect("读取 status");
+        assert_eq!(saved, "active", "空串 status 应被 DEFAULT 'active' 接管");
 
         pool.close().await;
         std::fs::remove_dir_all(&dir).ok();

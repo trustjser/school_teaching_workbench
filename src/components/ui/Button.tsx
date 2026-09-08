@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
+import { cn } from '../../lib/cn';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'success' | 'warning';
 export type ButtonSize = 'md' | 'lg' | 'xl';
@@ -49,7 +50,7 @@ export function Button({
     <button
       type={type}
       disabled={disabled || loading}
-      className={[
+      className={cn(
         'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-semibold select-none',
         'transition-[transform,background-color,box-shadow,color]',
         'hover:shadow-soft active:scale-[0.97]',
@@ -59,7 +60,7 @@ export function Button({
         VARIANT_CLASS[variant],
         block ? 'w-full' : '',
         className,
-      ].join(' ')}
+      )}
       {...rest}
     >
       {loading ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : icon}

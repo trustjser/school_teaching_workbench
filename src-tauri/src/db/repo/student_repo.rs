@@ -129,6 +129,13 @@ pub async fn upsert(pool: &SqlitePool, mut student: Student) -> AppResult<Studen
     if student.status.is_empty() {
         student.status = "active".to_string();
     }
+    // 兜底：即便上游漏填，绑定时把空串按 NULL 处理，交给 DB 的 DEFAULT 'active'
+    // 接管，避免空串既触发不了默认值又违反 NOT NULL（SQLite 旧库 status 列为空时常踩）。
+    let status_bind: Option<&str> = if student.status.trim().is_empty() || student.status == "null" {
+        None
+    } else {
+        Some(student.status.as_str())
+    };
 
     sqlx::query(
         "INSERT INTO students (id, student_no, name, gender, grade, class_name, class_id, seat_no, status,
@@ -159,7 +166,8 @@ pub async fn upsert(pool: &SqlitePool, mut student: Student) -> AppResult<Studen
     .bind(&student.grade)
     .bind(&student.class_name)
     .bind(&student.class_id)
-    .bind(&student.status)
+    .bind(student.seat_no)
+    .bind(status_bind)
     .bind(student.status_since)
     .bind(&student.note)
     .bind(&student.phone)
@@ -379,7 +387,11 @@ async fn upsert_in_tx(
     .bind(&student.class_name)
     .bind(&student.class_id)
     .bind(student.seat_no)
-    .bind(&student.status)
+    .bind(if student.status.trim().is_empty() || student.status == "null" {
+        None
+    } else {
+        Some(student.status.as_str())
+    })
     .bind(student.status_since)
     .bind(&student.note)
     .bind(&student.phone)

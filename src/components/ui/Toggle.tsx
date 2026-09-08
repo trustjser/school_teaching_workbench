@@ -1,3 +1,5 @@
+import { cn } from '../../lib/cn';
+
 export interface ToggleProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
@@ -18,11 +20,11 @@ export function Toggle({
 }: ToggleProps): JSX.Element {
   return (
     <label
-      className={[
+      className={cn(
         'flex items-center justify-between gap-4 rounded-lg px-1 py-2',
         disabled ? 'opacity-50' : 'cursor-pointer',
         className,
-      ].join(' ')}
+      )}
     >
       <span className="min-w-0">
         {label && <span className="block text-base font-semibold text-ink">{label}</span>}
