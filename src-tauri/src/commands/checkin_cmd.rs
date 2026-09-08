@@ -89,6 +89,7 @@ pub async fn checkin_daily_summary(state: State<'_, Arc<AppState>>, date: String
 pub async fn checkin_school_summary(state: State<'_, Arc<AppState>>, date: String) -> AppResult<SchoolSummary> {
     let row = sqlx::query_as::<_, SchoolSummary>(
         "SELECT
+            ? AS date,
             (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL AND status <> 'transferred') AS total_students,
             (SELECT COUNT(DISTINCT class_name) FROM students WHERE deleted_at IS NULL AND status <> 'transferred' AND class_name IS NOT NULL) AS total_classes,
             (SELECT COUNT(*) FROM checkin_records c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.state='present')
@@ -97,11 +98,15 @@ pub async fn checkin_school_summary(state: State<'_, Arc<AppState>>, date: Strin
             (SELECT COUNT(*) FROM checkin_records c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.state='absent') AS absent_cnt,
             (SELECT COUNT(*) FROM checkin_records c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.state='late') AS late_cnt,
             (SELECT COUNT(DISTINCT s3.class_name) FROM checkin_records cr2 JOIN students s3 ON s3.id=cr2.student_id WHERE cr2.checkin_date = ? AND cr2.deleted_at IS NULL AND s3.deleted_at IS NULL) AS submitted_classes,
+            (SELECT COUNT(DISTINCT c.student_id) FROM checkin_records c WHERE c.checkin_date = ? AND c.deleted_at IS NULL) AS marked_students,
+            0 AS conflict_count,
             CASE WHEN (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL AND status<>'transferred')=0 THEN 0.0 ELSE
                 CAST((SELECT COUNT(*) FROM checkin_records c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.state='present')
                     + (SELECT COUNT(*) FROM students s2 WHERE s2.deleted_at IS NULL AND s2.status<>'transferred' AND NOT EXISTS (SELECT 1 FROM checkin_records cr WHERE cr.student_id=s2.id AND cr.checkin_date = ? AND cr.deleted_at IS NULL)) AS REAL)
-                / (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL AND status<>'transferred') END AS attendance_rate",
+                / (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL AND status<>'transferred') * 100 END AS attendance_rate",
     )
+    .bind(&date)
+    .bind(&date)
     .bind(&date)
     .bind(&date)
     .bind(&date)
@@ -127,7 +132,7 @@ pub async fn checkin_class_attendance(state: State<'_, Arc<AppState>>, date: Str
             COALESCE(SUM(CASE WHEN c.state='leave' THEN 1 ELSE 0 END),0) AS leave_cnt,
             COALESCE(SUM(CASE WHEN c.state='absent' THEN 1 ELSE 0 END),0) AS absent_cnt,
             COALESCE(SUM(CASE WHEN c.state='late' THEN 1 ELSE 0 END),0) AS late_cnt,
-            CASE WHEN COUNT(c.id)=0 THEN 0.0 ELSE CAST((COALESCE(SUM(CASE WHEN c.state='present' THEN 1 ELSE 0 END),0) + (COUNT(*) - COUNT(c.id))) AS REAL)/COUNT(*) END AS attendance_rate,
+            CASE WHEN COUNT(c.id)=0 THEN 0.0 ELSE CAST((COALESCE(SUM(CASE WHEN c.state='present' THEN 1 ELSE 0 END),0) + (COUNT(*) - COUNT(c.id))) AS REAL)/COUNT(*) * 100 END AS attendance_rate,
             CASE WHEN COUNT(c.id) > 0 THEN 1 ELSE 0 END AS submitted
          FROM students s
          LEFT JOIN checkin_records c ON c.student_id=s.id AND c.checkin_date = ? AND c.deleted_at IS NULL

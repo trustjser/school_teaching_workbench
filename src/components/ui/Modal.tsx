@@ -32,13 +32,17 @@ export function Modal({
   closeOnBackdrop = true,
 }: ModalProps): JSX.Element | null {
   const panelRef = useRef<HTMLDivElement>(null);
+  // 用 ref 持有最新的 onClose，避免父组件每次渲染传入新函数导致 effect 反复重跑
+  // （否则每次按键 setGradeDraft 都会重新调度 panel.focus()，把输入焦点从输入框抢走）。
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== 'Tab') return;
@@ -70,7 +74,7 @@ export function Modal({
       document.body.style.overflow = prevOverflow;
       window.clearTimeout(timer);
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

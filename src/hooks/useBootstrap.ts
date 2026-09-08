@@ -34,7 +34,11 @@ export function useBootstrap(): void {
         if (disposed) return;
         app.applySettings(settings);
 
-        if (!app.settings.firstRunDone) {
+        // 注意：applySettings 内部调用 set() 会生成「新的」state 对象，而上面捕获的
+        // `app` 仍是启动前的旧引用，其 settings 还是默认值（firstRunDone=false）。
+        // 必须重新 getState() 读取最新 settings，否则 firstRunDone 永远取默认 false，
+        // 表现为「每次启动都进入首次运行配置」。
+        if (!useAppStore.getState().settings.firstRunDone) {
           app.setPhase('need-setup');
           return;
         }

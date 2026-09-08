@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, RefreshCw } from 'lucide-react';
+import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { IconButton, resolveIcon } from '@/components/ui/IconButton';
 import { useBroadcastStore, summarizeReceipts } from '@/store/useBroadcastStore';
 import { useDeviceStore } from '@/store/useDeviceStore';
 import { useAppStore } from '@/store/useAppStore';
@@ -18,6 +19,7 @@ import {
   TASK_TYPE_OPTIONS,
   PRIORITY_OPTIONS,
   COLOR_TOKENS,
+  COLOR_TOKEN_HEX,
   COLOR_TOKEN_LABEL,
   NODE_ICON_OPTIONS,
   DEFAULT_NODE_TEMPLATES,
@@ -199,6 +201,132 @@ export interface CreatePayload {
   nodes: BroadcastNodeTemplate[];
 }
 
+/** 节点配色色板：直接在选项中展示颜色 */
+function ColorSwatchPicker({
+  value,
+  onChange,
+}: {
+  value: ColorToken;
+  onChange: (color: ColorToken) => void;
+}): JSX.Element {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {COLOR_TOKENS.map((token) => {
+        const hex = COLOR_TOKEN_HEX[token] ?? '#64748b';
+        const selected = value === token;
+        return (
+          <button
+            key={token}
+            type="button"
+            title={COLOR_TOKEN_LABEL[token] ?? token}
+            aria-label={`配色：${COLOR_TOKEN_LABEL[token] ?? token}`}
+            onClick={() => onChange(token as ColorToken)}
+            className={[
+              'h-7 w-7 min-h-7 shrink-0 aspect-square box-border rounded-full border-2 transition-transform',
+              selected ? 'scale-110 border-ink shadow-sm' : 'border-transparent hover:scale-105',
+            ].join(' ')}
+            style={{ backgroundColor: hex }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/** 节点图标选择器：直接在选项中展示图标 */
+function IconPicker({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (icon: string) => void;
+}): JSX.Element {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {NODE_ICON_OPTIONS.map((opt) => {
+        const Icon = resolveIcon(opt.value);
+        const selected = value === opt.value || (value == null && opt.value === 'circle');
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            title={opt.label}
+            aria-label={`图标：${opt.label}`}
+            onClick={() => onChange(opt.value)}
+            className={[
+              'inline-flex h-9 w-9 min-h-9 items-center justify-center rounded-lg border transition-colors',
+              selected
+                ? 'border-brand-600 bg-brand-50 text-brand-700'
+                : 'border-surface-border bg-surface-raised text-ink-soft hover:bg-surface-muted hover:text-ink',
+            ].join(' ')}
+          >
+            <Icon className="h-4 w-4" />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 单条状态节点编辑卡：预览 + 名称 + 颜色/图标选项 + 终态 */
+function NodeEditorCard({
+  node,
+  canRemove,
+  onChange,
+  onRemove,
+}: {
+  node: EditableBroadcastNode;
+  canRemove: boolean;
+  onChange: (patch: Partial<EditableBroadcastNode>) => void;
+  onRemove: () => void;
+}): JSX.Element {
+  const Icon = resolveIcon(node.iconName);
+  const hex = COLOR_TOKEN_HEX[node.colorToken] ?? '#64748b';
+  return (
+    <div className="rounded-xl border border-surface-border bg-surface-raised p-4">
+      <div className="flex items-start gap-4">
+        <div
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full shadow-sm"
+          style={{ backgroundColor: hex }}
+          aria-label="节点预览"
+        >
+          <Icon className="h-6 w-6 text-white" />
+        </div>
+        <div className="min-w-0 flex-1 space-y-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-0 flex-1">
+              <Input
+                label="节点名称"
+                value={node.label}
+                onChange={(e) => onChange({ label: e.target.value })}
+              />
+            </div>
+            <div>
+              <Toggle label='终态' checked={node.isFinal} onChange={(v) => onChange({ isFinal: v })} className="py-0 px-0" />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <span className="text-sm font-semibold text-ink-muted">配色</span>
+            <ColorSwatchPicker value={node.colorToken} onChange={(c) => onChange({ colorToken: c })} />
+          </div>
+          <div className="space-y-1">
+            <span className="text-sm font-semibold text-ink-muted">图标</span>
+            <IconPicker value={node.iconName} onChange={(i) => onChange({ iconName: i })} />
+          </div>
+        </div>
+        <IconButton
+          icon={<Trash2 className="h-5 w-5" />}
+          label="删除节点"
+          variant="ghost"
+          disabled={!canRemove}
+          onClick={onRemove}
+          className="text-ink-muted hover:text-red-600"
+        />
+      </div>
+    </div>
+  );
+}
+
 function CreateBroadcastModal({
   open,
   onClose,
@@ -326,11 +454,11 @@ function CreateBroadcastModal({
         </>
       }
     >
-      <div className="space-y-4">
+      <div className="space-y-5">
         <Input label="任务标题" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如：周末安全提醒" />
         <Textarea label="描述" value={description} onChange={(e) => setDescription(e.target.value)} />
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Select
             label="优先级"
             options={PRIORITY_OPTIONS}
@@ -343,19 +471,18 @@ function CreateBroadcastModal({
             value={taskType}
             onChange={(e) => setTaskType(e.target.value)}
           />
+          <Select
+            label="默认视图"
+            options={[
+              { value: 'grid', label: '网格视图' },
+              { value: 'table', label: '表格视图' },
+            ]}
+            value={viewMode}
+            onChange={(e) => setViewMode(e.target.value as 'grid' | 'table')}
+          />
         </div>
 
-        <Select
-          label="默认视图"
-          options={[
-            { value: 'grid', label: '网格视图' },
-            { value: 'table', label: '表格视图' },
-          ]}
-          value={viewMode}
-          onChange={(e) => setViewMode(e.target.value as 'grid' | 'table')}
-        />
-
-        <div>
+        <div className="space-y-2">
           <Select
             label="下发目标"
             options={[
@@ -368,18 +495,17 @@ function CreateBroadcastModal({
             onChange={(e) => setTargetType(e.target.value as BroadcastTargetType)}
           />
           {targetType === 'school' && (
-            <p className="mt-1 text-sm text-ink-muted">将向局域网内全部班级端下发。</p>
+            <p className="text-sm text-ink-muted">将向局域网内全部班级端下发。</p>
           )}
           {(targetType === 'grade' || targetType === 'class') && (
             <Input
-              className="mt-2"
               placeholder={targetType === 'grade' ? '如：三年级（逗号分隔多个）' : '如：三年级二班（逗号分隔多个）'}
               value={targetText}
               onChange={(e) => setTargetText(e.target.value)}
             />
           )}
           {targetType === 'device' && (
-            <div className="mt-2 grid max-h-48 grid-cols-1 gap-2 overflow-y-auto pr-1 board:grid-cols-2">
+            <div className="grid max-h-48 grid-cols-1 gap-2 overflow-y-auto pr-1 board:grid-cols-2">
               {deviceOptions.length === 0 ? (
                 <p className="text-sm text-ink-muted">未发现其他班级端节点。</p>
               ) : (
@@ -412,50 +538,27 @@ function CreateBroadcastModal({
           )}
         </div>
 
-        <Toggle label="启用评分" checked={scoreEnabled} onChange={setScoreEnabled} />
-        <Toggle label="启用备注" checked={noteEnabled} onChange={setNoteEnabled} />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Toggle label="启用评分" checked={scoreEnabled} onChange={setScoreEnabled} />
+          <Toggle label="启用备注" checked={noteEnabled} onChange={setNoteEnabled} />
+        </div>
 
         <div className="space-y-3">
-          <p className="text-base font-semibold text-ink">状态节点（{nodes.length} 个，2~4）</p>
+          <div className="flex items-center justify-between">
+            <p className="text-base font-semibold text-ink">状态节点（{nodes.length} 个，2~4）</p>
+            <Button variant="secondary" size="md" onClick={addNode} disabled={nodes.length >= TASK_NODE_MAX}>
+              添加节点
+            </Button>
+          </div>
           {nodes.map((n, idx) => (
-            <div
+            <NodeEditorCard
               key={n.nodeKey}
-              className="flex flex-wrap items-end gap-3 rounded-lg border border-surface-border p-3"
-            >
-              <Input
-                label="节点名称"
-                value={n.label}
-                onChange={(e) => patchNode(idx, { label: e.target.value })}
-                className="w-40"
-              />
-              <Select
-                label="配色"
-                options={COLOR_TOKENS.map((c) => ({ value: c, label: COLOR_TOKEN_LABEL[c] ?? c }))}
-                value={n.colorToken}
-                onChange={(e) => patchNode(idx, { colorToken: e.target.value as ColorToken })}
-                className="w-36"
-              />
-              <Select
-                label="图标"
-                options={NODE_ICON_OPTIONS}
-                value={n.iconName ?? 'circle'}
-                onChange={(e) => patchNode(idx, { iconName: e.target.value })}
-                className="w-36"
-              />
-              <Toggle label="终态" checked={n.isFinal} onChange={(v) => patchNode(idx, { isFinal: v })} />
-              <Button
-                variant="danger"
-                size="md"
-                disabled={nodes.length <= TASK_NODE_MIN}
-                onClick={() => removeNode(idx)}
-              >
-                删除
-              </Button>
-            </div>
+              node={n}
+              canRemove={nodes.length > TASK_NODE_MIN}
+              onChange={(patch) => patchNode(idx, patch)}
+              onRemove={() => removeNode(idx)}
+            />
           ))}
-          <Button variant="secondary" onClick={addNode} disabled={nodes.length >= TASK_NODE_MAX}>
-            添加节点
-          </Button>
         </div>
       </div>
     </Modal>

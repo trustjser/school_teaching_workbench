@@ -50,7 +50,7 @@ export function Button({
       type={type}
       disabled={disabled || loading}
       className={[
-        'inline-flex items-center justify-center gap-2 rounded-lg font-semibold select-none',
+        'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-semibold select-none',
         'transition-[transform,background-color,box-shadow,color]',
         'hover:shadow-soft active:scale-[0.97]',
         'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400',

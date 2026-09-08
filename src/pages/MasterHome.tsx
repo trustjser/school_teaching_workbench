@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { BarChart3, CalendarCheck, Monitor, Radio } from 'lucide-react';
+import { BarChart3, CalendarCheck, Monitor, Radio, RefreshCw } from 'lucide-react';
 import { useDeviceStore } from '@/store/useDeviceStore';
 import { useBroadcastStore } from '@/store/useBroadcastStore';
 import { Card } from '@/components/ui/Card';
@@ -81,7 +81,13 @@ export function MasterHome(): JSX.Element {
             <p className="mt-0.5 text-ink-soft">节点状态、全校考勤与任务下发，一屏掌握。</p>
           </div>
         </div>
-        <Button variant="secondary" size="md" onClick={() => void refresh()} disabled={loading}>
+        <Button
+          variant="secondary"
+          size="md"
+          icon={<RefreshCw className="h-4 w-4" />}
+          loading={loading}
+          onClick={() => void refresh()}
+        >
           刷新
         </Button>
       </section>
@@ -106,18 +112,18 @@ export function MasterHome(): JSX.Element {
             tone="success"
             icon={CalendarCheck}
             label="全校出勤率"
-            value={summary ? summary.attendanceRate : 0}
+            value={summary ? summary.attendanceRate ?? 0 : 0}
             decimals={1}
             suffix="%"
             accent
-            sub={summary ? `${summary.markedStudents}/${summary.totalStudents} 已标记` : '—'}
+            sub={summary ? `${summary.markedStudents ?? 0}/${summary.totalStudents ?? 0} 已标记` : '—'}
           />
           <StatCard tone="violet" icon={Radio} label="已下发任务" value={outbox.length} sub="教务处下发" />
           <StatCard
             tone="warning"
             icon={BarChart3}
             label="异常学生"
-            value={summary ? summary.absent + summary.leave : 0}
+            value={summary ? (summary.absent ?? 0) + (summary.leave ?? 0) : 0}
             accent
             sub="缺勤 + 请假"
           />

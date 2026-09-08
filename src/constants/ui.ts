@@ -12,6 +12,7 @@ export const BREAKPOINTS = {
 
 /** UI 缩放档位 */
 export const UI_SCALE_OPTIONS: { value: number; label: string }[] = [
+  { value: 0.75, label: '较小 75%' },
   { value: 1, label: '标准 100%' },
   { value: 1.25, label: '较大 125%' },
   { value: 1.5, label: '大屏 150%' },

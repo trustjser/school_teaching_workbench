@@ -1065,28 +1065,50 @@ pub struct ExportSchResult {
 }
 
 /// 全校考勤汇总（教务处大屏首页）。
+///
+/// 前端 `SchoolSummary`（TS）约定字段：date / classCount / submittedClassCount /
+/// totalStudents / markedStudents / present / leave / absent / late /
+/// conflictCount / attendanceRate（0–100 百分比数字）。
+/// 这里用 `#[serde(rename)]` 把内部 snake_case 字段映射到 camelCase API。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct SchoolSummary {
+    /// 汇总日期（YYYY-MM-DD）。
+    pub date: String,
     /// 在读学生总数（排除已转出）。
     pub total_students: i64,
     /// 班级数。
+    #[serde(rename = "classCount")]
     pub total_classes: i64,
+    /// 已提交考勤的班级数。
+    #[serde(rename = "submittedClassCount")]
+    pub submitted_classes: i64,
+    /// 当日已有考勤记录的学生数（不含默认出勤）。
+    #[serde(rename = "markedStudents")]
+    pub marked_students: i64,
+    /// 冲突/重复打卡数（当前置 0）。
+    #[serde(rename = "conflictCount")]
+    pub conflict_count: i64,
     /// 出勤数（含「默认出勤」）。
+    #[serde(rename = "present")]
     pub present_cnt: i64,
     /// 请假数。
+    #[serde(rename = "leave")]
     pub leave_cnt: i64,
     /// 缺勤数。
+    #[serde(rename = "absent")]
     pub absent_cnt: i64,
     /// 迟到数。
+    #[serde(rename = "late")]
     pub late_cnt: i64,
-    /// 已提交考勤的班级数。
-    pub submitted_classes: i64,
-    /// 出勤率（0–1）。
+    /// 出勤率（0–100 百分比数字）。
     pub attendance_rate: f64,
 }
 
 /// 班级考勤大屏行（按班级聚合）。
+///
+/// 前端 `ClassAttendanceRow`（TS）约定字段：className / grade / total / present /
+/// leave / absent / late / attendanceRate（0–100 百分比数字）/ submitted。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct ClassAttendanceRow {
@@ -1095,16 +1117,21 @@ pub struct ClassAttendanceRow {
     /// 班级。
     pub class_name: String,
     /// 在读总数。
+    #[serde(rename = "total")]
     pub total_cnt: i64,
     /// 出勤数。
+    #[serde(rename = "present")]
     pub present_cnt: i64,
     /// 请假数。
+    #[serde(rename = "leave")]
     pub leave_cnt: i64,
     /// 缺勤数。
+    #[serde(rename = "absent")]
     pub absent_cnt: i64,
     /// 迟到数。
+    #[serde(rename = "late")]
     pub late_cnt: i64,
-    /// 出勤率（0–1）。
+    /// 出勤率（0–100 百分比数字）。
     pub attendance_rate: f64,
     /// 本班是否已提交（存在当日考勤记录）。
     pub submitted: bool,

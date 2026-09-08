@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CalendarCheck, CheckCircle2, UserMinus, UserX } from 'lucide-react';
+import { CalendarCheck, CheckCircle2, RefreshCw, UserMinus, UserX } from 'lucide-react';
 import { useDeviceStore } from '@/store/useDeviceStore';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -91,7 +91,14 @@ export function AttendanceBoard(): JSX.Element {
         <h1 className="text-3xl font-bold text-ink">考勤大屏</h1>
         <div className="flex items-end gap-3">
           <Input type="date" label="日期" value={date} onChange={(e) => setDate(e.target.value || toDateKey(Date.now()))} />
-          <Button variant="secondary" onClick={() => void refresh()} disabled={loading}>
+          <Button
+            variant="secondary"
+            size="md"
+            className="shrink-0"
+            icon={<RefreshCw className="h-4 w-4" />}
+            loading={loading}
+            onClick={() => void refresh()}
+          >
             刷新
           </Button>
         </div>
@@ -111,21 +118,21 @@ export function AttendanceBoard(): JSX.Element {
               tone="success"
               icon={CalendarCheck}
               label="全校出勤率"
-              value={summary.attendanceRate}
+              value={summary.attendanceRate ?? 0}
               decimals={1}
               suffix="%"
               accent
-              sub={`${summary.markedStudents}/${summary.totalStudents} 已标记`}
+              sub={`${summary.markedStudents ?? 0}/${summary.totalStudents ?? 0} 已标记`}
             />
             <StatCard
               tone="brand"
               icon={CheckCircle2}
               label="已提交班级"
-              value={`${summary.submittedClassCount}/${summary.classCount}`}
+              value={`${summary.submittedClassCount ?? 0}/${summary.classCount ?? 0}`}
               sub="已提交 / 总班级"
             />
-            <StatCard tone="danger" icon={UserX} label="缺勤" value={summary.absent} accent sub="人" />
-            <StatCard tone="warning" icon={UserMinus} label="请假" value={summary.leave} accent sub="人" />
+            <StatCard tone="danger" icon={UserX} label="缺勤" value={summary.absent ?? 0} accent sub="人" />
+            <StatCard tone="warning" icon={UserMinus} label="请假" value={summary.leave ?? 0} accent sub="人" />
           </Stagger>
         )
       )}

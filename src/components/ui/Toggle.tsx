@@ -4,6 +4,7 @@ export interface ToggleProps {
   label?: string;
   description?: string;
   disabled?: boolean;
+  className?: string;
 }
 
 /** 开关：启用评分 / 备注等。触控区 ≥44px，状态同时用颜色与文字表达。 */
@@ -13,12 +14,14 @@ export function Toggle({
   label,
   description,
   disabled = false,
+  className = '',
 }: ToggleProps): JSX.Element {
   return (
     <label
       className={[
         'flex items-center justify-between gap-4 rounded-lg px-1 py-2',
         disabled ? 'opacity-50' : 'cursor-pointer',
+        className,
       ].join(' ')}
     >
       <span className="min-w-0">
@@ -33,7 +36,7 @@ export function Toggle({
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={[
-          'relative inline-flex h-touch w-[4.25rem] shrink-0 items-center rounded-full',
+          'relative inline-flex h-touch w-[5rem] shrink-0 items-center rounded-full',
           'border-2 transition-colors',
           'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400',
           checked ? 'border-green-700 bg-green-600' : 'border-surface-border bg-surface-muted',
@@ -51,7 +54,7 @@ export function Toggle({
             checked ? 'left-3 text-white' : 'right-3 text-ink-soft',
           ].join(' ')}
         >
-          {checked ? 'ON' : 'OFF'}
+          {checked ? '开' : '关'}
         </span>
       </button>
     </label>

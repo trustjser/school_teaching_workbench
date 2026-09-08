@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { IconButton } from './IconButton';
 
@@ -26,10 +26,14 @@ export function Drawer({
   widthClass = 'w-[560px]',
   side = 'right',
 }: DrawerProps): JSX.Element | null {
+  // 用 ref 持有最新的 onClose，避免父组件每次渲染传入新函数导致 effect 反复重跑
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
     document.addEventListener('keydown', onKeyDown);
     const prev = document.body.style.overflow;
@@ -38,7 +42,7 @@ export function Drawer({
       document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = prev;
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

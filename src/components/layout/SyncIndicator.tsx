@@ -26,7 +26,7 @@ export function SyncIndicator({ compact = false }: SyncIndicatorProps): JSX.Elem
 
   return (
     <div className="flex items-center gap-3">
-      <Tooltip content={label}>
+      <Tooltip content={label} placement="bottom">
         <span className="inline-flex items-center gap-2">
           <span className={['relative inline-flex h-3.5 w-3.5 rounded-full', dotColor].join(' ')}>
             {isOnline && (
