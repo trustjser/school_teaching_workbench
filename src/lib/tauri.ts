@@ -10,7 +10,7 @@ import type { ErrorCode } from '@/types/enums';
  * —— A. 来自 docs/03-tasks.md §5.2 / docs/01-architecture.md，已锁定 ——
  *  1  settings_get_all            () -> AppSetting[]
  *  2  settings_set                ({ key, value, valueType }) -> void
- *  3  settings_complete_setup     ({ mode, deviceName, grade, className, schoolName, secret }) -> void
+ *  3  settings_complete_setup     ({ mode, deviceName, grade, className, classId?, schoolName, secret }) -> void
  *  4  settings_switch_mode        ({ mode }) -> AppMode
  *  5  settings_rotate_key         () -> { kid }
  *  6  student_list                ({ className?, status?, keyword?, includeDeleted? }) -> Student[]
@@ -63,6 +63,20 @@ import type { ErrorCode } from '@/types/enums';
  *       理由：离线包导出/导入历史展示。
  * 42  settings_key_info           () -> { kid, fingerprint }
  *       理由：设置页展示当前共享密钥标识与指纹，便于人工核对各端是否一致。
+ *
+ * —— C. 年级 / 班级目录（教务端统一维护，班级端消费）——
+ * 43  grade_list                 () -> Grade[]
+ *       理由：教务端管理年级列表；班级端首次同步后本地只读消费。
+ * 44  grade_upsert               (Grade) -> Grade
+ *       理由：新增 / 修改年级，写入待发队列同步到班级端。
+ * 45  grade_delete               ({ id }) -> void
+ *       理由：软删年级（其下班级 grade_id 置空）。
+ * 46  class_list                 ({ gradeId? }) -> Class[]
+ *       理由：班级列表（可按年级过滤）。
+ * 47  class_upsert               (Class) -> Class
+ *       理由：新增 / 修改班级（grade_id 关联年级，冗余年级名），写入待发队列。
+ * 48  class_delete               ({ id }) -> void
+ *       理由：软删班级。
  *
  * 参数与返回字段一律 camelCase（与 Rust #[serde(rename_all = "camelCase")] 对齐），
  * 时间为 number 毫秒时间戳，ID 为 string UUID。

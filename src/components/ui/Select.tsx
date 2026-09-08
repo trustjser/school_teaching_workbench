@@ -39,7 +39,7 @@ export function Select({
         <select
           id={inputId}
           className={[
-            'w-full min-h-touch appearance-none rounded-lg border bg-surface-raised px-4 pr-11',
+            'min-w-0 w-full min-h-touch appearance-none rounded-lg border bg-surface-raised px-4 pr-11',
             'text-base text-ink transition-colors',
             'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400',
             error ? 'border-red-600' : 'border-surface-border hover:border-surface-border',

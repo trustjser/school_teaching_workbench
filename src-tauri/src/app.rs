@@ -167,6 +167,13 @@ pub fn run() {
             crate::commands::student_cmd::student_batch_import,
             crate::commands::student_cmd::student_update_status,
             crate::commands::student_cmd::student_delete,
+            // ---- 目录（年级 / 班级）----
+            crate::commands::grade_cmd::grade_list,
+            crate::commands::grade_cmd::grade_upsert,
+            crate::commands::grade_cmd::grade_delete,
+            crate::commands::class_cmd::class_list,
+            crate::commands::class_cmd::class_upsert,
+            crate::commands::class_cmd::class_delete,
             // ---- 同步 ----
             crate::commands::sync_cmd::sync_queue_list,
             crate::commands::sync_cmd::sync_flush,

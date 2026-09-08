@@ -83,7 +83,9 @@ export type EntityType =
   | 'task_record'
   | 'broadcast_task'
   | 'receipt'
-  | 'device';
+  | 'device'
+  | 'grade'
+  | 'class';
 
 /** 队列条目状态 */
 export type QueueStatus = 'pending' | 'sending' | 'done' | 'failed' | 'dead';

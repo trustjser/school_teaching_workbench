@@ -60,5 +60,6 @@ fn map_record(headers: &[String], values: &[String]) -> AppResult<StudentImportR
         seat_no,
         phone: get(&["phone", "电话", "联系电话", "手机"]),
         note: get(&["note", "备注"]),
+        class_id: None,
     })
 }

@@ -18,6 +18,7 @@ import { DeviceMonitor } from '@/pages/DeviceMonitor';
 import { AttendanceBoard } from '@/pages/AttendanceBoard';
 import { BroadcastCenter } from '@/pages/BroadcastCenter';
 import { Analytics } from '@/pages/Analytics';
+import { GradeClassManage } from '@/pages/GradeClassManage';
 import { Settings } from '@/pages/Settings';
 
 /** 启动中全屏遮罩 */
@@ -93,6 +94,7 @@ export const router = createHashRouter([
       { path: 'master', element: <MasterHome /> },
       { path: 'master/devices', element: <DeviceMonitor /> },
       { path: 'master/attendance', element: <AttendanceBoard /> },
+      { path: 'master/directory', element: <GradeClassManage /> },
       { path: 'master/broadcast', element: <BroadcastCenter /> },
       { path: 'master/analytics', element: <Analytics /> },
       { path: 'settings', element: <Settings /> },

@@ -13,10 +13,13 @@ import { useAppStore } from '@/store/useAppStore';
 import { useStudentStore } from '@/store/useStudentStore';
 import type { ParsedStudentRow } from '@/types/api';
 import type { ImportRowError } from '@/types/api';
+import type { ClassContext } from '@/types/models';
 
 export interface StudentImportDialogProps {
   open: boolean;
   onClose: () => void;
+  /** 班级上下文（教务端目录 / 班级端绑定班级），用于为整批落位 classId */
+  classContext?: ClassContext | null;
   /** 导入完成回调 */
   onImported?: (successRows: number, failedRows: number) => void;
 }
@@ -38,6 +41,7 @@ const FIELD_LABELS: Record<string, string> = {
 export function StudentImportDialog({
   open,
   onClose,
+  classContext,
   onImported,
 }: StudentImportDialogProps): JSX.Element {
   const app = useAppStore();
@@ -116,8 +120,9 @@ export function StudentImportDialog({
           studentNo: r.studentNo,
           name: r.name,
           gender: r.gender,
-          grade: r.grade || null,
-          className: r.className || null,
+          grade: r.grade || classContext?.grade || null,
+          className: r.className || classContext?.className || null,
+          classId: classContext?.classId ?? null,
           seatNo: r.seatNo,
           phone: r.phone || null,
           note: r.note || null,

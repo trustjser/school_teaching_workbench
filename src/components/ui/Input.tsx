@@ -25,7 +25,7 @@ export function Input({
 }: InputProps): JSX.Element {
   const inputId = id ?? `input-${label ?? Math.random().toString(36).slice(2, 8)}`;
   return (
-    <div className="w-full">
+    <div className="min-w-0 w-full">
       {label && (
         <label htmlFor={inputId} className="mb-1.5 block text-base font-semibold text-ink">
           {label}

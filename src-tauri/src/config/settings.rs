@@ -23,6 +23,10 @@ pub async fn ensure_defaults(pool: &DbPool) -> AppResult<()> {
     if settings_repo::get_raw(pool, "completed_setup").await?.is_none() {
         settings_repo::set_raw(pool, "completed_setup", Some("false"), "boolean").await?;
     }
+    // 遗留键 first_run_done 与 completed_setup 保持同生命周期，避免一方缺失导致判定歧义。
+    if settings_repo::get_raw(pool, "first_run_done").await?.is_none() {
+        settings_repo::set_raw(pool, "first_run_done", Some("false"), "boolean").await?;
+    }
     if settings_repo::get_raw(pool, "api_port").await?.is_none() {
         settings_repo::set_raw(pool, "api_port", Some("5178"), "number").await?;
     }

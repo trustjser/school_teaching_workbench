@@ -2,7 +2,9 @@
 
 pub mod broadcast_cmd;
 pub mod checkin_cmd;
+pub mod class_cmd;
 pub mod device_cmd;
+pub mod grade_cmd;
 pub mod package_cmd;
 pub mod settings_cmd;
 pub mod student_cmd;

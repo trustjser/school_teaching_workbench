@@ -10,11 +10,11 @@ use axum::Json;
 
 use crate::config::constants::Events;
 use crate::db::models::{
-    AckResponse, BroadcastPush, BroadcastReceipt, BroadcastTask, CheckinRecord, CustomTask,
-    IngestItem, IngestRequest, IngestResponse, PingResponse, PullResponse, ReceiptPush,
+    AckResponse, BroadcastPush, BroadcastReceipt, BroadcastTask, CheckinRecord, Class, CustomTask,
+    Grade, IngestItem, IngestRequest, IngestResponse, PingResponse, PullResponse, ReceiptPush,
     Student, TaskRecord, TaskStatusNode, WhoamiResponse,
 };
-use crate::db::repo::{broadcast_repo, checkin_repo, now_ms, settings_repo, student_repo, task_repo, new_id, MergeOutcome};
+use crate::db::repo::{broadcast_repo, checkin_repo, class_repo, grade_repo, now_ms, settings_repo, student_repo, task_repo, new_id, MergeOutcome};
 use crate::error::{AppError, AppResult, ErrorBody};
 use crate::net::middleware::VerifiedRequest;
 use crate::state::AppState;
@@ -262,6 +262,14 @@ async fn apply_one(pool: &crate::db::DbPool, item: &IngestItem) -> AppResult<Mer
         "broadcast_task" => {
             let v: BroadcastTask = serde_json::from_value(item.entity.clone())?;
             broadcast_repo::merge_remote(pool, &v).await
+        }
+        "grade" => {
+            let v: Grade = serde_json::from_value(item.entity.clone())?;
+            grade_repo::merge_remote(pool, &v).await
+        }
+        "class" => {
+            let v: Class = serde_json::from_value(item.entity.clone())?;
+            class_repo::merge_remote(pool, &v).await
         }
         _ => Err(AppError::validation(format!("未知实体类型: {}", item.entity_type))),
     }

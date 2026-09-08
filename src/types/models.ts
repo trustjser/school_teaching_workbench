@@ -61,12 +61,44 @@ export interface Student extends BaseEntity {
   gender: Gender;
   grade: string | null;
   className: string | null;
+  /** 关联班级目录 id（教务端统一维护后落位；为空时回退用 className 匹配） */
+  classId: string | null;
   seatNo: number | null;
   status: StudentStatus;
   statusSince: number | null;
   note: string | null;
   phone: string | null;
   importBatchId: string | null;
+}
+
+/** 年级（教务端统一维护，全校唯一） */
+export interface Grade extends BaseEntity {
+  /** 年级编号，如 '3' / '2023' */
+  gradeNo: string;
+  /** 展示名，如 '三年级' */
+  gradeName: string;
+  /** 排序（数字越小越靠前） */
+  sortOrder: number;
+  remark: string | null;
+}
+
+/** 班级（归属某个年级，教务端统一维护） */
+export interface Class extends BaseEntity {
+  /** 关联 grades.id（软删时置空） */
+  gradeId: string | null;
+  /** 冗余：年级编号 */
+  gradeNo: string | null;
+  /** 冗余：年级展示名 */
+  gradeName: string | null;
+  /** 班号，如 '2' */
+  classNo: string | null;
+  /** 展示名，如 '三年级二班' */
+  className: string;
+  /** 班主任 */
+  headTeacher: string | null;
+  /** 班级排序 */
+  sortOrder: number;
+  remark: string | null;
 }
 
 /** 导入批次 */
@@ -217,6 +249,8 @@ export interface AppRuntimeSettings {
   deviceName: string;
   grade: string | null;
   className: string | null;
+  /** 当前班级端绑定的班级目录 id（教务端目录消费主键） */
+  classId: string | null;
   schoolName: string | null;
   apiPort: number;
   mdnsServiceType: string;
@@ -265,4 +299,11 @@ export interface DailySummary {
   absentCnt: number;
   lateCnt: number;
   markedCnt: number;
+}
+
+/** 班级上下文（教务端目录消费主键）：学生新增 / 导入时落位使用 */
+export interface ClassContext {
+  classId: string | null;
+  className: string;
+  grade: string | null;
 }

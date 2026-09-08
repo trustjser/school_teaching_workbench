@@ -85,5 +85,6 @@ fn map_record(header: Option<&[String]>, values: Vec<String>) -> AppResult<Stude
         seat_no,
         phone: get(&["phone", "电话", "联系电话", "手机"]),
         note: get(&["note", "备注"]),
+        class_id: None,
     })
 }

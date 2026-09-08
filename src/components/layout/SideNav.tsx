@@ -9,6 +9,7 @@ import {
   BarChart3,
   Monitor,
   CalendarCheck,
+  BookMarked,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { AppMode } from '@/types/enums';
@@ -36,6 +37,7 @@ const MASTER_NAV: NavItem[] = [
   { to: '/master', label: '全校总览', icon: LayoutGrid },
   { to: '/master/devices', label: '节点监控', icon: Monitor },
   { to: '/master/attendance', label: '考勤大屏', icon: CalendarCheck },
+  { to: '/master/directory', label: '年级班级管理', icon: BookMarked },
   { to: '/master/broadcast', label: '任务下发', icon: Radio },
   { to: '/master/analytics', label: '统计导出', icon: BarChart3 },
 ];

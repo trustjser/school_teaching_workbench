@@ -36,7 +36,7 @@ pub async fn settings_set(
     settings_repo::set_raw(&state.pool, &key, value.as_deref(), &value_type).await
 }
 
-/// 首次启动完成设置：写入模式/名称/年级/班级，可选导入共享密钥，标记已完成。
+/// 首次启动完成设置：写入模式/名称/年级/班级（目录 class_id）/学校，可选导入共享密钥，标记已完成。
 #[tauri::command]
 pub async fn settings_complete_setup(
     state: State<'_, Arc<AppState>>,
@@ -44,6 +44,7 @@ pub async fn settings_complete_setup(
     device_name: String,
     grade: Option<String>,
     class_name: Option<String>,
+    class_id: Option<String>,
     school_name: Option<String>,
     secret: Option<String>,
 ) -> AppResult<()> {
@@ -52,8 +53,12 @@ pub async fn settings_complete_setup(
     settings_repo::set_raw(&state.pool, "device_name", Some(&device_name), "string").await?;
     settings_repo::set_raw(&state.pool, "grade", grade.as_deref(), "string").await?;
     settings_repo::set_raw(&state.pool, "class_name", class_name.as_deref(), "string").await?;
+    settings_repo::set_raw(&state.pool, "class_id", class_id.as_deref(), "string").await?;
     settings_repo::set_raw(&state.pool, "school_name", school_name.as_deref(), "string").await?;
     settings_repo::set_raw(&state.pool, "completed_setup", Some("true"), "boolean").await?;
+    // 同时翻转遗留键 first_run_done，保证任何仍读取该键的旧前端/命令都能正确判定「已完成」，
+    // 避免「每次启动都进入首次运行配置」的回归（该键由迁移播种为 false 且此前从未被置为 true）。
+    settings_repo::set_raw(&state.pool, "first_run_done", Some("true"), "boolean").await?;
 
     if let Some(secret) = secret.as_deref() {
         if !secret.trim().is_empty() {

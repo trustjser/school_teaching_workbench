@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { IconButton } from './IconButton';
 
@@ -73,7 +74,7 @@ export function Modal({
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6">
       {/* 全屏遮罩：半透明深色 + 背景模糊，确保覆盖所有内容 */}
       <div
@@ -92,14 +93,14 @@ export function Modal({
         aria-label={typeof title === 'string' ? title : '对话框'}
         className={[
           'relative z-10 w-full animate-pop-in rounded-panel bg-surface-raised shadow-pop',
-          'flex max-h-[85vh] flex-col outline-none overscroll-contain',
+          'flex max-h-[85vh] min-w-0 flex-col outline-none overscroll-contain',
           widthClass,
         ].join(' ')}
       >
         <header className="shrink-0 flex items-start justify-between gap-4 border-b border-surface-border px-5 sm:px-6 py-4 sm:py-5">
-          <div className="min-w-0">
-            <h2 className="truncate text-xl sm:text-2xl font-bold text-ink">{title}</h2>
-            {description && <p className="mt-1 text-sm sm:text-base text-ink-muted">{description}</p>}
+          <div className="min-w-0 flex-1">
+            <h2 className="block w-full truncate text-xl font-bold text-ink sm:text-2xl">{title}</h2>
+            {description && <p className="mt-1 text-sm text-ink-muted sm:text-base">{description}</p>}
           </div>
           <IconButton icon={<X className="h-5 w-5 sm:h-6 sm:w-6" />} label="关闭" onClick={onClose} />
         </header>
@@ -113,6 +114,7 @@ export function Modal({
           </footer>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

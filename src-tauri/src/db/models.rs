@@ -297,6 +297,8 @@ pub struct Student {
     pub grade: Option<String>,
     /// 班级。
     pub class_name: Option<String>,
+    /// 关联 classes.id（目录统一维护后落位；为空时回退用 class_name 匹配）。
+    pub class_id: Option<String>,
     /// 座位号。
     pub seat_no: Option<i64>,
     /// 状态：active / leave / transferred。
@@ -314,6 +316,72 @@ pub struct Student {
     /// 更新时间。
     pub updated_at: i64,
     /// 软删时间。
+    pub deleted_at: Option<i64>,
+    /// 同步状态。
+    pub sync_state: String,
+    /// 是否待推送。
+    pub dirty: bool,
+}
+
+/// 年级（`grades`）。
+///
+/// 教务端统一维护，全校唯一。前端按 `Partial<Grade>` 提交（新建时无 id/时间戳/syncState），
+/// 因此整结构体开启 `serde(default)`，由 repo 层补全缺失字段。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Grade {
+    /// 主键 UUID。
+    pub id: String,
+    /// 年级编号，如 '3' / '2023'。
+    pub grade_no: String,
+    /// 展示名，如 '三年级'。
+    pub grade_name: String,
+    /// 排序（数字越小越靠前）。
+    pub sort_order: i64,
+    /// 备注。
+    pub remark: Option<String>,
+    /// 创建时间（毫秒）。
+    pub created_at: i64,
+    /// 更新时间（毫秒）。
+    pub updated_at: i64,
+    /// 软删时间（毫秒）。
+    pub deleted_at: Option<i64>,
+    /// 同步状态。
+    pub sync_state: String,
+    /// 是否待推送。
+    pub dirty: bool,
+}
+
+/// 班级（`classes`）。
+///
+/// 归属某个年级，教务端统一维护；`grade_no` / `grade_name` 冗余存储便于聚合免 join。
+/// 前端按 `Partial<Class>` 提交，见 `Grade` 说明。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Class {
+    /// 主键 UUID。
+    pub id: String,
+    /// 关联 grades.id（软删时置空）。
+    pub grade_id: Option<String>,
+    /// 冗余：年级编号。
+    pub grade_no: Option<String>,
+    /// 冗余：年级展示名。
+    pub grade_name: Option<String>,
+    /// 班号，如 '2'。
+    pub class_no: Option<String>,
+    /// 展示名，如 '三年级二班'。
+    pub class_name: String,
+    /// 班主任。
+    pub head_teacher: Option<String>,
+    /// 班级排序。
+    pub sort_order: i64,
+    /// 备注。
+    pub remark: Option<String>,
+    /// 创建时间（毫秒）。
+    pub created_at: i64,
+    /// 更新时间（毫秒）。
+    pub updated_at: i64,
+    /// 软删时间（毫秒）。
     pub deleted_at: Option<i64>,
     /// 同步状态。
     pub sync_state: String,
@@ -722,6 +790,8 @@ pub struct StudentImportRow {
     pub grade: Option<String>,
     /// 班级。
     pub class_name: Option<String>,
+    /// 关联 classes.id（导入时若已绑定班级则落位）。
+    pub class_id: Option<String>,
     /// 座位号。
     pub seat_no: Option<i64>,
     /// 联系电话。

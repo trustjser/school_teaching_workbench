@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 -- 配置键字典(setting_key):
 --   app_mode             'client' | 'master'                 运行模式
---   first_run_done       是否已完成首次启动向导
+--   completed_setup     是否已完成首次启动向导（前端据此跳过引导，权威键）
+--   first_run_done       遗留兼容键，值与 completed_setup 保持一致
 --   device_id            本机设备 UUID（全局唯一，同时用于 HMAC 身份）
 --   device_name          本机显示名（如「三年级二班-讲台机」）
 --   grade                所属年级（client 模式）
@@ -400,7 +401,7 @@ CREATE TABLE IF NOT EXISTS pending_queue (
     op_type          TEXT    NOT NULL CHECK (op_type IN ('upsert','delete','ack','heartbeat','broadcast')),
     entity_type      TEXT    NOT NULL CHECK (entity_type IN
                      ('student','checkin','custom_task','task_node','task_record',
-                      'broadcast_task','receipt','device')),
+                      'broadcast_task','receipt','device','grade','class')),
     entity_id        TEXT    NOT NULL,
     payload          TEXT    NOT NULL,                       -- JSON: 实体增量快照
     target_device_id TEXT,                                   -- 为空表示发给所有已知 master

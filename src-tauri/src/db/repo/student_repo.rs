@@ -9,8 +9,10 @@ use crate::error::{AppError, AppResult};
 /// 名册查询过滤条件。
 #[derive(Debug, Clone, Default)]
 pub struct StudentFilter {
-    /// 班级精确匹配。
+    /// 班级精确匹配（文本，兼容旧数据）。
     pub class_name: Option<String>,
+    /// 班级目录 ID 精确匹配（目录统一维护后优先）。
+    pub class_id: Option<String>,
     /// 状态精确匹配。
     pub status: Option<String>,
     /// 姓名 / 学号模糊匹配。
@@ -24,14 +26,28 @@ pub struct StudentFilter {
 /// 查询名册列表。
 pub async fn list(pool: &SqlitePool, filter: StudentFilter) -> AppResult<Vec<Student>> {
     let mut sql = String::from(
-        "SELECT id, student_no, name, gender, grade, class_name, seat_no, status, status_since,
+        "SELECT id, student_no, name, gender, grade, class_name, class_id, seat_no, status, status_since,
                 note, phone, import_batch_id, created_at, updated_at, deleted_at, sync_state, dirty
          FROM students WHERE 1 = 1",
     );
     if !filter.include_deleted {
         sql.push_str(" AND deleted_at IS NULL");
     }
-    if let Some(class_name) = &filter.class_name {
+    if let Some(class_id) = &filter.class_id {
+        if !class_id.is_empty() {
+            // 目录消费主路径：按 class_id 命中；无 class_id 的旧数据回退按 class_name 命中。
+            // 注意回退用展示名（filter.class_name）而非 id，否则旧数据会整体落空。
+            let cn = filter.class_name.clone().unwrap_or_default();
+            sql.push_str(" AND (class_id = ");
+            sql.push_str(&quote(class_id));
+            sql.push_str(" OR (class_id IS NULL AND class_name = ");
+            sql.push_str(&quote(&cn));
+            sql.push_str("))");
+        } else if let Some(class_name) = &filter.class_name {
+            sql.push_str(" AND class_name = ");
+            sql.push_str(&quote(class_name));
+        }
+    } else if let Some(class_name) = &filter.class_name {
         sql.push_str(" AND class_name = ");
         sql.push_str(&quote(class_name));
     }
@@ -58,7 +74,7 @@ pub async fn list(pool: &SqlitePool, filter: StudentFilter) -> AppResult<Vec<Stu
 /// 按主键查询（含已软删，便于恢复/合并判断）。
 pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Option<Student>> {
     let row = sqlx::query_as::<_, Student>(
-        "SELECT id, student_no, name, gender, grade, class_name, seat_no, status, status_since,
+        "SELECT id, student_no, name, gender, grade, class_name, class_id, seat_no, status, status_since,
                 note, phone, import_batch_id, created_at, updated_at, deleted_at, sync_state, dirty
          FROM students WHERE id = ?",
     )
@@ -76,7 +92,7 @@ pub async fn find_by_no(
     student_no: &str,
 ) -> AppResult<Option<Student>> {
     let row = sqlx::query_as::<_, Student>(
-        "SELECT id, student_no, name, gender, grade, class_name, seat_no, status, status_since,
+        "SELECT id, student_no, name, gender, grade, class_name, class_id, seat_no, status, status_since,
                 note, phone, import_batch_id, created_at, updated_at, deleted_at, sync_state, dirty
          FROM students
          WHERE COALESCE(grade, '') = COALESCE(?, '')
@@ -115,15 +131,16 @@ pub async fn upsert(pool: &SqlitePool, mut student: Student) -> AppResult<Studen
     }
 
     sqlx::query(
-        "INSERT INTO students (id, student_no, name, gender, grade, class_name, seat_no, status,
+        "INSERT INTO students (id, student_no, name, gender, grade, class_name, class_id, seat_no, status,
              status_since, note, phone, import_batch_id, created_at, updated_at, deleted_at, sync_state, dirty)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1)
          ON CONFLICT(id) DO UPDATE SET
              student_no = excluded.student_no,
              name = excluded.name,
              gender = excluded.gender,
              grade = excluded.grade,
              class_name = excluded.class_name,
+             class_id = excluded.class_id,
              seat_no = excluded.seat_no,
              status = excluded.status,
              status_since = excluded.status_since,
@@ -141,7 +158,7 @@ pub async fn upsert(pool: &SqlitePool, mut student: Student) -> AppResult<Studen
     .bind(&student.gender)
     .bind(&student.grade)
     .bind(&student.class_name)
-    .bind(student.seat_no)
+    .bind(&student.class_id)
     .bind(&student.status)
     .bind(student.status_since)
     .bind(&student.note)
@@ -207,6 +224,7 @@ pub async fn batch_import(
     source_type: &str,
     default_grade: Option<&str>,
     default_class: Option<&str>,
+    default_class_id: Option<&str>,
     batch_id: Option<String>,
 ) -> AppResult<ImportReport> {
     let now = now_ms();
@@ -248,6 +266,10 @@ pub async fn batch_import(
                 .class_name
                 .clone()
                 .or_else(|| default_class.map(|v| v.to_string())),
+            class_id: row
+                .class_id
+                .clone()
+                .or_else(|| default_class_id.map(|v| v.to_string())),
             seat_no: row.seat_no,
             status: "active".to_string(),
             status_since: Some(now),
@@ -338,14 +360,14 @@ async fn upsert_in_tx(
     student: &Student,
 ) -> AppResult<()> {
     sqlx::query(
-        "INSERT INTO students (id, student_no, name, gender, grade, class_name, seat_no, status,
+        "INSERT INTO students (id, student_no, name, gender, grade, class_name, class_id, seat_no, status,
              status_since, note, phone, import_batch_id, created_at, updated_at, deleted_at, sync_state, dirty)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1)
          ON CONFLICT(id) DO UPDATE SET
              student_no = excluded.student_no, name = excluded.name, gender = excluded.gender,
-             grade = excluded.grade, class_name = excluded.class_name, seat_no = excluded.seat_no,
-             status = excluded.status, status_since = excluded.status_since, note = excluded.note,
-             phone = excluded.phone, import_batch_id = excluded.import_batch_id,
+             grade = excluded.grade, class_name = excluded.class_name, class_id = excluded.class_id,
+             seat_no = excluded.seat_no, status = excluded.status, status_since = excluded.status_since,
+             note = excluded.note, phone = excluded.phone, import_batch_id = excluded.import_batch_id,
              updated_at = excluded.updated_at, deleted_at = NULL,
              sync_state = excluded.sync_state, dirty = 1",
     )
@@ -355,6 +377,7 @@ async fn upsert_in_tx(
     .bind(&student.gender)
     .bind(&student.grade)
     .bind(&student.class_name)
+    .bind(&student.class_id)
     .bind(student.seat_no)
     .bind(&student.status)
     .bind(student.status_since)

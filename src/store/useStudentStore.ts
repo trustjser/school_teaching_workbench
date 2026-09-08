@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Student, StudentStatus } from '@/types/models';
+import type { ClassContext, Student, StudentStatus } from '@/types/models';
 import { studentDelete, studentList, studentUpdateStatus, studentUpsert } from '@/lib/db';
 import { compareStudentNo } from '@/lib/format';
 import { useAppStore } from './useAppStore';
@@ -14,10 +14,13 @@ interface StudentState {
   filter: StudentFilter;
   /** 最近一次导入批次 ID */
   lastBatchId: string | null;
+  /** 当前名册作用域（教务端目录班级 / 班级端绑定班级） */
+  scope: ClassContext | null;
 
   setKeyword: (keyword: string) => void;
   setFilter: (filter: StudentFilter) => void;
-  load: (className?: string | null) => Promise<void>;
+  /** 加载名册：传入 ctx 时按 classId 过滤（目录消费主路径），否则按设置 className 回退 */
+  load: (ctx?: ClassContext | null) => Promise<void>;
   upsert: (student: Partial<Student> & { name: string; studentNo: string }) => Promise<Student>;
   changeStatus: (id: string, status: StudentStatus) => Promise<void>;
   remove: (id: string) => Promise<void>;
@@ -44,18 +47,21 @@ export const useStudentStore = create<StudentState>((set, get) => ({
   keyword: '',
   filter: 'all',
   lastBatchId: null,
+  scope: null,
 
   setKeyword: (keyword) => set({ keyword }),
   setFilter: (filter) => set({ filter }),
 
-  load: async (className) => {
+  load: async (ctx) => {
     set({ loading: true });
     const app = useAppStore.getState();
     try {
+      const scope = ctx === undefined ? null : ctx;
       const list = await studentList({
-        className: className === undefined ? app.settings.className : className,
+        classId: scope?.classId ?? null,
+        className: scope ? scope.className : app.settings.className,
       });
-      set({ students: sortStudents(list) });
+      set({ students: sortStudents(list), scope });
     } catch (err) {
       app.toastError(err, '加载名册失败');
     } finally {

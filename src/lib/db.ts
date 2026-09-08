@@ -5,9 +5,11 @@ import type {
   AppRuntimeSettings,
   AppSetting,
   CheckinRecord,
+  Class,
   CustomTask,
   DailySummary,
   Device,
+  Grade,
   OfflinePackage,
   PendingQueueItem,
   Student,
@@ -59,6 +61,8 @@ export interface CompleteSetupArgs {
   deviceName: string;
   grade: string | null;
   className: string | null;
+  /** 班级端绑定的班级目录 id（教务端目录消费主键） */
+  classId?: string | null;
   schoolName?: string | null;
   /** Base64 共享密钥；为空表示由 Rust 侧生成 */
   secret: string | null;
@@ -70,6 +74,7 @@ export async function settingsCompleteSetup(args: CompleteSetupArgs): Promise<vo
     deviceName: args.deviceName,
     grade: args.grade,
     className: args.className,
+    classId: args.classId ?? null,
     schoolName: args.schoolName ?? null,
     secret: args.secret,
   });
@@ -109,6 +114,7 @@ export function toRuntimeSettings(list: AppSetting[]): AppRuntimeSettings {
     deviceName: map.device_name || '',
     grade: map.grade || null,
     className: map.class_name || null,
+    classId: map.class_id || null,
     schoolName: map.school_name || null,
     apiPort: num('api_port', DEFAULT_SETTINGS.apiPort),
     mdnsServiceType: map.mdns_service_type || DEFAULT_SETTINGS.mdnsServiceType,
@@ -127,6 +133,8 @@ export function toRuntimeSettings(list: AppSetting[]): AppRuntimeSettings {
 
 export interface StudentListArgs {
   className?: string | null;
+  /** 班级目录 id（教务端目录消费主路径） */
+  classId?: string | null;
   status?: StudentStatus | null;
   keyword?: string | null;
   includeDeleted?: boolean;
@@ -135,6 +143,7 @@ export interface StudentListArgs {
 export async function studentList(args: StudentListArgs = {}): Promise<Student[]> {
   return invokeCmd<Student[]>('student_list', {
     className: args.className ?? null,
+    classId: args.classId ?? null,
     status: args.status ?? null,
     keyword: args.keyword ?? null,
     includeDeleted: args.includeDeleted ?? false,
@@ -152,6 +161,8 @@ export interface StudentImportRowInput {
   gender: string;
   grade: string | null;
   className: string | null;
+  /** 关联班级目录 id（教务端在班级上下文中导入时落位） */
+  classId?: string | null;
   seatNo: number | null;
   phone: string | null;
   note: string | null;
@@ -170,6 +181,34 @@ export async function studentUpdateStatus(id: string, status: StudentStatus): Pr
 
 export async function studentDelete(id: string): Promise<void> {
   await invokeCmd<void>('student_delete', { id });
+}
+
+/* -------------------------------------------------------------------------- */
+/* directory（年级 / 班级）                                                       */
+/* -------------------------------------------------------------------------- */
+
+export async function gradeList(): Promise<Grade[]> {
+  return invokeCmd<Grade[]>('grade_list');
+}
+
+export async function gradeUpsert(grade: Partial<Grade> & { gradeName: string }): Promise<Grade> {
+  return invokeCmd<Grade>('grade_upsert', { grade });
+}
+
+export async function gradeDelete(id: string): Promise<void> {
+  await invokeCmd<void>('grade_delete', { id });
+}
+
+export async function classList(gradeId?: string | null): Promise<Class[]> {
+  return invokeCmd<Class[]>('class_list', { gradeId: gradeId ?? null });
+}
+
+export async function classUpsert(klass: Partial<Class> & { className: string }): Promise<Class> {
+  return invokeCmd<Class>('class_upsert', { class: klass });
+}
+
+export async function classDelete(id: string): Promise<void> {
+  await invokeCmd<void>('class_delete', { id });
 }
 
 /* -------------------------------------------------------------------------- */

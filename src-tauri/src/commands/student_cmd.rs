@@ -26,6 +26,7 @@ pub async fn student_list(
 ) -> AppResult<Vec<Student>> {
     let filter = student_repo::StudentFilter {
         class_name,
+        class_id: None,
         status,
         keyword,
         include_deleted: include_deleted.unwrap_or(false),
@@ -51,8 +52,10 @@ pub async fn student_batch_import(
 ) -> AppResult<ImportReport> {
     let default_grade = settings_repo::get_string(&state.pool, "grade", "").await.ok().filter(|s| !s.is_empty());
     let default_class = settings_repo::get_string(&state.pool, "class_name", "").await.ok().filter(|s| !s.is_empty());
+    let default_class_id = settings_repo::get_string(&state.pool, "class_id", "").await.ok().filter(|s| !s.is_empty());
     let report = student_repo::batch_import(
-        &state.pool, rows, &batch_name, "manual", default_grade.as_deref(), default_class.as_deref(), None,
+        &state.pool, rows, &batch_name, "manual", default_grade.as_deref(), default_class.as_deref(),
+        default_class_id.as_deref(), None,
     ).await?;
     // 仅成功导入时入队同步。
     if report.success_rows > 0 {

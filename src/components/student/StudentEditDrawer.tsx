@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { useStudentStore } from '@/store/useStudentStore';
 import { useAppStore } from '@/store/useAppStore';
 import type { Gender, StudentStatus } from '@/types/enums';
-import type { Student as StudentModel } from '@/types/models';
+import type { ClassContext, Student as StudentModel } from '@/types/models';
 import { uuidV4 } from '@/lib/crypto';
 import { formatDateTime } from '@/lib/format';
 
@@ -15,6 +15,8 @@ export interface StudentEditDrawerProps {
   open: boolean;
   /** 为 null 表示新增 */
   student: StudentModel | null;
+  /** 班级上下文（教务端目录 / 班级端绑定班级），用于落位 classId */
+  classContext?: ClassContext | null;
   onClose: () => void;
 }
 
@@ -42,7 +44,13 @@ interface FormState {
   status: StudentStatus;
 }
 
-function toForm(student: StudentModel | null, defaults: { grade: string; className: string }): FormState {
+interface EditDefaults {
+  classId: string | null;
+  grade: string;
+  className: string;
+}
+
+function toForm(student: StudentModel | null, defaults: EditDefaults): FormState {
   if (!student) {
     return {
       studentNo: '',
@@ -70,21 +78,35 @@ function toForm(student: StudentModel | null, defaults: { grade: string; classNa
 }
 
 /** 学生编辑抽屉：信息编辑、状态变更、备注 */
-export function StudentEditDrawer({ open, student, onClose }: StudentEditDrawerProps): JSX.Element {
+export function StudentEditDrawer({
+  open,
+  student,
+  classContext,
+  onClose,
+}: StudentEditDrawerProps): JSX.Element {
   const settings = useAppStore((s) => s.settings);
   const upsert = useStudentStore((s) => s.upsert);
-  const [form, setForm] = useState<FormState>(() =>
-    toForm(null, { grade: settings.grade ?? '', className: settings.className ?? '' }),
-  );
+  const ctx: EditDefaults = classContext
+    ? {
+        classId: classContext.classId,
+        grade: classContext.grade ?? settings.grade ?? '',
+        className: classContext.className ?? settings.className ?? '',
+      }
+    : {
+        classId: settings.classId,
+        grade: settings.grade ?? '',
+        className: settings.className ?? '',
+      };
+  const [form, setForm] = useState<FormState>(() => toForm(null, ctx));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
-      setForm(toForm(student, { grade: settings.grade ?? '', className: settings.className ?? '' }));
+      setForm(toForm(student, ctx));
       setError(null);
     }
-  }, [open, settings.className, settings.grade, student]);
+  }, [open, ctx.classId, ctx.className, ctx.grade, student]);
 
   const handleSave = async (): Promise<void> => {
     if (!form.name.trim()) {
@@ -109,6 +131,7 @@ export function StudentEditDrawer({ open, student, onClose }: StudentEditDrawerP
         gender: form.gender,
         grade: form.grade.trim() || null,
         className: form.className.trim() || null,
+        classId: ctx.classId,
         seatNo,
         status: form.status,
         phone: form.phone.trim() || null,
