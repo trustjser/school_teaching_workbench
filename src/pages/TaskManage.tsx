@@ -22,7 +22,7 @@ import { uuidV4 } from '@/lib/crypto';
 import { StatusNodeEditor, type EditableNode } from '@/components/task/StatusNodeEditor';
 import { useAppStore } from '@/store/useAppStore';
 
-/** 任务管理页：任务 CRUD + 状态节点（2~4）编辑 */
+/** 任务中心：统一管理班级自建任务与教务下发任务 */
 export function TaskManage(): JSX.Element {
   const tasks = useTaskStore((s) => s.tasks);
   const currentTaskId = useTaskStore((s) => s.currentTaskId);
@@ -130,7 +130,7 @@ export function TaskManage(): JSX.Element {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-ink">任务管理</h1>
+        <h1 className="text-3xl font-bold text-ink">任务中心</h1>
         <Button icon={<Plus className="h-5 w-5" />} onClick={() => setCreateOpen(true)}>
           新建任务
         </Button>

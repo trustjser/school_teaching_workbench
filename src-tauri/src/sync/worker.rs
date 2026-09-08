@@ -98,7 +98,18 @@ async fn deliver_item(
     match item.op_type.as_str() {
         "broadcast" => {
             let to = item.target_device_id.clone().ok_or((ErrorCode::Validation, "广播缺少目标设备".into()))?;
-            let base_url = item.target_base_url.clone().ok_or((ErrorCode::Net, "广播缺少目标地址".into()))?;
+            let base_url = match item.target_base_url.clone() {
+                Some(url) => url,
+                None => {
+                    let dev = device_repo::get_by_device_id(&state.pool, &to).await
+                        .map_err(|e| (ErrorCode::Db, e.message))?
+                        .ok_or((ErrorCode::Net, "目标设备尚未发现".into()))?;
+                    match (dev.ip_address, dev.port) {
+                        (Some(ip), Some(port)) if port > 0 => format!("http://{}:{}", ip, port),
+                        _ => return Err((ErrorCode::Net, "目标设备尚未就绪".into())),
+                    }
+                }
+            };
             let payload: Value = serde_json::from_str(&item.payload).map_err(|e| (ErrorCode::Validation, format!("广播载荷非法: {}", e)))?;
             let status = client::deliver(state, &to, &base_url, &item.target_endpoint, "POST", &payload)
                 .await

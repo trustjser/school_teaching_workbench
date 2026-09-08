@@ -9,7 +9,7 @@ import { PRIORITY_OPTIONS } from '@/constants/status';
 import { parseBroadcastPayload } from '@/types/broadcast';
 import { formatDateTime } from '@/lib/format';
 
-/** 教务指令收件箱（班级端）：查看并「接受」生成班级待办 */
+/** 通知资料收件箱（班级端）：查看教务通知、资料并确认接收 */
 export function InboxPage(): JSX.Element {
   const inbox = useBroadcastStore((s) => s.inbox);
   const loadInbox = useBroadcastStore((s) => s.loadInbox);
@@ -26,7 +26,7 @@ export function InboxPage(): JSX.Element {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-ink">教务指令</h1>
+        <h1 className="text-3xl font-bold text-ink">通知资料</h1>
         <Button variant="secondary" size="md" onClick={markAllRead}>
           全部标为已读
         </Button>

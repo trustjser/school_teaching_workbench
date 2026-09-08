@@ -26,16 +26,16 @@ export function ClientHome(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      {/* 欢迎条 */}
+      {/* 今日工作摘要 */}
       <section className="card flex flex-wrap items-center justify-between gap-4 p-6">
         <div className="flex items-center gap-4">
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-gradient text-white shadow-glow">
             <GraduationCap className="h-7 w-7" />
           </div>
           <div>
-            <p className="text-sm font-medium text-ink-muted">欢迎回来</p>
+            <p className="text-sm font-medium text-ink-muted">今日工作</p>
             <h1 className="text-3xl font-bold text-ink">班级工作台</h1>
-            <p className="mt-0.5 text-ink-soft">一键考勤、任务矩阵与教务指令，尽在掌握。</p>
+            <p className="mt-0.5 text-ink-soft">先完成考勤，再处理待办任务和通知资料。</p>
           </div>
         </div>
         <span className="rounded-full border border-surface-border bg-surface-muted px-3 py-1.5 text-sm text-ink-muted">
@@ -65,30 +65,30 @@ export function ClientHome(): JSX.Element {
         >
           <p className="text-ink-soft">
             {tasks.length > 0
-              ? `当前 ${tasks.length} 个任务，可进入「任务矩阵」逐人标记状态节点。`
+              ? `当前 ${tasks.length} 个任务，可进入「任务中心」逐人标记状态节点。`
               : '尚未创建自定义任务。'}
           </p>
           <Link to="/client/tasks">
             <Button variant="secondary" size="md" className="mt-3">
-              管理任务
+              进入任务中心
             </Button>
           </Link>
         </Card>
 
         <Card
           className="card-interactive"
-          title="教务指令"
-          description="接收教务处下发的任务与通知"
+          title="通知资料"
+          description="查看教务处下发的通知与资料"
           actions={unread > 0 ? <Badge tone="warning">🔔 {unread} 条未读</Badge> : undefined}
         >
           <p className="text-ink-soft">
             {inbox.length > 0
-              ? `收到 ${inbox.length} 条教务指令，点击「接受」可生成本班待办。`
-              : '暂无新的教务指令。'}
+              ? `收到 ${inbox.length} 条通知或资料，请及时查看并确认。`
+              : '暂无新的通知或资料。'}
           </p>
           <Link to="/client/inbox">
             <Button variant="secondary" size="md" className="mt-3">
-              查看收件箱
+              查看通知资料
             </Button>
           </Link>
         </Card>

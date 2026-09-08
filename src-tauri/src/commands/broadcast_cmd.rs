@@ -54,14 +54,19 @@ pub async fn broadcast_send(
     let mut resolved: Vec<(String, Option<String>)> = Vec::with_capacity(targets.len());
     let mut missing = 0;
     for dev_id in &targets {
+        // 目标记录必须持久化，即使设备当前离线；worker 会在重试时重新解析地址。
         match device_repo::get_by_device_id(&state.pool, dev_id).await? {
-            Some(dev) if dev.status == "online" => match (dev.ip_address, dev.port) {
-                (Some(ip), Some(port)) if port > 0 => {
-                    resolved.push((dev.device_id.clone(), Some(format!("http://{}:{}", ip, port))));
+            Some(dev) => {
+                let base_url = match (dev.ip_address, dev.port) {
+                    (Some(ip), Some(port)) if port > 0 => Some(format!("http://{}:{}", ip, port)),
+                    _ => None,
+                };
+                if dev.status != "online" || base_url.is_none() {
+                    missing += 1;
                 }
-                _ => missing += 1,
-            },
-            _ => missing += 1,
+                resolved.push((dev.device_id.clone(), base_url));
+            }
+            None => missing += 1,
         }
     }
 

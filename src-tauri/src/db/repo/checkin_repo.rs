@@ -147,6 +147,9 @@ pub async fn list_by_student(
 ///
 /// 「反向考勤」语义：未标记的在读学生视为出勤，因此
 /// `present_cnt = 在读总数 - leave - absent - late`。
+pub fn present_count(total: i64, leave: i64, absent: i64, late: i64) -> i64 {
+    (total - leave - absent - late).max(0)
+}
 pub async fn daily_summary(
     pool: &SqlitePool,
     checkin_date: &str,
@@ -180,20 +183,18 @@ pub async fn daily_summary(
     .await?;
 
     let mut summaries: Vec<DailySummary> = Vec::new();
-    for (grade, cls, date, period, present, leave, absent, late, marked) in rows {
+    for (grade, cls, date, period, _present, leave, absent, late, marked) in rows {
         let total = totals
             .iter()
             .find(|(name, _)| name.as_deref() == cls.as_deref())
             .map(|(_, count)| *count)
             .unwrap_or(marked);
-        let explicit_present = present;
-        let implicit_present = (total - leave - absent - late).max(0);
         summaries.push(DailySummary {
             grade,
             class_name: cls,
             checkin_date: date,
             period,
-            present_cnt: explicit_present + implicit_present,
+            present_cnt: present_count(total, leave, absent, late),
             leave_cnt: leave,
             absent_cnt: absent,
             late_cnt: late,
@@ -279,4 +280,16 @@ pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
     .execute(pool)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::present_count;
+
+    #[test]
+    fn present_count_does_not_double_count_explicit_present_records() {
+        assert_eq!(present_count(30, 2, 3, 1), 24);
+        assert_eq!(present_count(5, 0, 0, 0), 5);
+        assert_eq!(present_count(2, 4, 0, 0), 0);
+    }
 }
