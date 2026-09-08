@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { UserPlus } from 'lucide-react';
+import { CalendarCheck, ClipboardList, GraduationCap, Inbox, Users, UserPlus } from 'lucide-react';
 import { useStudentStore } from '@/store/useStudentStore';
 import { useCheckinStore } from '@/store/useCheckinStore';
 import { useTaskStore } from '@/store/useTaskStore';
@@ -8,10 +8,11 @@ import { useBroadcastStore } from '@/store/useBroadcastStore';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { AttendanceGrid } from '@/components/checkin/AttendanceGrid';
+import { StatCard } from '@/components/ui/StatCard';
 import { StudentImportDialog } from '@/components/student/StudentImportDialog';
+import { Stagger } from '@/components/motion/Reveal';
 
-/** 班级首页：名册导入入口 + 反向标记考勤 + 任务矩阵概览 + 教务指令收件箱 */
+/** 班级首页：名册导入入口 + 出勤率概览 + 任务矩阵 + 教务指令收件箱 */
 export function ClientHome(): JSX.Element {
   const students = useStudentStore((s) => s.students);
   const tasks = useTaskStore((s) => s.tasks);
@@ -28,36 +29,33 @@ export function ClientHome(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-bold text-ink">班级首页</h1>
+      {/* 欢迎条 */}
+      <section className="card flex flex-wrap items-center justify-between gap-4 p-6">
+        <div className="flex items-center gap-4">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-gradient text-white shadow-glow">
+            <GraduationCap className="h-7 w-7" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-ink-muted">欢迎回来</p>
+            <h1 className="text-3xl font-bold text-ink">班级工作台</h1>
+            <p className="mt-0.5 text-ink-soft">一键考勤、任务矩阵与教务指令，尽在掌握。</p>
+          </div>
+        </div>
         <Button icon={<UserPlus className="h-5 w-5" />} onClick={() => setImportOpen(true)}>
           导入名册
         </Button>
-      </div>
+      </section>
 
-      <div className="grid grid-cols-2 gap-4 board:grid-cols-4">
-        <StatCard label="在读学生" value={rosterCount} tone="brand" />
-        <StatCard label="今日出勤率" value={`${rate}%`} tone="success" />
-        <StatCard label="自定义任务" value={tasks.length} tone="violet" />
-        <StatCard label="教务指令" value={inbox.length} tone="warning" badge={unread} />
-      </div>
+      <Stagger className="grid grid-cols-2 gap-4 board:grid-cols-4" step={70}>
+        <StatCard icon={Users} label="在读学生" value={rosterCount} tone="brand" />
+        <StatCard icon={CalendarCheck} label="今日出勤率" value={rate} decimals={1} suffix="%" tone="success" accent />
+        <StatCard icon={ClipboardList} label="自定义任务" value={tasks.length} tone="violet" />
+        <StatCard icon={Inbox} label="教务指令" value={inbox.length} tone="warning" badge={unread} />
+      </Stagger>
 
-      <Card
-        title="快捷考勤（反向标记）"
-        description="点击卡片循环：出勤 → 请假 → 缺勤 → 出勤"
-        actions={
-          <Link to="/client/checkin">
-            <Button variant="ghost" size="md">
-              全屏考勤
-            </Button>
-          </Link>
-        }
-      >
-        <AttendanceGrid compact />
-      </Card>
-
-      <div className="grid gap-4 board:grid-cols-2">
+      <Stagger className="grid gap-4 board:grid-cols-2" step={80}>
         <Card
+          className="card-interactive"
           title="任务矩阵"
           description="学生 × 状态节点，2~4 个节点双视图"
           actions={
@@ -81,6 +79,7 @@ export function ClientHome(): JSX.Element {
         </Card>
 
         <Card
+          className="card-interactive"
           title="教务指令"
           description="接收教务处下发的任务与通知"
           actions={unread > 0 ? <Badge tone="warning">🔔 {unread} 条未读</Badge> : undefined}
@@ -96,33 +95,9 @@ export function ClientHome(): JSX.Element {
             </Button>
           </Link>
         </Card>
-      </div>
+      </Stagger>
 
       <StudentImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  tone,
-  badge,
-}: {
-  label: string;
-  value: string | number;
-  tone: 'brand' | 'success' | 'violet' | 'warning';
-  badge?: number;
-}): JSX.Element {
-  return (
-    <Card>
-      <p className="text-base text-ink-muted">{label}</p>
-      <p className="mt-1 text-4xl font-bold text-ink">{value}</p>
-      {badge ? (
-        <Badge tone={tone} className="mt-2">
-          未读 {badge}
-        </Badge>
-      ) : null}
-    </Card>
   );
 }

@@ -50,18 +50,18 @@ export function Table<T>({
     <div className={['overflow-auto rounded-lg border border-surface-border', className].join(' ')}>
       <div className={maxHeightClass ? `overflow-y-auto ${maxHeightClass}` : ''}>
         <table className="w-full border-collapse text-base">
-          <thead className="sticky top-0 z-10 bg-slate-100">
+          <thead className="sticky top-0 z-10 bg-surface-muted">
             <tr>
               {columns.map((col) => (
                 <th
                   key={col.key}
                   scope="col"
                   className={[
-                    'whitespace-nowrap border-b border-slate-300 px-4 py-3',
+                    'whitespace-nowrap border-b border-surface-border px-4 py-3',
                     'text-base font-bold text-ink',
                     alignClass(col.align),
                     col.widthClass ?? '',
-                    col.sticky ? 'sticky left-0 z-20 bg-slate-100' : '',
+                    col.sticky ? 'sticky left-0 z-20 bg-surface-muted' : '',
                   ].join(' ')}
                 >
                   {col.header}
@@ -82,8 +82,8 @@ export function Table<T>({
                 key={rowKey(row, index)}
                 onClick={onRowClick ? () => onRowClick(row, index) : undefined}
                 className={[
-                  'border-b border-slate-200 transition-colors',
-                  striped && index % 2 === 1 ? 'bg-slate-50' : 'bg-white',
+                  'border-b border-surface-border transition-colors',
+                  striped && index % 2 === 1 ? 'bg-surface-muted' : 'bg-surface-raised',
                   onRowClick ? 'cursor-pointer hover:bg-brand-50' : '',
                 ].join(' ')}
               >

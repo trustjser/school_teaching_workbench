@@ -14,7 +14,7 @@ export function TaskMatrix(): JSX.Element {
   return (
     <div className="space-y-4">
       <h1 className="text-3xl font-bold text-ink">任务矩阵</h1>
-      <Card>
+      <Card className="animate-rise-in">
         <TaskMatrixView />
       </Card>
     </div>

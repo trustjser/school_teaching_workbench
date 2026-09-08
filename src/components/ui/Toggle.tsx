@@ -36,19 +36,19 @@ export function Toggle({
           'relative inline-flex h-touch w-[4.25rem] shrink-0 items-center rounded-full',
           'border-2 transition-colors',
           'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400',
-          checked ? 'border-green-700 bg-green-600' : 'border-slate-400 bg-slate-300',
+          checked ? 'border-green-700 bg-green-600' : 'border-surface-border bg-surface-muted',
         ].join(' ')}
       >
         <span
           className={[
-            'absolute h-9 w-9 rounded-full bg-white shadow transition-transform',
+            'absolute h-9 w-9 rounded-full bg-surface-raised shadow transition-transform',
             checked ? 'translate-x-[2.1rem]' : 'translate-x-0.5',
           ].join(' ')}
         />
         <span
           className={[
             'pointer-events-none absolute text-xs font-bold uppercase',
-            checked ? 'left-3 text-white' : 'right-3 text-slate-600',
+            checked ? 'left-3 text-white' : 'right-3 text-ink-soft',
           ].join(' ')}
         >
           {checked ? 'ON' : 'OFF'}

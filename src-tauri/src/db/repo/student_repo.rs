@@ -109,6 +109,10 @@ pub async fn upsert(pool: &SqlitePool, mut student: Student) -> AppResult<Studen
     if student.sync_state.is_empty() {
         student.sync_state = "pending".to_string();
     }
+    // 前端按 Partial<Student> 提交，状态缺失时归为在读。
+    if student.status.is_empty() {
+        student.status = "active".to_string();
+    }
 
     sqlx::query(
         "INSERT INTO students (id, student_no, name, gender, grade, class_name, seat_no, status,

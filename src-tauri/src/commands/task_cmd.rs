@@ -1,8 +1,10 @@
 //! 自定义任务命令：列表 / 任务增改 / 状态节点增删 / 矩阵单元格 / 矩阵查询 / 删除 / 完成率统计。
+//!
+//! 约定：Tauri v2 会按「参数名转 lowerCamelCase」从 invoke payload 顶层取值，
+//! 因此所有命令一律使用扁平 snake_case 参数，不再包裹 `XxxArgs` 结构体。
 
 use std::sync::Arc;
 
-use serde::Deserialize;
 use tauri::State;
 
 use crate::db::models::{CustomTask, TaskCompletionRow, TaskMatrix, TaskRecord, TaskStatusNode};
@@ -11,34 +13,10 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::sync::outbox;
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskListArgs {
-    status: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskIdArgs {
-    task_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IdArgs {
-    id: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CompletionArgs {
-    since_ts: Option<i64>,
-}
-
 /// 任务列表（可按状态过滤）。
 #[tauri::command]
-pub async fn task_list(state: State<'_, Arc<AppState>>, args: TaskListArgs) -> AppResult<Vec<CustomTask>> {
-    task_repo::list(&state.pool, args.status.as_deref(), None).await
+pub async fn task_list(state: State<'_, Arc<AppState>>, status: Option<String>) -> AppResult<Vec<CustomTask>> {
+    task_repo::list(&state.pool, status.as_deref(), None).await
 }
 
 /// 新增或修改任务，并写入待发队列。
@@ -59,14 +37,14 @@ pub async fn task_node_upsert(state: State<'_, Arc<AppState>>, node: TaskStatusN
 
 /// 删除状态节点（软删，本地生效）。
 #[tauri::command]
-pub async fn task_node_delete(state: State<'_, Arc<AppState>>, args: IdArgs) -> AppResult<()> {
-    task_repo::node_delete(&state.pool, &args.id).await
+pub async fn task_node_delete(state: State<'_, Arc<AppState>>, id: String) -> AppResult<()> {
+    task_repo::node_delete(&state.pool, &id).await
 }
 
 /// 任务的状态节点列表（独立读取，供节点编辑器）。
 #[tauri::command]
-pub async fn task_node_list(state: State<'_, Arc<AppState>>, args: TaskIdArgs) -> AppResult<Vec<TaskStatusNode>> {
-    task_repo::node_list(&state.pool, &args.task_id).await
+pub async fn task_node_list(state: State<'_, Arc<AppState>>, task_id: String) -> AppResult<Vec<TaskStatusNode>> {
+    task_repo::node_list(&state.pool, &task_id).await
 }
 
 /// 新增或修改矩阵单元格记录（含评分/备注校验）。
@@ -79,20 +57,20 @@ pub async fn task_record_upsert(state: State<'_, Arc<AppState>>, record: TaskRec
 
 /// 一次性返回任务矩阵（任务 + 节点 + 学生 + 已有记录）。
 #[tauri::command]
-pub async fn task_matrix_query(state: State<'_, Arc<AppState>>, args: TaskIdArgs) -> AppResult<TaskMatrix> {
-    task_repo::matrix(&state.pool, &args.task_id).await
+pub async fn task_matrix_query(state: State<'_, Arc<AppState>>, task_id: String) -> AppResult<TaskMatrix> {
+    task_repo::matrix(&state.pool, &task_id).await
 }
 
 /// 软删任务（级联软删节点与记录）。
 #[tauri::command]
-pub async fn task_delete(state: State<'_, Arc<AppState>>, args: IdArgs) -> AppResult<()> {
-    task_repo::soft_delete(&state.pool, &args.id).await
+pub async fn task_delete(state: State<'_, Arc<AppState>>, id: String) -> AppResult<()> {
+    task_repo::soft_delete(&state.pool, &id).await
 }
 
 /// 任务完成率统计（教务处端统计与导出）。
 #[tauri::command]
-pub async fn task_completion_stats(state: State<'_, Arc<AppState>>, args: CompletionArgs) -> AppResult<Vec<TaskCompletionRow>> {
-    let since = args.since_ts;
+pub async fn task_completion_stats(state: State<'_, Arc<AppState>>, since_ts: Option<i64>) -> AppResult<Vec<TaskCompletionRow>> {
+    let since = since_ts;
     let rows = sqlx::query_as::<_, TaskCompletionRow>(
         "SELECT
             t.id AS task_id,

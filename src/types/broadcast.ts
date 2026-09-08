@@ -6,7 +6,10 @@ import type {
   ColorToken,
   ReceiptStatus,
 } from './enums';
-import type { BaseEntity } from './models';
+import type { BaseEntity, Device } from './models';
+
+/** 展开目标时使用的设备最小信息 */
+export type TargetableDevice = Pick<Device, 'deviceId' | 'txtGrade' | 'txtClassName' | 'isSelf'>;
 
 /** 广播 payload 中携带的任务模板定义（班级端一键生成待办时使用） */
 export interface BroadcastTaskTemplate {
@@ -88,6 +91,36 @@ export interface ReceiptSummary {
   accepted: number;
   rejected: number;
   done: number;
+}
+
+/**
+ * 将 UI 的目标选择器展开为设备 ID 列表。
+ *
+ * Rust 侧 `broadcast_send` 的 `targets` 只认 device_id 数组，选择器展开在前端完成：
+ * - school：除本端外的全部设备
+ * - grade：按设备广播的 txtGrade 匹配
+ * - class：按设备广播的 txtClassName 匹配
+ * - device：直接取已选设备（顺带剔除非在册的过期 ID）
+ */
+export function resolveTargetDeviceIds(selector: TargetSelector, devices: TargetableDevice[]): string[] {
+  const values = new Set(selector.values);
+  return devices
+    .filter((d) => {
+      if (d.isSelf) return false;
+      switch (selector.targetType) {
+        case 'school':
+          return true;
+        case 'grade':
+          return !!d.txtGrade && values.has(d.txtGrade);
+        case 'class':
+          return !!d.txtClassName && values.has(d.txtClassName);
+        case 'device':
+          return values.has(d.deviceId);
+        default:
+          return false;
+      }
+    })
+    .map((d) => d.deviceId);
 }
 
 /** 解析后的广播 payload（带解析失败兜底） */

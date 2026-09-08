@@ -15,7 +15,7 @@ export function StatusBar(): JSX.Element {
   const online = devices.filter((d) => d.status === 'online').length;
 
   return (
-    <footer className="flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-slate-200 bg-slate-50 px-6 py-2 text-sm text-ink-muted">
+    <footer className="flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-surface-border bg-surface-muted px-6 py-2 text-sm text-ink-muted">
       <span>
         设备 ID：<span className="font-mono text-ink-soft">{settings.deviceId || '未初始化'}</span>
       </span>
@@ -27,11 +27,11 @@ export function StatusBar(): JSX.Element {
       </span>
       <span>
         已发现节点：<span className="font-semibold text-ink-soft">{devices.length}</span>（在线{' '}
-        <span className="font-semibold text-green-700">{online}</span>）
+        <span className="font-semibold text-state-present">{online}</span>）
       </span>
       <span>
-        待发队列：<span className="font-semibold text-amber-700">{pending}</span>
-        {dead > 0 && <span className="ml-1 text-red-700">· 死信 {dead}</span>}
+        待发队列：<span className="font-semibold text-state-leave">{pending}</span>
+        {dead > 0 && <span className="ml-1 text-state-absent">· 死信 {dead}</span>}
       </span>
       <span className="ml-auto">
         上次刷新：{lastRefreshedAt ? formatRelative(lastRefreshedAt) : '尚未刷新'}

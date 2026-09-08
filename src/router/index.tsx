@@ -1,10 +1,6 @@
-import { createHashRouter, Navigate, Outlet, useNavigate } from 'react-router-dom';
+import { createHashRouter, Navigate, Outlet } from 'react-router-dom';
 import { useBootstrap } from '@/hooks/useBootstrap';
 import { useAppStore } from '@/store/useAppStore';
-import { useDeviceStore } from '@/store/useDeviceStore';
-import { useQueueStore } from '@/store/useQueueStore';
-import { useStudentStore } from '@/store/useStudentStore';
-import { useBroadcastStore } from '@/store/useBroadcastStore';
 import { AppShell } from '@/components/layout/AppShell';
 import { Spinner } from '@/components/ui/Spinner';
 import { Card } from '@/components/ui/Card';
@@ -16,6 +12,7 @@ import { CheckinPage } from '@/pages/CheckinPage';
 import { TaskManage } from '@/pages/TaskManage';
 import { TaskMatrix } from '@/pages/TaskMatrix';
 import { InboxPage } from '@/pages/InboxPage';
+import { SetupWizard } from '@/components/setup/SetupWizard';
 import { MasterHome } from '@/pages/MasterHome';
 import { DeviceMonitor } from '@/pages/DeviceMonitor';
 import { AttendanceBoard } from '@/pages/AttendanceBoard';
@@ -52,51 +49,6 @@ function ErrorScreen(): JSX.Element {
 }
 
 /**
- * 首次启动引导占位。
- * 完整的「密钥 / 班级 / 模式」配置向导不在本任务范围；此处提供「以某端预览」入口，
- * 仅写入前端 store 的 appMode，便于在无 Rust 配置数据时也能查看 UI。
- *
- * 关键：必须把 `phase` 从 `need-setup` 切到 `ready`——`AppRoot` 在
- * `need-setup` 阶段会**一直**渲染本组件、不渲染 `<Outlet />`，所以仅
- * `navigate('/client')` 是无效的（URL 变了但子路由看不到）。`setPhase('ready')`
- * 后才会渲染 `AppShell + Outlet`，子路由（ClientHome/MasterHome）才真正挂载。
- * 同时补上 `useBootstrap` 在 ready 阶段会跑的预热，让预览能看到数据。
- */
-function SetupScreen(): JSX.Element {
-  const setSettings = useAppStore((s) => s.setSettings);
-  const setPhase = useAppStore((s) => s.setPhase);
-  const navigate = useNavigate();
-
-  const enterPreview = (mode: 'client' | 'master'): void => {
-    setSettings({ appMode: mode });
-    // 与 useBootstrap.ready 分支一致地预热全局 store
-    void useDeviceStore.getState().load();
-    void useQueueStore.getState().load();
-    void useStudentStore.getState().load();
-    void useBroadcastStore.getState().loadInbox();
-    setPhase('ready');
-    navigate(mode === 'master' ? '/master' : '/client');
-  };
-
-  return (
-    <div className="flex h-screen w-screen items-center justify-center bg-surface-sunken p-6">
-      <Card className="max-w-lg">
-        <h1 className="text-2xl font-bold text-ink">首次启动引导</h1>
-        <p className="mt-2 text-ink-soft">
-          尚未完成首次运行配置（共享密钥 / 班级 / 运行模式）。请在设置中完成配置后继续使用。
-        </p>
-        <div className="mt-4 flex flex-wrap gap-3">
-          <Button onClick={() => enterPreview('client')}>以班级端预览</Button>
-          <Button variant="secondary" onClick={() => enterPreview('master')}>
-            以教务处端预览
-          </Button>
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-/**
  * 根路由：启动引导门禁。
  * 依据 useAppStore.phase 决定渲染加载屏 / 引导屏 / 主框架。
  * 主框架内通过 <Outlet /> 渲染当前子路由页面。
@@ -106,7 +58,7 @@ function AppRoot(): JSX.Element {
   const phase = useAppStore((s) => s.phase);
 
   if (phase === 'idle' || phase === 'loading') return <FullScreenLoading />;
-  if (phase === 'need-setup') return <SetupScreen />;
+  if (phase === 'need-setup') return <SetupWizard />;
   if (phase === 'error') return <ErrorScreen />;
 
   return (

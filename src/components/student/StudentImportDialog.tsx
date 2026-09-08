@@ -226,7 +226,7 @@ export function StudentImportDialog({
 
       {step === 'map' && (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-3 rounded-lg bg-slate-50 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-3 rounded-lg bg-surface-muted px-4 py-3">
             <span className="text-base font-semibold text-ink">文件：{fileName}</span>
             <span className="text-sm text-ink-muted">编码：{encoding}</span>
             <span className="text-sm text-ink-muted">解析到 {rows.length} 行</span>
@@ -250,7 +250,7 @@ export function StudentImportDialog({
       {step === 'preview' && (
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-4">
-            <div className="rounded-lg border border-slate-200 p-3">
+            <div className="rounded-lg border border-surface-border p-3">
               <p className="text-sm text-ink-muted">总行数</p>
               <p className="text-2xl font-bold text-ink">{rows.length}</p>
             </div>

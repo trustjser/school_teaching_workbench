@@ -103,7 +103,7 @@ export function TaskMatrixView(): JSX.Element {
                 type="button"
                 disabled={!currentTaskId}
                 onClick={() => currentTaskId && void cycleCell(currentTaskId, student.id)}
-                className="flex min-h-touch flex-col items-center justify-center gap-1 rounded-lg border-2 bg-white p-3 text-center transition-colors hover:brightness-95 disabled:opacity-60"
+                className="flex min-h-touch flex-col items-center justify-center gap-1 rounded-lg border-2 bg-surface-raised p-3 text-center transition-colors hover:brightness-95 disabled:opacity-60"
                 style={{ borderColor: color }}
                 title="点击切换到下一状态节点"
               >
@@ -119,7 +119,7 @@ export function TaskMatrixView(): JSX.Element {
       ) : (
         <div className="overflow-x-auto rounded-lg border border-surface-border">
           <table className="w-full border-collapse text-base">
-            <thead className="bg-slate-100">
+            <thead className="bg-surface-muted">
               <tr>
                 <th className="px-4 py-2 text-left text-ink">学生</th>
                 {nodes.map((n) => (
@@ -137,7 +137,7 @@ export function TaskMatrixView(): JSX.Element {
               {roster.map((student) => {
                 const key = effectiveNodeKey(currentTaskId ?? '', student.id);
                 return (
-                  <tr key={student.id} className="border-t border-slate-200">
+                  <tr key={student.id} className="border-t border-surface-border">
                     <td className="px-4 py-2 font-semibold text-ink">{student.name}</td>
                     {nodes.map((n) => {
                       const active = n.nodeKey === key;
@@ -149,7 +149,7 @@ export function TaskMatrixView(): JSX.Element {
                             onClick={() => currentTaskId && void setCellNode(currentTaskId, student.id, n.nodeKey)}
                             className={[
                               'mx-auto inline-flex h-10 min-w-touch items-center justify-center rounded-md px-3 text-sm font-semibold',
-                              active ? 'text-white' : 'text-ink-muted hover:bg-slate-100',
+                              active ? 'text-white' : 'text-ink-muted hover:bg-surface-muted',
                             ].join(' ')}
                             style={active ? { backgroundColor: COLOR_TOKEN_HEX[n.colorToken] ?? '#475569' } : undefined}
                             title={n.label}

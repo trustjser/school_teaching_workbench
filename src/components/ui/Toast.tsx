@@ -8,31 +8,31 @@ const KIND_STYLE: Record<
 > = {
   success: {
     border: 'border-green-600',
-    bg: 'bg-white',
+    bg: 'bg-surface-raised',
     text: 'text-green-800',
     icon: <CheckCircle2 className="h-7 w-7 text-green-600" aria-hidden />,
   },
   error: {
     border: 'border-red-600',
-    bg: 'bg-white',
+    bg: 'bg-surface-raised',
     text: 'text-red-800',
     icon: <XCircle className="h-7 w-7 text-red-600" aria-hidden />,
   },
   warning: {
     border: 'border-amber-600',
-    bg: 'bg-white',
+    bg: 'bg-surface-raised',
     text: 'text-amber-800',
     icon: <AlertTriangle className="h-7 w-7 text-amber-600" aria-hidden />,
   },
   info: {
     border: 'border-brand-600',
-    bg: 'bg-white',
+    bg: 'bg-surface-raised',
     text: 'text-brand-800',
     icon: <Info className="h-7 w-7 text-brand-600" aria-hidden />,
   },
   pending: {
-    border: 'border-slate-400',
-    bg: 'bg-white',
+    border: 'border-surface-border',
+    bg: 'bg-surface-raised',
     text: 'text-ink-soft',
     icon: <Loader2 className="h-6 w-6 animate-spin text-brand-600" aria-hidden />,
   },
@@ -54,7 +54,7 @@ function ToastRow({ item }: { item: ToastItem }): JSX.Element {
       aria-live="polite"
       className={[
         'pointer-events-auto flex w-[22rem] animate-toast-in items-start gap-3 rounded-lg border-l-4',
-        'border border-slate-200 px-4 py-3 shadow-pop',
+        'border border-surface-border px-4 py-3 shadow-pop',
         style.border,
         style.bg,
       ].join(' ')}
@@ -70,7 +70,7 @@ function ToastRow({ item }: { item: ToastItem }): JSX.Element {
         type="button"
         onClick={() => dismiss(item.id)}
         aria-label="关闭提示"
-        className="shrink-0 rounded p-1 text-ink-muted transition-colors hover:bg-slate-100 hover:text-ink"
+        className="shrink-0 rounded p-1 text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
       >
         <X className="h-5 w-5" aria-hidden />
       </button>

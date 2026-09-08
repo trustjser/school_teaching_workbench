@@ -100,9 +100,9 @@ export const STUDENT_STATUS_META: Record<StudentStatus, StatusMeta> = {
     label: '已转出',
     emoji: '⚪',
     color: '#64748b',
-    bgClass: 'bg-slate-100',
-    textClass: 'text-slate-700',
-    borderClass: 'border-slate-500',
+    bgClass: 'bg-surface-muted',
+    textClass: 'text-ink-soft',
+    borderClass: 'border-surface-border',
   },
 };
 

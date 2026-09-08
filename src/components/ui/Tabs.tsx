@@ -27,7 +27,7 @@ export function Tabs<T extends string>({
     <div
       role="tablist"
       className={[
-        'inline-flex items-center gap-1 rounded-lg bg-slate-100 p-1',
+        'inline-flex items-center gap-1 rounded-lg bg-surface-muted p-1',
         className,
       ].join(' ')}
     >
@@ -45,8 +45,8 @@ export function Tabs<T extends string>({
               'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400',
               size === 'lg' ? 'min-h-touch px-5 text-base' : 'min-h-[2.25rem] px-4 text-sm',
               active
-                ? 'bg-white text-brand-800 shadow-card'
-                : 'text-ink-muted hover:bg-slate-200 hover:text-ink',
+                ? 'bg-surface-raised text-brand-600 shadow-card'
+                : 'text-ink-muted hover:bg-surface-muted hover:text-ink',
             ].join(' ')}
           >
             {item.emoji && <span aria-hidden>{item.emoji}</span>}
@@ -55,7 +55,7 @@ export function Tabs<T extends string>({
               <span
                 className={[
                   'rounded-full px-2 py-0.5 text-xs font-bold',
-                  active ? 'bg-brand-100 text-brand-800' : 'bg-slate-200 text-ink-soft',
+                  active ? 'bg-brand-600 text-white' : 'bg-surface-muted text-ink-soft',
                 ].join(' ')}
               >
                 {item.count}

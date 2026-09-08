@@ -14,7 +14,7 @@ export function CheckinPage(): JSX.Element {
   return (
     <div className="space-y-4">
       <h1 className="text-3xl font-bold text-ink">快捷考勤</h1>
-      <Card>
+      <Card className="animate-rise-in">
         <AttendanceGrid />
       </Card>
     </div>

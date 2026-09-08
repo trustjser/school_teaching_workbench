@@ -16,8 +16,9 @@ export interface ModalProps {
 }
 
 /**
- * 模态框：Esc 关闭、焦点陷阱、大屏居中放大。
+ * 模态框：Esc 关闭、焦点陷阱、大屏居中。
  * 打开时锁定 body 滚动并将焦点移入对话框。
+ * 遮罩层全屏覆盖（z-index 高于一切），面板内容区独立滚动。
  */
 export function Modal({
   open,
@@ -73,14 +74,16 @@ export function Modal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-modal flex items-center justify-center p-6">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6">
+      {/* 全屏遮罩：半透明深色 + 背景模糊，确保覆盖所有内容 */}
       <div
-        className="absolute inset-0 bg-slate-900/50"
+        className="absolute inset-0 bg-black/55 backdrop-blur-sm"
         role="presentation"
         onClick={() => {
           if (closeOnBackdrop) onClose();
         }}
       />
+      {/* 面板：限制最大高度，内容区独立滚动 */}
       <div
         ref={panelRef}
         tabIndex={-1}
@@ -88,21 +91,24 @@ export function Modal({
         aria-modal="true"
         aria-label={typeof title === 'string' ? title : '对话框'}
         className={[
-          'relative z-10 w-full animate-pop-in rounded-panel bg-white shadow-pop',
-          'flex max-h-[88vh] flex-col outline-none',
+          'relative z-10 w-full animate-pop-in rounded-panel bg-surface-raised shadow-pop',
+          'flex max-h-[85vh] flex-col outline-none overscroll-contain',
           widthClass,
         ].join(' ')}
       >
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+        <header className="shrink-0 flex items-start justify-between gap-4 border-b border-surface-border px-5 sm:px-6 py-4 sm:py-5">
           <div className="min-w-0">
-            <h2 className="text-2xl font-bold text-ink">{title}</h2>
-            {description && <p className="mt-1 text-base text-ink-muted">{description}</p>}
+            <h2 className="truncate text-xl sm:text-2xl font-bold text-ink">{title}</h2>
+            {description && <p className="mt-1 text-sm sm:text-base text-ink-muted">{description}</p>}
           </div>
-          <IconButton icon={<X className="h-6 w-6" />} label="关闭" onClick={onClose} />
+          <IconButton icon={<X className="h-5 w-5 sm:h-6 sm:w-6" />} label="关闭" onClick={onClose} />
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
+        {/* 内容区：可滚动，其余区域不滚动 */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 sm:px-6 py-4 sm:py-5">
+          {children}
+        </div>
         {footer && (
-          <footer className="flex items-center justify-end gap-3 border-t border-slate-200 px-6 py-4">
+          <footer className="shrink-0 flex items-center justify-end gap-3 border-t border-surface-border px-5 sm:px-6 py-3 sm:py-4">
             {footer}
           </footer>
         )}

@@ -18,7 +18,9 @@ export function StudentRoster(): JSX.Element {
   return (
     <div className="space-y-4">
       <h1 className="text-3xl font-bold text-ink">学生名册</h1>
-      <StudentTable onEdit={setEditTarget} onImport={() => setImportOpen(true)} />
+      <div className="animate-rise-in">
+        <StudentTable onEdit={setEditTarget} onImport={() => setImportOpen(true)} />
+      </div>
       <StudentImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
       <StudentEditDrawer
         open={editTarget !== null}

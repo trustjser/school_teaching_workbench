@@ -1,9 +1,11 @@
 //! 广播任务命令：创建 / 下发 / 列表 / 回执查询 / 班级端一键接受生成待办。
+//!
+//! 约定：Tauri v2 会按「参数名转 lowerCamelCase」从 invoke payload 顶层取值，
+//! 因此所有命令一律使用扁平 snake_case 参数，不再包裹 `XxxArgs` 结构体。
 
 use std::sync::Arc;
 use tauri::Emitter;
 
-use serde::Deserialize;
 use serde_json::Value;
 use tauri::State;
 
@@ -13,25 +15,6 @@ use crate::db::repo::{broadcast_repo, device_repo, student_repo, task_repo};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::sync::outbox;
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BroadcastSendArgs {
-    id: String,
-    targets: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DirectionArgs {
-    direction: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BroadcastTaskIdArgs {
-    broadcast_task_id: String,
-}
 
 /// 创建广播任务（教务处端，本地草稿）。
 #[tauri::command]
@@ -47,8 +30,12 @@ pub async fn broadcast_create(state: State<'_, Arc<AppState>>, mut task: Broadca
 
 /// 下发广播任务给指定目标设备（逐设备入队，worker 异步投递）。
 #[tauri::command]
-pub async fn broadcast_send(state: State<'_, Arc<AppState>>, args: BroadcastSendArgs) -> AppResult<SendReport> {
-    let task = broadcast_repo::get(&state.pool, &args.id).await?
+pub async fn broadcast_send(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    targets: Vec<String>,
+) -> AppResult<SendReport> {
+    let task = broadcast_repo::get(&state.pool, &id).await?
         .ok_or_else(|| AppError::not_found("广播任务"))?;
 
     // 从 payload 中抽取状态节点模板。
@@ -64,13 +51,13 @@ pub async fn broadcast_send(state: State<'_, Arc<AppState>>, args: BroadcastSend
     let push_value = serde_json::to_value(&push)?;
 
     // 解析目标设备地址。
-    let mut targets: Vec<(String, Option<String>)> = Vec::with_capacity(args.targets.len());
+    let mut resolved: Vec<(String, Option<String>)> = Vec::with_capacity(targets.len());
     let mut missing = 0;
-    for dev_id in &args.targets {
+    for dev_id in &targets {
         match device_repo::get_by_device_id(&state.pool, dev_id).await? {
             Some(dev) if dev.status == "online" => match (dev.ip_address, dev.port) {
                 (Some(ip), Some(port)) if port > 0 => {
-                    targets.push((dev.device_id.clone(), Some(format!("http://{}:{}", ip, port))));
+                    resolved.push((dev.device_id.clone(), Some(format!("http://{}:{}", ip, port))));
                 }
                 _ => missing += 1,
             },
@@ -78,43 +65,43 @@ pub async fn broadcast_send(state: State<'_, Arc<AppState>>, args: BroadcastSend
         }
     }
 
-    let queued_ids = if targets.is_empty() {
+    let queued_ids = if resolved.is_empty() {
         Vec::new()
     } else {
-        outbox::enqueue_broadcast_targets(&state.pool, &task.id, push_value, &targets).await?
+        outbox::enqueue_broadcast_targets(&state.pool, &task.id, push_value, &resolved).await?
     };
 
     // 更新任务状态与预期回执数。
     broadcast_repo::update_status(&state.pool, &task.id, "sending", 0).await.ok();
-    let _ = crate::db::repo::settings_repo::set_raw(&state.pool, "broadcast_expect", Some(&targets.len().to_string()), "number").await;
+    let _ = crate::db::repo::settings_repo::set_raw(&state.pool, "broadcast_expect", Some(&resolved.len().to_string()), "number").await;
 
     let _ = state.app.emit(Events::SYNC_QUEUE_CHANGED, serde_json::json!({ "broadcast": task.id }));
 
     Ok(SendReport {
         broadcast_task_id: task.id,
-        total: args.targets.len() as i64,
-        queued: queued_ids.len() as i64,
-        failed: missing,
-        targets: args.targets,
+        expect_count: targets.len() as i64,
+        enqueued: queued_ids.len() as i64,
+        skipped: missing,
+        targets,
     })
 }
 
 /// 广播任务列表（按方向过滤）。
 #[tauri::command]
-pub async fn broadcast_list(state: State<'_, Arc<AppState>>, args: DirectionArgs) -> AppResult<Vec<BroadcastTask>> {
-    broadcast_repo::list(&state.pool, args.direction.as_deref(), None).await
+pub async fn broadcast_list(state: State<'_, Arc<AppState>>, direction: Option<String>) -> AppResult<Vec<BroadcastTask>> {
+    broadcast_repo::list(&state.pool, direction.as_deref(), None).await
 }
 
 /// 某广播任务的回执列表。
 #[tauri::command]
-pub async fn broadcast_receipts(state: State<'_, Arc<AppState>>, args: BroadcastTaskIdArgs) -> AppResult<Vec<BroadcastReceipt>> {
-    broadcast_repo::receipts(&state.pool, &args.broadcast_task_id).await
+pub async fn broadcast_receipts(state: State<'_, Arc<AppState>>, broadcast_task_id: String) -> AppResult<Vec<BroadcastReceipt>> {
+    broadcast_repo::receipts(&state.pool, &broadcast_task_id).await
 }
 
 /// 班级端一键接受下发任务：生成本地待办任务并登记回执，回执异步回传教务处。
 #[tauri::command]
-pub async fn broadcast_accept(state: State<'_, Arc<AppState>>, args: BroadcastTaskIdArgs) -> AppResult<CustomTask> {
-    let bt = broadcast_repo::get(&state.pool, &args.broadcast_task_id).await?
+pub async fn broadcast_accept(state: State<'_, Arc<AppState>>, broadcast_task_id: String) -> AppResult<CustomTask> {
+    let bt = broadcast_repo::get(&state.pool, &broadcast_task_id).await?
         .ok_or_else(|| AppError::not_found("广播任务"))?;
 
     let payload: Value = serde_json::from_str(&bt.payload).unwrap_or(Value::Null);

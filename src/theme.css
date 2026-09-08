@@ -1,0 +1,122 @@
+/* ==========================================================================
+ *  LAN Workbench — 主题令牌系统 (Theme Token System)
+ *  三套主题通过 CSS 变量驱动：light（默认）/ dark / high-contrast
+ *  Tailwind 的 surface.* 与 ink.* 颜色映射到这些变量，因此切换 <html> 上的
+ *  主题类即可让全应用（含卡片、导航、文本、边框）即时换肤，无需 dark: 变体。
+ *  用法：<html class="dark"> 或 <html class="high-contrast">
+ * ========================================================================== */
+
+/* ----------------------------- 浅色（默认） ------------------------------ */
+:root {
+  /* 表面层：画布 → 凹陷 → 悬浮态 → 抬升(卡片) → 边框 */
+  --surface: 248 250 252; /* #f8fafc 画布 */
+  --surface-sunken: 241 245 249; /* #f1f5f9 页面底色 */
+  --surface-muted: 226 232 240; /* #e2e8f0 悬浮/斑马 */
+  --surface-raised: 255 255 255; /* #ffffff 卡片/面板 */
+  --surface-border: 224 230 240; /* 边框 */
+
+  /* 文字：主 → 次级 → 弱化 → 反色 */
+  --ink: 15 23 42; /* #0f172a */
+  --ink-soft: 51 65 85; /* #334155 */
+  --ink-muted: 100 116 139; /* #64748b */
+  --ink-inverse: 248 250 252; /* 深色表面上的文字 */
+
+  /* 品牌强调（高对比下提亮以保证可读） */
+  --brand: 37 121 235; /* #2579eb */
+  --brand-strong: 29 99 216; /* #1d63d8 */
+  --brand-soft: 219 234 254; /* 浅色品牌背景 */
+
+  /* 玻璃拟态表面（带透明度的抬升层） */
+  --glass-bg: 255 255 255;
+  --glass-alpha: 0.72;
+  --glass-border: 255 255 255;
+  --glass-border-alpha: 0.6;
+
+  /* 阴影强度（浅色下更柔） */
+  --shadow-strength: 0.08;
+  --ring-brand: 59 151 246; /* focus ring */
+}
+
+/* ------------------------------- 深色 -------------------------------- */
+.dark {
+  --surface: 2 6 23; /* #020617 画布（slate-950） */
+  --surface-sunken: 2 6 23;
+  --surface-muted: 30 41 59; /* #1e293b 悬浮态 */
+  --surface-raised: 15 23 42; /* #0f172a 卡片 */
+  --surface-border: 38 50 71; /* #263247 边框 */
+
+  --ink: 241 245 249; /* #f1f5f9 */
+  --ink-soft: 203 213 225; /* #cbd5e1 */
+  --ink-muted: 148 163 184; /* #94a3b8 */
+  --ink-inverse: 2 6 23;
+
+  --brand: 96 182 250; /* 提亮蓝 #60b6fa，深色背景可读 */
+  --brand-strong: 147 208 253; /* #93d0fd */
+  --brand-soft: 30 58 95; /* 深色品牌背景 */
+
+  --glass-bg: 15 23 42;
+  --glass-alpha: 0.66;
+  --glass-border: 148 163 184;
+  --glass-border-alpha: 0.16;
+
+  --shadow-strength: 0.5;
+  --ring-brand: 96 182 250;
+}
+
+/* ----------------------------- 高对比 -------------------------------- */
+.high-contrast {
+  --surface: 0 0 0;
+  --surface-sunken: 0 0 0;
+  --surface-muted: 24 24 24;
+  --surface-raised: 0 0 0;
+  --surface-border: 255 255 255; /* 白边强分隔 */
+
+  --ink: 255 255 255;
+  --ink-soft: 255 255 255;
+  --ink-muted: 232 232 232;
+  --ink-inverse: 0 0 0;
+
+  --brand: 56 189 248; /* 高亮青蓝 */
+  --brand-strong: 125 211 252;
+  --brand-soft: 20 40 60;
+
+  --glass-bg: 0 0 0;
+  --glass-alpha: 1;
+  --glass-border: 255 255 255;
+  --glass-border-alpha: 1;
+
+  --shadow-strength: 0;
+  --ring-brand: 250 204 21; /* 黄环，强可见 */
+}
+
+/* 高对比下去除柔化阴影，强化描边 */
+.high-contrast .card,
+.high-contrast [data-card] {
+  box-shadow: none !important;
+  border-width: 2px;
+}
+
+/* ==========================================================================
+ *  主题切换瞬态过渡：仅在切换时挂 .theme-anim，避免日常交互抖动
+ * ========================================================================== */
+html.theme-anim,
+html.theme-anim * {
+  transition:
+    background-color 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+    fill 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+    stroke 0.32s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* 减少动效偏好：尊重系统设置，关闭非必要动画 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

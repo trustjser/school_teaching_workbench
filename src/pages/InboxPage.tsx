@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useBroadcastStore } from '@/store/useBroadcastStore';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { SkeletonCard } from '@/components/ui/Skeleton';
 import { PRIORITY_OPTIONS } from '@/constants/status';
 import { parseBroadcastPayload } from '@/types/broadcast';
 import { formatDateTime } from '@/lib/format';
@@ -14,9 +15,12 @@ export function InboxPage(): JSX.Element {
   const loadInbox = useBroadcastStore((s) => s.loadInbox);
   const accept = useBroadcastStore((s) => s.accept);
   const markAllRead = useBroadcastStore((s) => s.markAllRead);
+  const [booting, setBooting] = useState(true);
 
   useEffect(() => {
     void loadInbox();
+    const t = setTimeout(() => setBooting(false), 450);
+    return () => clearTimeout(t);
   }, [loadInbox]);
 
   return (
@@ -28,36 +32,47 @@ export function InboxPage(): JSX.Element {
         </Button>
       </div>
 
-      {inbox.length === 0 ? (
+      {booting && inbox.length === 0 ? (
+        <div className="space-y-3">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
+      ) : inbox.length === 0 ? (
         <EmptyState title="收件箱为空" description="教务处下发的任务与通知会显示在这里。" />
       ) : (
         <div className="space-y-3">
-          {inbox.map((task) => {
+          {inbox.map((task, i) => {
             const tpl = parseBroadcastPayload(task.payload);
             const prio = PRIORITY_OPTIONS.find((o) => o.value === task.priority)?.label ?? task.priority;
             return (
-              <Card
+              <div
                 key={task.id}
-                title={task.title}
-                description={tpl?.description ?? '（无描述）'}
-                actions={<Badge tone="warning">{prio}</Badge>}
+                className="animate-rise-in"
+                style={{ animationDelay: `${Math.min(i, 8) * 60}ms` }}
               >
-                <p className="text-sm text-ink-muted">
-                  下发时间：{task.sentAt ? formatDateTime(task.sentAt) : '—'}
-                </p>
-                {tpl && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {tpl.statusNodes.map((n) => (
-                      <Badge key={n.nodeKey} tone="neutral">
-                        {n.label}
-                      </Badge>
-                    ))}
+                <Card
+                  title={task.title}
+                  description={tpl?.description ?? '（无描述）'}
+                  actions={<Badge tone="warning">{prio}</Badge>}
+                >
+                  <p className="text-sm text-ink-muted">
+                    下发时间：{task.sentAt ? formatDateTime(task.sentAt) : '—'}
+                  </p>
+                  {tpl && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {tpl.statusNodes.map((n) => (
+                        <Badge key={n.nodeKey} tone="neutral">
+                          {n.label}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-3">
+                    <Button onClick={() => void accept(task.id)}>接受并生成班级待办</Button>
                   </div>
-                )}
-                <div className="mt-3">
-                  <Button onClick={() => void accept(task.id)}>接受并生成班级待办</Button>
-                </div>
-              </Card>
+                </Card>
+              </div>
             );
           })}
         </div>

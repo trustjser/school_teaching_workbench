@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { BroadcastReceipt, BroadcastTask, SendReport, TargetSelector } from '@/types/broadcast';
+import type { BroadcastReceipt, BroadcastTask, SendReport } from '@/types/broadcast';
 import type { CustomTask } from '@/types/models';
 import {
   broadcastAccept,
@@ -27,7 +27,8 @@ interface BroadcastState {
   loadReceipts: (broadcastTaskId: string) => Promise<void>;
   select: (id: string | null) => void;
   create: (task: Partial<BroadcastTask> & { title: string; payload: string }) => Promise<BroadcastTask>;
-  send: (id: string, targets: TargetSelector) => Promise<SendReport>;
+  /** `targetDeviceIds` 需为已展开的设备 ID 数组（见 resolveTargetDeviceIds） */
+  send: (id: string, targetDeviceIds: string[]) => Promise<SendReport>;
   accept: (broadcastTaskId: string) => Promise<CustomTask | null>;
   /** 收到新下发任务（事件驱动） */
   pushIncoming: (task: BroadcastTask) => void;
@@ -95,10 +96,10 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
     }
   },
 
-  send: async (id, targets) => {
+  send: async (id, targetDeviceIds) => {
     const app = useAppStore.getState();
     try {
-      const report = await broadcastSend(id, targets);
+      const report = await broadcastSend(id, targetDeviceIds);
       set((s) => ({
         outbox: s.outbox.map((t) =>
           t.id === id

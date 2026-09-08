@@ -20,7 +20,7 @@ export interface BadgeProps {
 }
 
 const TONE_CLASS: Record<BadgeTone, string> = {
-  neutral: 'bg-slate-100 text-slate-800 border-slate-400',
+  neutral: 'bg-surface-muted text-ink border-surface-border',
   brand: 'bg-brand-50 text-brand-800 border-brand-500',
   success: 'bg-green-50 text-green-800 border-green-600',
   warning: 'bg-amber-50 text-amber-800 border-amber-600',

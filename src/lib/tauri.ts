@@ -10,15 +10,15 @@ import type { ErrorCode } from '@/types/enums';
  * —— A. 来自 docs/03-tasks.md §5.2 / docs/01-architecture.md，已锁定 ——
  *  1  settings_get_all            () -> AppSetting[]
  *  2  settings_set                ({ key, value, valueType }) -> void
- *  3  settings_complete_setup     ({ mode, deviceName, grade, className, secret }) -> void
+ *  3  settings_complete_setup     ({ mode, deviceName, grade, className, schoolName, secret }) -> void
  *  4  settings_switch_mode        ({ mode }) -> AppMode
  *  5  settings_rotate_key         () -> { kid }
- *  6  student_list                ({ className?, status?, keyword? }) -> Student[]
+ *  6  student_list                ({ className?, status?, keyword?, includeDeleted? }) -> Student[]
  *  7  student_upsert              (Student) -> Student
  *  8  student_batch_import        ({ rows, batchName }) -> ImportReport
  *  9  student_update_status       ({ id, status }) -> Student
  * 10  checkin_list                ({ date, period }) -> CheckinRecord[]
- * 11  checkin_mark                ({ studentId, date, period, state }) -> CheckinRecord
+ * 11  checkin_mark                ({ studentId, date, period, state, note? }) -> CheckinRecord
  * 12  checkin_batch_mark          ({ items }) -> CheckinRecord[]
  * 13  checkin_daily_summary       ({ date }) -> DailySummary[]
  * 14  task_list                   ({ status? }) -> CustomTask[]
@@ -28,7 +28,7 @@ import type { ErrorCode } from '@/types/enums';
  * 18  task_record_upsert          (TaskRecord) -> TaskRecord
  * 19  task_matrix_query           ({ taskId }) -> TaskMatrix
  * 20  broadcast_create            (BroadcastTask) -> BroadcastTask
- * 21  broadcast_send              ({ id, targets }) -> SendReport
+ * 21  broadcast_send              ({ id, targets: deviceId[] }) -> SendReport
  * 22  broadcast_list              ({ direction }) -> BroadcastTask[]
  * 23  broadcast_receipts          ({ broadcastTaskId }) -> BroadcastReceipt[]
  * 24  broadcast_accept            ({ broadcastTaskId }) -> CustomTask

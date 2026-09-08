@@ -21,7 +21,7 @@ export function SyncIndicator({ compact = false }: SyncIndicatorProps): JSX.Elem
   const pushToast = useAppStore((s) => s.pushToast);
 
   const isOnline = online > 0;
-  const dotColor = isOnline ? 'bg-green-500' : 'bg-slate-400';
+  const dotColor = isOnline ? 'bg-green-500' : 'bg-surface-muted';
   const label = isOnline ? `在线 ${online} 个节点` : '未发现节点';
 
   return (
@@ -42,7 +42,7 @@ export function SyncIndicator({ compact = false }: SyncIndicatorProps): JSX.Elem
           {isOnline ? (
             <Wifi className="h-6 w-6 text-green-700" aria-hidden />
           ) : (
-            <WifiOff className="h-6 w-6 text-slate-500" aria-hidden />
+            <WifiOff className="h-6 w-6 text-ink-muted" aria-hidden />
           )}
           {!compact && <span className="text-base font-semibold text-ink-soft">{label}</span>}
         </span>
@@ -60,7 +60,7 @@ export function SyncIndicator({ compact = false }: SyncIndicatorProps): JSX.Elem
           'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400',
           pending > 0
             ? 'border-amber-600 bg-amber-50 text-amber-800'
-            : 'border-slate-300 bg-white text-ink-soft hover:bg-slate-50',
+            : 'border-surface-border bg-surface-raised text-ink-soft hover:bg-surface-muted',
         ].join(' ')}
         title="点击立即补发一次"
       >

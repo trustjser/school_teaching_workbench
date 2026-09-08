@@ -17,8 +17,8 @@ export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
 
 const VARIANT_CLASS: Record<ButtonVariant, string> = {
   primary: 'bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800 border border-brand-700',
-  secondary: 'bg-white text-ink border border-surface-border hover:bg-slate-50 active:bg-slate-100',
-  ghost: 'bg-transparent text-ink-soft hover:bg-slate-100 active:bg-slate-200 border border-transparent',
+  secondary: 'bg-surface-raised text-ink border border-surface-border hover:bg-surface-muted active:bg-surface-muted',
+  ghost: 'bg-transparent text-ink-soft hover:bg-surface-muted active:bg-surface-muted border border-transparent',
   danger: 'bg-red-600 text-white hover:bg-red-700 active:bg-red-800 border border-red-700',
   success: 'bg-green-600 text-white hover:bg-green-700 active:bg-green-800 border border-green-700',
   warning: 'bg-amber-500 text-white hover:bg-amber-600 active:bg-amber-700 border border-amber-600',
@@ -50,10 +50,11 @@ export function Button({
       type={type}
       disabled={disabled || loading}
       className={[
-        'inline-flex items-center justify-center gap-2 rounded-lg font-semibold',
-        'transition-colors select-none',
+        'inline-flex items-center justify-center gap-2 rounded-lg font-semibold select-none',
+        'transition-[transform,background-color,box-shadow,color]',
+        'hover:shadow-soft active:scale-[0.97]',
         'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400',
-        'disabled:opacity-50 disabled:cursor-not-allowed',
+        'disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 disabled:hover:shadow-none',
         SIZE_CLASS[size],
         VARIANT_CLASS[variant],
         block ? 'w-full' : '',

@@ -279,8 +279,11 @@ pub struct ImportBatch {
 }
 
 /// 学生名册（`students`）。
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-#[serde(rename_all = "camelCase")]
+///
+/// 前端按 `Partial<Student>` 提交（新建时没有 id/createdAt/syncState 等），
+/// 因此整结构体开启 `serde(default)`，缺失字段取默认值，由 repo 层补全。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase", default)]
 pub struct Student {
     /// 主键 UUID。
     pub id: String,
@@ -354,9 +357,9 @@ pub struct CheckinRecord {
     pub dirty: bool,
 }
 
-/// 自定义任务（`custom_tasks`）。
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-#[serde(rename_all = "camelCase")]
+/// 自定义任务（`custom_tasks`）。前端按 `Partial<CustomTask>` 提交，见 `Student` 说明。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase", default)]
 pub struct CustomTask {
     /// 主键 UUID。
     pub id: String,
@@ -404,9 +407,9 @@ pub struct CustomTask {
     pub dirty: bool,
 }
 
-/// 任务状态节点（`task_status_nodes`）。
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-#[serde(rename_all = "camelCase")]
+/// 任务状态节点（`task_status_nodes`）。前端按 `Partial<TaskStatusNode>` 提交，见 `Student` 说明。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase", default)]
 pub struct TaskStatusNode {
     /// 主键 UUID。
     pub id: String,
@@ -439,8 +442,9 @@ pub struct TaskStatusNode {
 }
 
 /// 任务-学生矩阵单元格（`task_records`）。
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-#[serde(rename_all = "camelCase")]
+/// 前端新建单元格时显式传 `id: undefined`，必须允许缺字段，见 `Student` 说明。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase", default)]
 pub struct TaskRecord {
     /// 主键 UUID。
     pub id: String,
@@ -472,9 +476,9 @@ pub struct TaskRecord {
     pub dirty: bool,
 }
 
-/// 广播任务（`broadcast_tasks`）。
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-#[serde(rename_all = "camelCase")]
+/// 广播任务（`broadcast_tasks`）。前端按 `Partial<BroadcastTask>` 提交，见 `Student` 说明。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase", default)]
 pub struct BroadcastTask {
     /// 主键 UUID。
     pub id: String,
@@ -812,12 +816,12 @@ pub struct TaskMatrix {
 pub struct SendReport {
     /// 广播任务 ID。
     pub broadcast_task_id: String,
-    /// 目标总数。
-    pub total: i64,
-    /// 已进入队列数。
-    pub queued: i64,
-    /// 失败数。
-    pub failed: i64,
+    /// 目标设备总数（与前端 `expectCount` 对齐）。
+    pub expect_count: i64,
+    /// 已入队数（与前端 `enqueued` 对齐）。
+    pub enqueued: i64,
+    /// 跳过的设备数：离线或缺少地址（与前端 `skipped` 对齐）。
+    pub skipped: i64,
     /// 目标设备列表。
     pub targets: Vec<String>,
 }

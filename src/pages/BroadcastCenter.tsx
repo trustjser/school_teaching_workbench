@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, RefreshCw } from 'lucide-react';
 import { useBroadcastStore, summarizeReceipts } from '@/store/useBroadcastStore';
 import { useDeviceStore } from '@/store/useDeviceStore';
+import { useAppStore } from '@/store/useAppStore';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -12,6 +13,7 @@ import { Table, type TableColumn } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
 import { Toggle } from '@/components/ui/Toggle';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { SkeletonRows } from '@/components/ui/Skeleton';
 import {
   TASK_TYPE_OPTIONS,
   PRIORITY_OPTIONS,
@@ -25,9 +27,9 @@ import type { BroadcastPriority, BroadcastTargetType, ColorToken } from '@/types
 import type { BroadcastTask } from '@/types/broadcast';
 import {
   stringifyBroadcastPayload,
+  resolveTargetDeviceIds,
   type BroadcastNodeTemplate,
   type BroadcastTaskTemplate,
-  type TargetSelector,
 } from '@/types/broadcast';
 import type { BroadcastReceipt } from '@/types/broadcast';
 import { uuidV4 } from '@/lib/crypto';
@@ -45,13 +47,30 @@ export function BroadcastCenter(): JSX.Element {
   const loadDevices = useDeviceStore((s) => s.load);
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [booting, setBooting] = useState(true);
 
   useEffect(() => {
     void loadOutbox();
     void loadDevices();
+    const t = setTimeout(() => setBooting(false), 450);
+    return () => clearTimeout(t);
   }, [loadOutbox, loadDevices]);
 
   const handleCreate = async (p: CreatePayload): Promise<void> => {
+    // Rust 侧只认 device_id 数组，选择器在这里展开。
+    const targetDeviceIds = resolveTargetDeviceIds(
+      { targetType: p.targetType, values: p.targetValues },
+      devices,
+    );
+    if (targetDeviceIds.length === 0) {
+      useAppStore.getState().pushToast({
+        kind: 'warning',
+        title: '没有匹配到目标设备',
+        description: '请先刷新设备列表，或调整下发范围',
+      });
+      return;
+    }
+
     const template: BroadcastTaskTemplate = {
       title: p.title,
       description: p.description || null,
@@ -70,8 +89,7 @@ export function BroadcastCenter(): JSX.Element {
       targetType: p.targetType,
       dueAt: p.dueAt,
     });
-    const targets: TargetSelector = { targetType: p.targetType, values: p.targetValues };
-    await send(created.id, targets);
+    await send(created.id, targetDeviceIds);
     await loadOutbox();
   };
 
@@ -134,7 +152,9 @@ export function BroadcastCenter(): JSX.Element {
       </div>
 
       <Card>
-        {outbox.length === 0 ? (
+        {booting && outbox.length === 0 ? (
+          <SkeletonRows rows={5} />
+        ) : outbox.length === 0 ? (
           <EmptyState title="尚未下发任务" description="点击「新建并下发」向班级 / 年级 / 全校推送任务。" />
         ) : (
           <Table columns={columns} data={outbox} rowKey={(t) => t.id} />
@@ -370,7 +390,7 @@ function CreateBroadcastModal({
                       key={d.deviceId}
                       className={[
                         'flex min-h-touch items-center gap-3 rounded-lg border px-3',
-                        checked ? 'border-brand-600 bg-brand-50' : 'border-surface-border bg-white',
+                        checked ? 'border-brand-600 bg-brand-50' : 'border-surface-border bg-surface-raised',
                       ].join(' ')}
                     >
                       <input

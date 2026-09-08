@@ -20,7 +20,22 @@ export default {
         '7xl': ['4.5rem', { lineHeight: '4.75rem' }],
       },
       colors: {
-        // 高对比品牌色
+        // 表面层（主题感知：全部映射到 src/theme.css 的 CSS 变量）
+        surface: {
+          DEFAULT: 'rgb(var(--surface) / <alpha-value>)',
+          sunken: 'rgb(var(--surface-sunken) / <alpha-value>)',
+          muted: 'rgb(var(--surface-muted) / <alpha-value>)',
+          raised: 'rgb(var(--surface-raised) / <alpha-value>)',
+          border: 'rgb(var(--surface-border) / <alpha-value>)',
+        },
+        // 文字（主题感知）
+        ink: {
+          DEFAULT: 'rgb(var(--ink) / <alpha-value>)',
+          soft: 'rgb(var(--ink-soft) / <alpha-value>)',
+          muted: 'rgb(var(--ink-muted) / <alpha-value>)',
+          inverse: 'rgb(var(--ink-inverse) / <alpha-value>)',
+        },
+        // 品牌色（跨主题通用的高饱和强调色）
         brand: {
           50: '#eff8ff',
           100: '#dbeefe',
@@ -52,18 +67,6 @@ export default {
           cyan: '#0891b2',
           orange: '#ea580c',
         },
-        ink: {
-          DEFAULT: '#0f172a',
-          soft: '#334155',
-          muted: '#64748b',
-          inverse: '#f8fafc',
-        },
-        surface: {
-          DEFAULT: '#ffffff',
-          sunken: '#f1f5f9',
-          raised: '#ffffff',
-          border: '#cbd5e1',
-        },
       },
       spacing: {
         // 触控目标 ≥ 44px
@@ -79,10 +82,20 @@ export default {
       borderRadius: {
         card: '0.75rem',
         panel: '1rem',
+        xl: '1.25rem',
       },
       boxShadow: {
-        card: '0 1px 2px 0 rgba(15, 23, 42, 0.08), 0 1px 3px 0 rgba(15, 23, 42, 0.06)',
+        // 现代分层柔影：浅色更柔、深色更聚（由 --shadow-strength 间接控制见下方 rgba）
+        card: '0 1px 2px rgba(15, 23, 42, 0.06), 0 2px 8px -2px rgba(15, 23, 42, 0.08)',
+        soft: '0 1px 3px rgba(15, 23, 42, 0.05), 0 8px 24px -8px rgba(15, 23, 42, 0.12)',
         pop: '0 12px 32px -8px rgba(15, 23, 42, 0.28)',
+        glow: '0 0 0 1px rgb(var(--brand) / 0.35), 0 8px 28px -6px rgb(var(--brand) / 0.45)',
+      },
+      backgroundImage: {
+        'brand-gradient':
+          'linear-gradient(135deg, rgb(var(--brand)) 0%, rgb(var(--brand-strong)) 100%)',
+        'brand-sheen':
+          'linear-gradient(120deg, transparent 0%, rgb(255 255 255 / 0.18) 50%, transparent 100%)',
       },
       screens: {
         // 大屏断点：教室一体机常见分辨率
@@ -103,16 +116,62 @@ export default {
           '100%': { transform: 'translateX(0)' },
         },
         'pulse-ring': {
-          '0%': { boxShadow: '0 0 0 0 rgba(37, 121, 235, 0.5)' },
-          '70%': { boxShadow: '0 0 0 12px rgba(37, 121, 235, 0)' },
-          '100%': { boxShadow: '0 0 0 0 rgba(37, 121, 235, 0)' },
+          '0%': { boxShadow: '0 0 0 0 rgb(var(--ring-brand) / 0.5)' },
+          '70%': { boxShadow: '0 0 0 12px rgb(var(--ring-brand) / 0)' },
+          '100%': { boxShadow: '0 0 0 0 rgb(var(--ring-brand) / 0)' },
+        },
+        // —— 现代入场与微交互 ——
+        'rise-in': {
+          '0%': { opacity: '0', transform: 'translateY(14px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        'fade-in': {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        'scale-in': {
+          '0%': { opacity: '0', transform: 'scale(0.94)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        'slide-in-up': {
+          '0%': { opacity: '0', transform: 'translateY(100%)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        'shimmer': {
+          '0%': { backgroundPosition: '-200% 0' },
+          '100%': { backgroundPosition: '200% 0' },
+        },
+        'float': {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-6px)' },
+        },
+        'gradient-pan': {
+          '0%': { backgroundPosition: '0% 50%' },
+          '50%': { backgroundPosition: '100% 50%' },
+          '100%': { backgroundPosition: '0% 50%' },
+        },
+        'ring-spin': {
+          to: { transform: 'rotate(360deg)' },
+        },
+        'icon-pop': {
+          '0%': { transform: 'scale(0.6)' },
+          '60%': { transform: 'scale(1.15)' },
+          '100%': { transform: 'scale(1)' },
         },
       },
       animation: {
         'toast-in': 'toast-in 160ms ease-out',
-        'pop-in': 'pop-in 120ms ease-out',
+        'pop-in': 'pop-in 160ms ease-out',
         'slide-in-right': 'slide-in-right 180ms ease-out',
         'pulse-ring': 'pulse-ring 1.4s ease-out infinite',
+        'rise-in': 'rise-in 0.5s cubic-bezier(0.21, 1.02, 0.73, 1) both',
+        'fade-in': 'fade-in 0.4s ease both',
+        'scale-in': 'scale-in 0.22s cubic-bezier(0.21, 1.02, 0.73, 1) both',
+        'slide-in-up': 'slide-in-up 0.28s cubic-bezier(0.21, 1.02, 0.73, 1) both',
+        'shimmer': 'shimmer 1.4s linear infinite',
+        'float': 'float 6s ease-in-out infinite',
+        'gradient-pan': 'gradient-pan 8s ease infinite',
+        'icon-pop': 'icon-pop 0.3s cubic-bezier(0.21, 1.02, 0.73, 1) both',
       },
       zIndex: {
         drawer: '60',

@@ -93,7 +93,7 @@ export function StudentPicker({
               <label
                 className={[
                   'flex min-h-touch items-center gap-3 rounded-lg border px-3 transition-colors',
-                  checked ? 'border-brand-600 bg-brand-50' : 'border-surface-border bg-white hover:bg-slate-50',
+                  checked ? 'border-brand-600 bg-brand-50' : 'border-surface-border bg-surface-raised hover:bg-surface-muted',
                   disabled ? 'opacity-50' : 'cursor-pointer',
                 ].join(' ')}
               >

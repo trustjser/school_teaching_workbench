@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { Monitor, CalendarCheck, Radio, BarChart3 } from 'lucide-react';
+import { BarChart3, CalendarCheck, Monitor, Radio } from 'lucide-react';
 import { useDeviceStore } from '@/store/useDeviceStore';
 import { useBroadcastStore } from '@/store/useBroadcastStore';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
+import { StatCard } from '@/components/ui/StatCard';
+import { SkeletonStatCard } from '@/components/ui/Skeleton';
 import { Table, type TableColumn } from '@/components/ui/Table';
+import { Stagger } from '@/components/motion/Reveal';
 import { checkinSchoolSummary, checkinClassAttendance } from '@/lib/db';
 import { toDateKey, formatPercent } from '@/lib/format';
 import type { SchoolSummary, ClassAttendanceRow } from '@/types/api';
@@ -66,34 +69,60 @@ export function MasterHome(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-bold text-ink">全校总览</h1>
+      {/* 欢迎条 */}
+      <section className="card flex flex-wrap items-center justify-between gap-4 p-6">
+        <div className="flex items-center gap-4">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-gradient text-white shadow-glow">
+            <Monitor className="h-7 w-7" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-ink-muted">教务处协同端</p>
+            <h1 className="text-3xl font-bold text-ink">全校总览</h1>
+            <p className="mt-0.5 text-ink-soft">节点状态、全校考勤与任务下发，一屏掌握。</p>
+          </div>
+        </div>
         <Button variant="secondary" size="md" onClick={() => void refresh()} disabled={loading}>
           刷新
         </Button>
-      </div>
+      </section>
 
-      <div className="grid grid-cols-2 gap-4 board:grid-cols-4">
-        <HomeStat icon={<Monitor className="h-6 w-6" />} label="已发现节点" value={devices.length} sub={`在线 ${online}`} />
-        <HomeStat
-          icon={<CalendarCheck className="h-6 w-6" />}
-          label="全校出勤率"
-          value={summary ? formatPercent(summary.attendanceRate) : '—'}
-          sub={summary ? `${summary.markedStudents}/${summary.totalStudents} 已标记` : '加载中'}
-        />
-        <HomeStat
-          icon={<Radio className="h-6 w-6" />}
-          label="已下发任务"
-          value={outbox.length}
-          sub="教务处下发"
-        />
-        <HomeStat
-          icon={<BarChart3 className="h-6 w-6" />}
-          label="异常学生"
-          value={summary ? summary.absent + summary.leave : '—'}
-          sub="缺勤 + 请假"
-        />
-      </div>
+      {loading && !summary ? (
+        <div className="grid grid-cols-2 gap-4 board:grid-cols-4">
+          <SkeletonStatCard />
+          <SkeletonStatCard />
+          <SkeletonStatCard />
+          <SkeletonStatCard />
+        </div>
+      ) : (
+        <Stagger className="grid grid-cols-2 gap-4 board:grid-cols-4" step={70}>
+          <StatCard
+            tone="brand"
+            icon={Monitor}
+            label="已发现节点"
+            value={devices.length}
+            sub={`在线 ${online}`}
+          />
+          <StatCard
+            tone="success"
+            icon={CalendarCheck}
+            label="全校出勤率"
+            value={summary ? summary.attendanceRate : 0}
+            decimals={1}
+            suffix="%"
+            accent
+            sub={summary ? `${summary.markedStudents}/${summary.totalStudents} 已标记` : '—'}
+          />
+          <StatCard tone="violet" icon={Radio} label="已下发任务" value={outbox.length} sub="教务处下发" />
+          <StatCard
+            tone="warning"
+            icon={BarChart3}
+            label="异常学生"
+            value={summary ? summary.absent + summary.leave : 0}
+            accent
+            sub="缺勤 + 请假"
+          />
+        </Stagger>
+      )}
 
       <Card
         title="各班级考勤"
@@ -118,43 +147,23 @@ export function MasterHome(): JSX.Element {
         )}
       </Card>
 
-      <div className="grid gap-4 board:grid-cols-3">
+      <Stagger className="grid gap-4 board:grid-cols-3" step={80}>
         <QuickLink to="/master/devices" title="节点监控" desc="查看局域网内班级端与教务处端节点状态" />
         <QuickLink to="/master/broadcast" title="任务下发" desc="向指定班级 / 年级 / 全校下发任务" />
         <QuickLink to="/master/analytics" title="统计导出" desc="导出任务完成率与考勤汇总（xlsx）" />
-      </div>
+      </Stagger>
     </div>
-  );
-}
-
-function HomeStat({
-  icon,
-  label,
-  value,
-  sub,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string | number;
-  sub?: string;
-}): JSX.Element {
-  return (
-    <Card>
-      <div className="flex items-center gap-2 text-ink-muted">
-        <span className="text-brand-600">{icon}</span>
-        <span className="text-base">{label}</span>
-      </div>
-      <p className="mt-2 text-4xl font-bold text-ink">{value}</p>
-      {sub && <p className="mt-1 text-sm text-ink-muted">{sub}</p>}
-    </Card>
   );
 }
 
 function QuickLink({ to, title, desc }: { to: string; title: string; desc: string }): JSX.Element {
   return (
     <Link to={to}>
-      <Card className="h-full transition-colors hover:border-brand-500">
-        <h3 className="text-xl font-bold text-ink">{title}</h3>
+      <Card className="card-interactive group h-full">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-xl font-bold text-ink">{title}</h3>
+          <span className="text-brand-600 transition-transform group-hover:translate-x-1">→</span>
+        </div>
         <p className="mt-1 text-ink-soft">{desc}</p>
       </Card>
     </Link>

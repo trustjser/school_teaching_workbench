@@ -33,7 +33,7 @@ export function Input({
       )}
       <div
         className={[
-          'flex items-center gap-2 rounded-lg border bg-white px-3',
+          'flex items-center gap-2 rounded-lg border bg-surface-raised px-3',
           'transition-colors focus-within:ring-4 focus-within:ring-brand-400',
           error ? 'border-red-600' : 'border-surface-border',
           size === 'lg' ? 'min-h-touch' : 'min-h-[2.25rem]',
@@ -43,7 +43,7 @@ export function Input({
         <input
           id={inputId}
           className={[
-            'min-w-0 flex-1 bg-transparent outline-none placeholder:text-slate-400',
+            'min-w-0 flex-1 bg-transparent outline-none placeholder:text-ink-muted',
             size === 'lg' ? 'text-base' : 'text-sm',
             'text-ink',
             className,
@@ -53,7 +53,7 @@ export function Input({
         {suffix && <span className="shrink-0 text-sm text-ink-muted">{suffix}</span>}
       </div>
       {error ? (
-        <p className="mt-1 text-sm font-medium text-red-700">{error}</p>
+        <p className="mt-1 text-sm font-medium text-red-500">{error}</p>
       ) : hint ? (
         <p className="mt-1 text-sm text-ink-muted">{hint}</p>
       ) : null}

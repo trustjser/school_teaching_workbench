@@ -51,9 +51,9 @@ export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
 }
 
 const VARIANT_CLASS: Record<IconButtonVariant, string> = {
-  ghost: 'bg-transparent text-ink-soft hover:bg-slate-100 active:bg-slate-200',
+  ghost: 'bg-transparent text-ink-soft hover:bg-surface-muted active:bg-surface-muted',
   solid: 'bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800',
-  outline: 'bg-white text-ink-soft border border-surface-border hover:bg-slate-50',
+  outline: 'bg-surface-raised text-ink-soft border border-surface-border hover:bg-surface-muted',
   danger: 'bg-red-600 text-white hover:bg-red-700 active:bg-red-800',
 };
 

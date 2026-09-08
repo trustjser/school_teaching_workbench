@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { CalendarCheck, CheckCircle2, UserMinus, UserX } from 'lucide-react';
 import { useDeviceStore } from '@/store/useDeviceStore';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -7,6 +8,9 @@ import { Tabs } from '@/components/ui/Tabs';
 import { Table, type TableColumn } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { StatCard } from '@/components/ui/StatCard';
+import { SkeletonStatCard } from '@/components/ui/Skeleton';
+import { Stagger } from '@/components/motion/Reveal';
 import { checkinSchoolSummary, checkinClassAttendance, checkinExceptionStudents } from '@/lib/db';
 import { toDateKey, formatPercent } from '@/lib/format';
 import type { SchoolSummary, ClassAttendanceRow, ExceptionStudentRow } from '@/types/api';
@@ -93,30 +97,37 @@ export function AttendanceBoard(): JSX.Element {
         </div>
       </div>
 
-      {summary && (
+      {loading && !summary ? (
         <div className="grid grid-cols-2 gap-4 board:grid-cols-4">
-          <Card>
-            <p className="text-base text-ink-muted">全校出勤率</p>
-            <p className="mt-1 text-4xl font-bold text-ink">{formatPercent(summary.attendanceRate)}</p>
-            <p className="mt-1 text-sm text-ink-muted">
-              {summary.markedStudents}/{summary.totalStudents} 已标记
-            </p>
-          </Card>
-          <Card>
-            <p className="text-base text-ink-muted">已提交班级</p>
-            <p className="mt-1 text-4xl font-bold text-ink">
-              {summary.submittedClassCount}/{summary.classCount}
-            </p>
-          </Card>
-          <Card>
-            <p className="text-base text-ink-muted">缺勤</p>
-            <p className="mt-1 text-4xl font-bold text-red-700">{summary.absent}</p>
-          </Card>
-          <Card>
-            <p className="text-base text-ink-muted">请假</p>
-            <p className="mt-1 text-4xl font-bold text-amber-700">{summary.leave}</p>
-          </Card>
+          <SkeletonStatCard />
+          <SkeletonStatCard />
+          <SkeletonStatCard />
+          <SkeletonStatCard />
         </div>
+      ) : (
+        summary && (
+          <Stagger className="grid grid-cols-2 gap-4 board:grid-cols-4" step={70}>
+            <StatCard
+              tone="success"
+              icon={CalendarCheck}
+              label="全校出勤率"
+              value={summary.attendanceRate}
+              decimals={1}
+              suffix="%"
+              accent
+              sub={`${summary.markedStudents}/${summary.totalStudents} 已标记`}
+            />
+            <StatCard
+              tone="brand"
+              icon={CheckCircle2}
+              label="已提交班级"
+              value={`${summary.submittedClassCount}/${summary.classCount}`}
+              sub="已提交 / 总班级"
+            />
+            <StatCard tone="danger" icon={UserX} label="缺勤" value={summary.absent} accent sub="人" />
+            <StatCard tone="warning" icon={UserMinus} label="请假" value={summary.leave} accent sub="人" />
+          </Stagger>
+        )
       )}
 
       <Card

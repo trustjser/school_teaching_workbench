@@ -20,7 +20,7 @@ export function Spinner({ size = 28, label = '加载中', className = '' }: Spin
 /** 全区域加载遮罩 */
 export function LoadingOverlay({ label = '加载中…' }: { label?: string }): JSX.Element {
   return (
-    <div className="flex h-full min-h-[200px] w-full items-center justify-center bg-white/70">
+    <div className="flex h-full min-h-[200px] w-full items-center justify-center bg-surface-raised/70">
       <Spinner label={label} size={32} />
     </div>
   );

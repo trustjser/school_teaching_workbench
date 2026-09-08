@@ -122,7 +122,7 @@ export function AttendanceGrid({ compact = false }: AttendanceGridProps): JSX.El
                 key={student.id}
                 type="button"
                 onClick={() => void cycle(student)}
-                className="flex min-h-touch flex-col items-center justify-center gap-1 rounded-lg border-2 bg-white p-3 text-center transition-colors hover:brightness-95"
+                className="flex min-h-touch flex-col items-center justify-center gap-1 rounded-lg border-2 bg-surface-raised p-3 text-center transition-colors hover:brightness-95"
                 style={{ borderColor: meta.color }}
                 title="点击切换：出勤 → 请假 → 缺勤 → 出勤"
               >

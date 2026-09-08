@@ -46,7 +46,7 @@ export function ProgressBar({
         aria-valuemin={0}
         aria-valuemax={safeMax}
         aria-label={label ?? '进度'}
-        className={['w-full overflow-hidden rounded-full bg-slate-200', heightClass].join(' ')}
+        className={['w-full overflow-hidden rounded-full bg-surface-muted', heightClass].join(' ')}
       >
         <div
           className={['h-full rounded-full transition-[width] duration-200', TONE_BG[tone]].join(' ')}

@@ -2,6 +2,7 @@ import { CalendarDays, Search } from 'lucide-react';
 import { ModeBadge } from './ModeBadge';
 import { SyncIndicator } from './SyncIndicator';
 import { Input } from '@/components/ui/Input';
+import { ThemeSwitcher } from '@/components/motion/ThemeSwitcher';
 import { useAppStore } from '@/store/useAppStore';
 import { formatDateCN, toDateKey } from '@/lib/format';
 
@@ -13,7 +14,7 @@ export interface TopBarProps {
   showSearch?: boolean;
 }
 
-/** 顶栏：模式徽标 + 班级/学校名 + 日期 + 同步指示器 + 搜索入口 */
+/** 顶栏：模式徽标 + 班级/学校名 + 日期 + 同步指示器 + 搜索 + 主题切换 */
 export function TopBar({ search = '', onSearchChange, showSearch = false }: TopBarProps): JSX.Element {
   const settings = useAppStore((s) => s.settings);
   const isMaster = settings.appMode === 'master';
@@ -22,7 +23,7 @@ export function TopBar({ search = '', onSearchChange, showSearch = false }: TopB
     : `${settings.grade ?? ''}${settings.className ?? '未设置班级'}`.trim() || '未设置班级';
 
   return (
-    <header className="flex min-h-[4.5rem] flex-wrap items-center gap-4 border-b border-slate-200 bg-white px-6 py-3">
+    <header className="glass sticky top-0 z-50 flex min-h-[4.5rem] flex-wrap items-center gap-4 border-b border-surface-border px-6 py-3">
       <ModeBadge mode={settings.appMode} size="md" />
 
       <div className="min-w-0">
@@ -44,12 +45,13 @@ export function TopBar({ search = '', onSearchChange, showSearch = false }: TopB
         </div>
       )}
 
-      <div className="ml-auto flex items-center gap-4">
-        <span className="inline-flex items-center gap-2 text-base font-semibold text-ink-soft">
+      <div className="ml-auto flex items-center gap-3 sm:gap-4">
+        <span className="hidden items-center gap-2 text-base font-semibold text-ink-soft md:inline-flex">
           <CalendarDays className="h-6 w-6" aria-hidden />
           {formatDateCN(toDateKey(Date.now()))}
         </span>
         <SyncIndicator />
+        <ThemeSwitcher />
       </div>
     </header>
   );

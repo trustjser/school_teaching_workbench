@@ -1,4 +1,6 @@
 /* LAN Workbench — Tailwind 入口与全局基础样式 */
+@import './theme.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -19,8 +21,8 @@ body {
     'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   font-size: 1.125rem;
   line-height: 1.75rem;
-  color: #0f172a;          /* ink.DEFAULT */
-  background-color: #f1f5f9; /* surface.sunken */
+  color: rgb(var(--ink));
+  background-color: rgb(var(--surface-sunken));
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -34,17 +36,25 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* 滚动条轻量化（macOS 风格），大屏滚动更顺 */
+/* 滚动条轻量化（macOS 风格），主题感知 */
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 *::-webkit-scrollbar-thumb {
-  background-color: rgba(15, 23, 42, 0.18);
+  background-color: rgb(var(--ink) / 0.18);
   border-radius: 6px;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(15, 23, 42, 0.32);
+  background-color: rgb(var(--ink) / 0.32);
+}
+*::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+/* 选中态主题化 */
+::selection {
+  background-color: rgb(var(--brand) / 0.25);
 }
 
 /* 触控目标兜底：避免某些第三方控件 < 44px */
@@ -59,33 +69,53 @@ button,
 @layer components {
   /* 卡片 */
   .card {
-    @apply bg-surface-raised rounded-card shadow-card border border-surface-border;
+    @apply rounded-panel border border-surface-border bg-surface-raised shadow-card;
   }
+  /* 可悬浮交互卡片：抬升 + 高亮边 + 柔光 */
+  .card-interactive {
+    @apply card transition-[transform,box-shadow,border-color] duration-200;
+  }
+  .card-interactive:hover {
+    @apply -translate-y-0.5 shadow-soft;
+    border-color: rgb(var(--brand) / 0.4);
+  }
+
   /* 主按钮 */
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600
-           text-white px-4 min-h-touch text-base font-medium
-           hover:bg-brand-700 active:bg-brand-800
-           disabled:bg-ink-muted disabled:opacity-60 transition-colors;
+           text-white px-4 min-h-touch text-base font-semibold
+           transition-[transform, background-color, box-shadow]
+           hover:bg-brand-700 active:scale-[0.97] active:bg-brand-800
+           focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400
+           disabled:bg-ink-muted disabled:opacity-60 disabled:active:scale-100;
   }
   /* 次按钮 */
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-white
-           text-ink px-4 min-h-touch text-base font-medium border border-surface-border
-           hover:bg-slate-50 active:bg-slate-100 transition-colors;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-surface-raised
+           text-ink px-4 min-h-touch text-base font-semibold border border-surface-border
+           transition-[transform, background-color, box-shadow]
+           hover:bg-surface-muted active:scale-[0.97]
+           focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400
+           disabled:opacity-60 disabled:active:scale-100;
   }
   /* 危险按钮 */
   .btn-danger {
     @apply inline-flex items-center justify-center gap-2 rounded-lg bg-state-absent
-           text-white px-4 min-h-touch text-base font-medium
-           hover:bg-red-700 active:bg-red-800 transition-colors;
+           text-white px-4 min-h-touch text-base font-semibold
+           transition-[transform, background-color, box-shadow]
+           hover:bg-red-700 active:scale-[0.97] active:bg-red-800
+           focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-400
+           disabled:opacity-60 disabled:active:scale-100;
   }
-  /* 输入框 */
-  .input {
-    @apply w-full rounded-lg border border-surface-border bg-white px-3 min-h-touch
-           text-base text-ink placeholder:text-ink-muted
-           focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200;
+
+  /* 玻璃拟态表面（顶栏/侧栏/弹出层） */
+  .glass {
+    background-color: rgb(var(--glass-bg) / var(--glass-alpha));
+    backdrop-filter: saturate(180%) blur(14px);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+    border: 1px solid rgb(var(--glass-border) / var(--glass-border-alpha));
   }
+
   /* 状态徽标（present/leave/absent/late） */
   .badge-present {
     @apply inline-flex items-center px-2 py-0.5 rounded-md text-2xs font-semibold
@@ -102,5 +132,32 @@ button,
   .badge-late {
     @apply inline-flex items-center px-2 py-0.5 rounded-md text-2xs font-semibold
            bg-orange-50 text-state-late border border-orange-200;
+  }
+
+  /* 骨架/加载微光 */
+  .shimmer {
+    background-image: linear-gradient(
+      90deg,
+      rgb(var(--surface-muted)) 25%,
+      rgb(var(--surface-raised)) 50%,
+      rgb(var(--surface-muted)) 75%
+    );
+    background-size: 200% 100%;
+    @apply animate-shimmer;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  工具类（utilities）                                                       */
+/* -------------------------------------------------------------------------- */
+@layer utilities {
+  /* 画布渐变底纹：浅色/深色下都柔和 */
+  .surface-grid {
+    background-image:
+      radial-gradient(rgb(var(--ink) / 0.04) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .text-balance {
+    text-wrap: balance;
   }
 }

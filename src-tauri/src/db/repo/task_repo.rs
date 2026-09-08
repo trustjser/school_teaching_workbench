@@ -71,6 +71,10 @@ pub async fn upsert(pool: &SqlitePool, mut task: CustomTask) -> AppResult<Custom
     if task.sync_state.is_empty() {
         task.sync_state = "pending".to_string();
     }
+    // 前端按 Partial<CustomTask> 提交，来源字段缺失时归为本地创建。
+    if task.source.is_empty() {
+        task.source = "local".to_string();
+    }
 
     sqlx::query(
         "INSERT INTO custom_tasks (id, title, description, task_type, scope, grade, class_name,

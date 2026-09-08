@@ -5,16 +5,15 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { ModeBadge } from '@/components/layout/ModeBadge';
+import { ThemeSwitcher } from '@/components/motion/ThemeSwitcher';
 import { UI_SCALE_OPTIONS } from '@/constants/ui';
 import { formatFingerprint } from '@/lib/crypto';
-import type { ThemeName } from '@/types/enums';
 import type { KeyInfo } from '@/types/api';
 
 /** 设置页：运行模式切换、UI 缩放、主题、共享密钥指纹 */
 export function Settings(): JSX.Element {
   const settings = useAppStore((s) => s.settings);
   const setUiScale = useAppStore((s) => s.setUiScale);
-  const setTheme = useAppStore((s) => s.setTheme);
   const switchMode = useAppStore((s) => s.switchMode);
   const [keyInfo, setKeyInfo] = useState<KeyInfo | null>(null);
 
@@ -50,17 +49,13 @@ export function Settings(): JSX.Element {
           value={String(settings.uiScale)}
           onChange={(e) => void setUiScale(Number(e.target.value))}
         />
-        <Select
-          className="mt-4"
-          label="主题"
-          options={[
-            { value: 'light', label: '浅色' },
-            { value: 'dark', label: '深色' },
-            { value: 'high-contrast', label: '高对比' },
-          ]}
-          value={settings.theme}
-          onChange={(e) => void setTheme(e.target.value as ThemeName)}
-        />
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-base font-semibold text-ink">主题</p>
+            <p className="mt-0.5 text-sm text-ink-muted">浅色 / 深色 / 高对比，即时切换并自动记忆。</p>
+          </div>
+          <ThemeSwitcher />
+        </div>
       </Card>
 
       <Card title="共享密钥">

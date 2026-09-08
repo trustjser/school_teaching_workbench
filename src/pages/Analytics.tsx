@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Download } from 'lucide-react';
+import { BarChart3, Download, ListChecks } from 'lucide-react';
 import { useTaskStore } from '@/store/useTaskStore';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Table, type TableColumn } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
+import { StatCard } from '@/components/ui/StatCard';
+import { SkeletonStatCard } from '@/components/ui/Skeleton';
+import { Stagger } from '@/components/motion/Reveal';
 import { checkinClassAttendance } from '@/lib/db';
 import {
   exportSheetsToXlsx,
@@ -81,6 +84,15 @@ export function Analytics(): JSX.Element {
     },
   ];
 
+  const total = completion.length;
+  const avgRate = total
+    ? Math.round((completion.reduce((s, r) => s + r.completionRate, 0) / total) * 10) / 10
+    : 0;
+  const scored = completion.filter((r) => r.avgScore != null);
+  const avgScore = scored.length
+    ? Math.round((scored.reduce((s, r) => s + (r.avgScore ?? 0), 0) / scored.length) * 10) / 10
+    : 0;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -104,6 +116,37 @@ export function Analytics(): JSX.Element {
           </Button>
         </div>
       </div>
+
+      {loading && completion.length === 0 ? (
+        <div className="grid grid-cols-2 gap-4 board:grid-cols-3">
+          <SkeletonStatCard />
+          <SkeletonStatCard />
+          <SkeletonStatCard />
+        </div>
+      ) : (
+        <Stagger className="grid grid-cols-2 gap-4 board:grid-cols-3" step={80}>
+          <StatCard tone="brand" icon={ListChecks} label="统计任务数" value={total} sub="含完成率记录" />
+          <StatCard
+            tone="success"
+            icon={BarChart3}
+            label="平均完成率"
+            value={avgRate}
+            decimals={1}
+            suffix="%"
+            accent
+            sub="各任务均值"
+          />
+          <StatCard
+            tone="violet"
+            icon={BarChart3}
+            label="平均得分"
+            value={avgScore}
+            decimals={1}
+            accent
+            sub={scored.length ? '满分 100' : '暂无评分'}
+          />
+        </Stagger>
+      )}
 
       <Card title="任务完成率统计" description="各任务的最终状态完成率与平均评分">
         {loading ? (

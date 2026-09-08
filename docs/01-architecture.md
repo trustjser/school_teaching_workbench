@@ -747,15 +747,15 @@ classDiagram
 |---|---|---|---|
 | `settings_get_all` | — | `Vec<AppSetting>` | 读取全部配置 |
 | `settings_set` | `{key, value, value_type}` | `()` | 写配置 |
-| `settings_complete_setup` | `{mode, device_name, grade, class_name, secret}` | `()` | 完成向导，初始化密钥与身份 |
+| `settings_complete_setup` | `{mode, device_name, grade, class_name, school_name, secret}` | `()` | 完成向导，初始化密钥与身份 |
 | `settings_switch_mode` | `{mode}` | `AppMode` | 热切换模式并广播事件 |
 | `settings_rotate_key` | — | `{kid}` | 生成新密钥并返回 kid |
-| `student_list` | `{class_name?, status?, keyword?}` | `Vec<Student>` | 名册列表 |
+| `student_list` | `{class_name?, status?, keyword?, include_deleted?}` | `Vec<Student>` | 名册列表 |
 | `student_upsert` | `Student` | `Student` | 新增/更新 |
 | `student_batch_import` | `{rows, batch_name}` | `ImportReport` | 批量导入（事务） |
 | `student_update_status` | `{id, status}` | `Student` | 状态变更（转出等） |
 | `checkin_list` | `{date, period}` | `Vec<CheckinRecord>` | 当日考勤 |
-| `checkin_mark` | `{student_id, date, period, state}` | `CheckinRecord` | 单点标记（反向标记） |
+| `checkin_mark` | `{student_id, date, period, state, note?}` | `CheckinRecord` | 单点标记（反向标记） |
 | `checkin_batch_mark` | `{items}` | `Vec<CheckinRecord>` | 批量标记 |
 | `checkin_daily_summary` | `{date}` | `Vec<DailySummary>` | 汇总 |
 | `task_list` | `{status?}` | `Vec<CustomTask>` | 任务列表 |
@@ -765,7 +765,7 @@ classDiagram
 | `task_record_upsert` | `TaskRecord` | `TaskRecord` | 矩阵单元格更新 |
 | `task_matrix_query` | `{task_id}` | `TaskMatrix` | 一次性返回矩阵（学生 × 记录） |
 | `broadcast_create` | `BroadcastTask` | `BroadcastTask` | 创建下发任务 |
-| `broadcast_send` | `{id, targets}` | `SendReport` | 下发到目标设备 |
+| `broadcast_send` | `{id, targets: deviceId[]}` | `SendReport` | 下发到目标设备（targets 为已展开的设备 ID 数组，选择器展开在前端完成） |
 | `broadcast_list` | `{direction}` | `Vec<BroadcastTask>` | 列表 |
 | `broadcast_receipts` | `{broadcast_task_id}` | `Vec<BroadcastReceipt>` | 回执汇总 |
 | `broadcast_accept` | `{broadcast_task_id}` | `CustomTask` | 班级端一键生成待办 |

@@ -1,10 +1,10 @@
 import { NavLink } from 'react-router-dom';
+import { GraduationCap, Settings } from 'lucide-react';
 import {
   ClipboardList,
   Inbox,
   LayoutGrid,
   Radio,
-  Settings,
   Users,
   BarChart3,
   Monitor,
@@ -45,7 +45,7 @@ export interface SideNavProps {
   onNavigate?: () => void;
 }
 
-/** 侧边导航：按 appMode 渲染不同菜单 */
+/** 侧边导航：按 appMode 渲染不同菜单，含品牌头与动画激活态 */
 export function SideNav({ mode, onNavigate }: SideNavProps): JSX.Element {
   const unread = useBroadcastStore((s) => s.unreadCount);
   const pending = useQueueStore((s) => s.pendingCount());
@@ -58,6 +58,19 @@ export function SideNav({ mode, onNavigate }: SideNavProps): JSX.Element {
 
   return (
     <nav className="flex h-full flex-col gap-1 overflow-y-auto p-3" aria-label="主导航">
+      {/* 品牌头 */}
+      <div className="mb-3 flex items-center gap-3 px-2 py-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-gradient text-white shadow-glow">
+          <GraduationCap className="h-6 w-6" aria-hidden />
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-base font-bold leading-tight text-ink">教务工作台</p>
+          <p className="truncate text-2xs text-ink-muted">
+            {mode === 'master' ? '教务处协同端' : '班级协同端'}
+          </p>
+        </div>
+      </div>
+
       {items.map((item) => (
         <NavLink
           key={item.to}
@@ -66,18 +79,32 @@ export function SideNav({ mode, onNavigate }: SideNavProps): JSX.Element {
           onClick={onNavigate}
           className={({ isActive }) =>
             [
-              'flex min-h-touch items-center gap-3 rounded-lg px-4 font-semibold transition-colors',
-              'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400',
+              'group relative flex min-h-touch items-center gap-3 rounded-xl px-4 font-semibold',
+              'transition-[transform,background-color,color,box-shadow] duration-200',
+              'active:scale-[0.97] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400',
               isActive
-                ? 'bg-brand-600 text-white'
-                : 'text-ink-soft hover:bg-slate-100 hover:text-ink',
+                ? 'bg-brand-gradient text-white shadow-glow'
+                : 'text-ink-soft hover:bg-surface-muted hover:text-ink',
             ].join(' ')
           }
         >
-          <item.icon className="h-6 w-6 shrink-0" aria-hidden />
+          <item.icon
+            className={[
+              'h-6 w-6 shrink-0 transition-transform',
+
+              'group-hover:scale-110',
+            ].join(' ')}
+            aria-hidden
+          />
           <span className="flex-1 truncate text-base">{item.label}</span>
           {item.badge !== undefined && item.badge > 0 && (
-            <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">
+            <span
+              className={[
+                'rounded-full px-2 py-0.5 text-xs font-bold',
+                'bg-red-600 text-white',
+                'animate-pulse-ring',
+              ].join(' ')}
+            >
               {item.badge > 99 ? '99+' : item.badge}
             </span>
           )}
@@ -90,15 +117,16 @@ export function SideNav({ mode, onNavigate }: SideNavProps): JSX.Element {
           onClick={onNavigate}
           className={({ isActive }) =>
             [
-              'flex min-h-touch items-center gap-3 rounded-lg px-4 font-semibold transition-colors',
-              'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400',
+              'group relative flex min-h-touch items-center gap-3 rounded-xl px-4 font-semibold',
+              'transition-[transform,background-color,color,box-shadow] duration-200',
+              'active:scale-[0.97] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400',
               isActive
-                ? 'bg-brand-600 text-white'
-                : 'text-ink-soft hover:bg-slate-100 hover:text-ink',
+                ? 'bg-brand-gradient text-white shadow-glow'
+                : 'text-ink-soft hover:bg-surface-muted hover:text-ink',
             ].join(' ')
           }
         >
-          <Settings className="h-6 w-6 shrink-0" aria-hidden />
+          <Settings className="h-6 w-6 shrink-0 transition-transform group-hover:scale-110" aria-hidden />
           <span className="text-base">设置</span>
         </NavLink>
       </div>

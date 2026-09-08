@@ -26,13 +26,14 @@ export function Card({
 }: CardProps): JSX.Element {
   return (
     <section
+      data-card
       className={[
-        'rounded-panel border border-surface-border bg-surface-raised shadow-card',
+        'card transition-[box-shadow,border-color] duration-200',
         className,
       ].join(' ')}
     >
       {(title || actions) && (
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+        <header className="flex items-start justify-between gap-4 border-b border-surface-border px-5 py-4">
           <div className="min-w-0">
             {title && <h2 className="truncate text-xl font-bold text-ink">{title}</h2>}
             {description && <p className="mt-1 text-sm text-ink-muted">{description}</p>}

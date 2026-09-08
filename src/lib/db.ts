@@ -30,7 +30,6 @@ import type {
   BroadcastReceipt,
   BroadcastTask,
   SendReport,
-  TargetSelector,
 } from '@/types/broadcast';
 import { DEFAULT_SETTINGS } from '@/constants/app';
 
@@ -101,7 +100,11 @@ export function toRuntimeSettings(list: AppSetting[]): AppRuntimeSettings {
   const mode: AppMode = map.app_mode === 'master' ? 'master' : 'client';
   return {
     appMode: mode,
-    firstRunDone: map.first_run_done === 'true' || map.first_run_done === '1',
+    firstRunDone:
+      map.completed_setup === 'true' ||
+      map.completed_setup === '1' ||
+      map.first_run_done === 'true' ||
+      map.first_run_done === '1',
     deviceId: map.device_id || '',
     deviceName: map.device_name || '',
     grade: map.grade || null,
@@ -279,11 +282,18 @@ export async function broadcastCreate(
   return invokeCmd<BroadcastTask>('broadcast_create', { task });
 }
 
+/**
+ * 下发广播任务。
+ *
+ * `targetDeviceIds` 必须是**已展开的 device_id 数组**——Rust 侧 `targets: Vec<String>`
+ * 只认设备 ID，不认 `{ targetType, values }` 选择器。展开请用
+ * `resolveTargetDeviceIds(selector, devices)`。
+ */
 export async function broadcastSend(
   id: string,
-  targets: TargetSelector,
+  targetDeviceIds: string[],
 ): Promise<SendReport> {
-  return invokeCmd<SendReport>('broadcast_send', { id, targets });
+  return invokeCmd<SendReport>('broadcast_send', { id, targets: targetDeviceIds });
 }
 
 export async function broadcastReceipts(broadcastTaskId: string): Promise<BroadcastReceipt[]> {

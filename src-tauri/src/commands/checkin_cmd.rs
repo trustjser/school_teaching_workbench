@@ -1,4 +1,7 @@
 //! 考勤命令：列表 / 反向标记 / 批量标记 / 日汇总 / 全校汇总 / 班级大屏 / 异常名单。
+//!
+//! 约定：Tauri v2 会按「参数名转 lowerCamelCase」从 invoke payload 顶层取值，
+//! 因此所有命令一律使用扁平 snake_case 参数，不再包裹 `XxxArgs` 结构体。
 
 use std::sync::Arc;
 use tauri::Emitter;
@@ -13,13 +16,7 @@ use crate::error::AppResult;
 use crate::state::AppState;
 use crate::sync::outbox;
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CheckinListArgs {
-    date: String,
-    period: Option<String>,
-}
-
+/// 批量标记的单条入参（前端按 camelCase 传入：`studentId` / `period` / `state`）。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckinMarkArgs {
@@ -27,53 +24,52 @@ pub struct CheckinMarkArgs {
     date: String,
     period: String,
     state: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CheckinBatchMarkArgs {
-    items: Vec<CheckinMarkArgs>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DateArgs {
-    date: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExceptionArgs {
-    date: String,
-    class_name: Option<String>,
+    note: Option<String>,
 }
 
 /// 某日某时段的考勤列表。
 #[tauri::command]
-pub async fn checkin_list(state: State<'_, Arc<AppState>>, args: CheckinListArgs) -> AppResult<Vec<CheckinRecord>> {
-    checkin_repo::list(&state.pool, &args.date, args.period.as_deref(), None).await
+pub async fn checkin_list(
+    state: State<'_, Arc<AppState>>,
+    date: String,
+    period: Option<String>,
+) -> AppResult<Vec<CheckinRecord>> {
+    checkin_repo::list(&state.pool, &date, period.as_deref(), None).await
 }
 
 /// 反向标记单条考勤（默认全体在读生为出勤，点击循环切换状态）。
+///
+/// 注意：`state` 是考勤状态字段（对应前端 `state`），因此 Tauri 托管的
+/// `State<'_, Arc<AppState>>` 改名为 `app_state` 以避免同名冲突。
 #[tauri::command]
-pub async fn checkin_mark(state: State<'_, Arc<AppState>>, args: CheckinMarkArgs) -> AppResult<CheckinRecord> {
+pub async fn checkin_mark(
+    app_state: State<'_, Arc<AppState>>,
+    student_id: String,
+    date: String,
+    period: String,
+    state: String,
+    note: Option<String>,
+) -> AppResult<CheckinRecord> {
     let saved = checkin_repo::upsert(
-        &state.pool, None, &args.student_id, &args.date, &args.period, None, &args.state,
-        Some(&state.device_id), None, "local",
+        &app_state.pool, None, &student_id, &date, &period, None, &state,
+        Some(&app_state.device_id), note.as_deref(), "local",
     ).await?;
-    outbox::enqueue_entity(&state.pool, "checkin", &saved.id, "upsert", &saved, None, None).await?;
-    let _ = state.app.emit(Events::CHECKIN_UPDATED, serde_json::json!({ "date": args.date, "period": args.period }));
+    outbox::enqueue_entity(&app_state.pool, "checkin", &saved.id, "upsert", &saved, None, None).await?;
+    let _ = app_state.app.emit(Events::CHECKIN_UPDATED, serde_json::json!({ "date": date, "period": period }));
     Ok(saved)
 }
 
 /// 批量标记（大屏/表格快速打卡）。
 #[tauri::command]
-pub async fn checkin_batch_mark(state: State<'_, Arc<AppState>>, args: CheckinBatchMarkArgs) -> AppResult<Vec<CheckinRecord>> {
-    let mut out = Vec::with_capacity(args.items.len());
-    for it in &args.items {
+pub async fn checkin_batch_mark(
+    state: State<'_, Arc<AppState>>,
+    items: Vec<CheckinMarkArgs>,
+) -> AppResult<Vec<CheckinRecord>> {
+    let mut out = Vec::with_capacity(items.len());
+    for it in &items {
         let saved = checkin_repo::upsert(
             &state.pool, None, &it.student_id, &it.date, &it.period, None, &it.state,
-            Some(&state.device_id), None, "local",
+            Some(&state.device_id), it.note.as_deref(), "local",
         ).await?;
         outbox::enqueue_entity(&state.pool, "checkin", &saved.id, "upsert", &saved, None, None).await.ok();
         out.push(saved);
@@ -84,14 +80,13 @@ pub async fn checkin_batch_mark(state: State<'_, Arc<AppState>>, args: CheckinBa
 
 /// 日考勤汇总（按班级聚合，含「默认出勤」）。
 #[tauri::command]
-pub async fn checkin_daily_summary(state: State<'_, Arc<AppState>>, args: DateArgs) -> AppResult<Vec<DailySummary>> {
-    checkin_repo::daily_summary(&state.pool, &args.date, None).await
+pub async fn checkin_daily_summary(state: State<'_, Arc<AppState>>, date: String) -> AppResult<Vec<DailySummary>> {
+    checkin_repo::daily_summary(&state.pool, &date, None).await
 }
 
 /// 全校考勤汇总（教务处大屏首页）。
 #[tauri::command]
-pub async fn checkin_school_summary(state: State<'_, Arc<AppState>>, args: DateArgs) -> AppResult<SchoolSummary> {
-    let date = &args.date;
+pub async fn checkin_school_summary(state: State<'_, Arc<AppState>>, date: String) -> AppResult<SchoolSummary> {
     let row = sqlx::query_as::<_, SchoolSummary>(
         "SELECT
             (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL AND status <> 'transferred') AS total_students,
@@ -107,14 +102,14 @@ pub async fn checkin_school_summary(state: State<'_, Arc<AppState>>, args: DateA
                     + (SELECT COUNT(*) FROM students s2 WHERE s2.deleted_at IS NULL AND s2.status<>'transferred' AND NOT EXISTS (SELECT 1 FROM checkin_records cr WHERE cr.student_id=s2.id AND cr.checkin_date = ? AND cr.deleted_at IS NULL)) AS REAL)
                 / (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL AND status<>'transferred') END AS attendance_rate",
     )
-    .bind(date)
-    .bind(date)
-    .bind(date)
-    .bind(date)
-    .bind(date)
-    .bind(date)
-    .bind(date)
-    .bind(date)
+    .bind(&date)
+    .bind(&date)
+    .bind(&date)
+    .bind(&date)
+    .bind(&date)
+    .bind(&date)
+    .bind(&date)
+    .bind(&date)
     .fetch_one(&state.pool)
     .await?;
     Ok(row)
@@ -122,7 +117,7 @@ pub async fn checkin_school_summary(state: State<'_, Arc<AppState>>, args: DateA
 
 /// 班级考勤大屏（按班级聚合）。
 #[tauri::command]
-pub async fn checkin_class_attendance(state: State<'_, Arc<AppState>>, args: DateArgs) -> AppResult<Vec<ClassAttendanceRow>> {
+pub async fn checkin_class_attendance(state: State<'_, Arc<AppState>>, date: String) -> AppResult<Vec<ClassAttendanceRow>> {
     let rows = sqlx::query_as::<_, ClassAttendanceRow>(
         "SELECT
             s.grade AS grade,
@@ -140,7 +135,7 @@ pub async fn checkin_class_attendance(state: State<'_, Arc<AppState>>, args: Dat
          GROUP BY s.class_name, s.grade
          ORDER BY s.grade, s.class_name",
     )
-    .bind(&args.date)
+    .bind(&date)
     .fetch_all(&state.pool)
     .await?;
     Ok(rows)
@@ -148,8 +143,11 @@ pub async fn checkin_class_attendance(state: State<'_, Arc<AppState>>, args: Dat
 
 /// 异常学生名单（缺勤 / 请假 / 迟到），可按班级过滤。
 #[tauri::command]
-pub async fn checkin_exception_students(state: State<'_, Arc<AppState>>, args: ExceptionArgs) -> AppResult<Vec<ExceptionStudentRow>> {
-    let class = args.class_name.clone();
+pub async fn checkin_exception_students(
+    state: State<'_, Arc<AppState>>,
+    date: String,
+    class_name: Option<String>,
+) -> AppResult<Vec<ExceptionStudentRow>> {
     let rows = sqlx::query_as::<_, ExceptionStudentRow>(
         "SELECT c.student_id AS student_id, s.student_no AS student_no, s.name AS name,
                 s.grade AS grade, s.class_name AS class_name, c.state AS state,
@@ -160,9 +158,9 @@ pub async fn checkin_exception_students(state: State<'_, Arc<AppState>>, args: E
            AND (? IS NULL OR s.class_name = ?)
          ORDER BY s.class_name, s.student_no",
     )
-    .bind(&args.date)
-    .bind(&class)
-    .bind(&class)
+    .bind(&date)
+    .bind(&class_name)
+    .bind(&class_name)
     .fetch_all(&state.pool)
     .await?;
     Ok(rows)

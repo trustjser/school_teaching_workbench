@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Toggle } from '@/components/ui/Toggle';
 import { Modal } from '@/components/ui/Modal';
 import { Table, type TableColumn } from '@/components/ui/Table';
+import { SkeletonRows } from '@/components/ui/Skeleton';
 import {
   TASK_TYPE_OPTIONS,
   TASK_STATUS_OPTIONS,
@@ -39,9 +40,12 @@ export function TaskManage(): JSX.Element {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editNodesOpen, setEditNodesOpen] = useState(false);
+  const [booting, setBooting] = useState(true);
 
   useEffect(() => {
     void loadTasks();
+    const t = setTimeout(() => setBooting(false), 450);
+    return () => clearTimeout(t);
   }, [loadTasks]);
 
   useEffect(() => {
@@ -135,12 +139,16 @@ export function TaskManage(): JSX.Element {
       </div>
 
       <Card>
-        <Table
-          columns={columns}
-          data={tasks}
-          rowKey={(t) => t.id}
-          empty={<span>还没有任务，点击「新建任务」创建第一个自定义任务。</span>}
-        />
+        {booting && tasks.length === 0 ? (
+          <SkeletonRows rows={5} />
+        ) : (
+          <Table
+            columns={columns}
+            data={tasks}
+            rowKey={(t) => t.id}
+            empty={<span>还没有任务，点击「新建任务」创建第一个自定义任务。</span>}
+          />
+        )}
       </Card>
 
       <CreateTaskModal
