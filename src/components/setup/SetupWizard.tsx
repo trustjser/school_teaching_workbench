@@ -86,6 +86,8 @@ export function SetupWizard(): JSX.Element {
         grade: boundClass ? boundClass.gradeName : grade.trim() || null,
         className: boundClass ? boundClass.className : className.trim() || null,
         classId: boundClass ? boundClass.id : null,
+        schoolYearId: boundClass ? boundClass.schoolYearId : null,
+        boundClassId: boundClass ? boundClass.id : null,
         schoolName: schoolName.trim() || null,
         secret: secret.trim() || null,
       });

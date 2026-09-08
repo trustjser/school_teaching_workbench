@@ -1,6 +1,8 @@
 //! 班级仓储：CRUD、软删、远端合并（last-write-wins）。
 //!
-//! 班级归属年级，由教务端统一维护，经离线队列同步到班级端（entity_type = 'class'）。
+//! 班级归属年级，并归入某个学年（年隔离维度）。班级真正身份 =
+//! (school_year_id, grade_id, class_no)，由教务端统一维护，经离线队列同步到
+//! 班级端（entity_type = 'class'）。
 
 use sqlx::SqlitePool;
 
@@ -8,28 +10,42 @@ use crate::db::models::Class;
 use crate::db::repo::{decide_merge, merged_sync_state, new_id, now_ms, MergeOutcome};
 use crate::error::{AppError, AppResult};
 
-/// 查询班级列表（可按 grade_id 过滤；空表示全部）。
-pub async fn list(pool: &SqlitePool, grade_id: Option<&str>) -> AppResult<Vec<Class>> {
+/// 查询班级列表（可按 grade_id / school_year_id 过滤；空表示全部）。
+pub async fn list(
+    pool: &SqlitePool,
+    grade_id: Option<&str>,
+    school_year_id: Option<&str>,
+) -> AppResult<Vec<Class>> {
     let rows = sqlx::query_as::<_, Class>(
-        "SELECT id, grade_id, grade_no, grade_name, class_no, class_name, head_teacher,
+        "SELECT id, grade_id, school_year_id, grade_no, grade_name, class_no, class_name, head_teacher,
                 sort_order, remark, created_at, updated_at, deleted_at, sync_state, dirty
          FROM classes WHERE deleted_at IS NULL
          ORDER BY sort_order, class_name",
     )
     .fetch_all(pool)
     .await?;
-    match grade_id {
-        Some(id) if !id.is_empty() => {
-            Ok(rows.into_iter().filter(|c| c.grade_id.as_deref() == Some(id)).collect())
-        }
-        _ => Ok(rows),
-    }
+    Ok(rows.into_iter().filter(|c| {
+        let grade_ok = match grade_id {
+            Some(id) if !id.is_empty() => c.grade_id.as_deref() == Some(id),
+            _ => true,
+        };
+        let year_ok = match school_year_id {
+            Some(id) if !id.is_empty() => c.school_year_id.as_deref() == Some(id),
+            _ => true,
+        };
+        grade_ok && year_ok
+    }).collect())
+}
+
+/// 按学年查询该学年下全部有效班级（班级端按年隔离消费用）。
+pub async fn list_by_year(pool: &SqlitePool, school_year_id: &str) -> AppResult<Vec<Class>> {
+    list(pool, None, Some(school_year_id)).await
 }
 
 /// 按主键查询（含已软删）。
 pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Option<Class>> {
     let row = sqlx::query_as::<_, Class>(
-        "SELECT id, grade_id, grade_no, grade_name, class_no, class_name, head_teacher,
+        "SELECT id, grade_id, school_year_id, grade_no, grade_name, class_no, class_name, head_teacher,
                 sort_order, remark, created_at, updated_at, deleted_at, sync_state, dirty
          FROM classes WHERE id = ?",
     )
@@ -42,7 +58,7 @@ pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Option<Class>> {
 /// 按班级名查找有效班级（用于从 student 的 class_name 反查目录）。
 pub async fn find_by_name(pool: &SqlitePool, class_name: &str) -> AppResult<Option<Class>> {
     let row = sqlx::query_as::<_, Class>(
-        "SELECT id, grade_id, grade_no, grade_name, class_no, class_name, head_teacher,
+        "SELECT id, grade_id, school_year_id, grade_no, grade_name, class_no, class_name, head_teacher,
                 sort_order, remark, created_at, updated_at, deleted_at, sync_state, dirty
          FROM classes WHERE class_name = ? AND deleted_at IS NULL LIMIT 1",
     )
@@ -54,7 +70,8 @@ pub async fn find_by_name(pool: &SqlitePool, class_name: &str) -> AppResult<Opti
 
 /// 新增或更新班级。
 ///
-/// `grade_id` 关联年级；`grade_no` / `grade_name` 冗余存储，便于免 join 查询。
+/// `grade_id` 关联年级；`school_year_id` 归入学年（年隔离维度）；
+/// `grade_no` / `grade_name` 冗余存储，便于免 join 查询。
 pub async fn upsert(pool: &SqlitePool, mut class: Class) -> AppResult<Class> {
     let now = now_ms();
     if class.id.is_empty() {
@@ -86,11 +103,12 @@ pub async fn upsert(pool: &SqlitePool, mut class: Class) -> AppResult<Class> {
     }
 
     sqlx::query(
-        "INSERT INTO classes (id, grade_id, grade_no, grade_name, class_no, class_name, head_teacher,
+        "INSERT INTO classes (id, grade_id, school_year_id, grade_no, grade_name, class_no, class_name, head_teacher,
              sort_order, remark, created_at, updated_at, deleted_at, sync_state, dirty)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1)
          ON CONFLICT(id) DO UPDATE SET
              grade_id = excluded.grade_id,
+             school_year_id = excluded.school_year_id,
              grade_no = excluded.grade_no,
              grade_name = excluded.grade_name,
              class_no = excluded.class_no,
@@ -105,6 +123,7 @@ pub async fn upsert(pool: &SqlitePool, mut class: Class) -> AppResult<Class> {
     )
     .bind(&class.id)
     .bind(&class.grade_id)
+    .bind(&class.school_year_id)
     .bind(&class.grade_no)
     .bind(&class.grade_name)
     .bind(&class.class_no)

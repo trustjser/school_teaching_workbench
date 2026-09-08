@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom';
 import { BarChart3, CalendarCheck, Monitor, Radio, RefreshCw } from 'lucide-react';
 import { useDeviceStore } from '@/store/useDeviceStore';
 import { useBroadcastStore } from '@/store/useBroadcastStore';
+import { useDirectoryStore } from '@/store/useDirectoryStore';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { Select } from '@/components/ui/Select';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 import { StatCard } from '@/components/ui/StatCard';
@@ -21,6 +23,10 @@ export function MasterHome(): JSX.Element {
   const loadDevices = useDeviceStore((s) => s.load);
   const outbox = useBroadcastStore((s) => s.outbox);
   const loadOutbox = useBroadcastStore((s) => s.loadOutbox);
+  const schoolYears = useDirectoryStore((s) => s.schoolYears);
+  const selectedSchoolYearId = useDirectoryStore((s) => s.selectedSchoolYearId);
+  const selectSchoolYear = useDirectoryStore((s) => s.selectSchoolYear);
+  const loadSchoolYears = useDirectoryStore((s) => s.loadSchoolYears);
   const [summary, setSummary] = useState<SchoolSummary | null>(null);
   const [classes, setClasses] = useState<ClassAttendanceRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -42,8 +48,9 @@ export function MasterHome(): JSX.Element {
   useEffect(() => {
     void loadDevices();
     void loadOutbox();
+    void loadSchoolYears();
     void refresh();
-  }, [loadDevices, loadOutbox, refresh]);
+  }, [loadDevices, loadOutbox, loadSchoolYears, refresh]);
 
   const online = devices.filter((d) => d.status === 'online').length;
 
@@ -79,6 +86,15 @@ export function MasterHome(): JSX.Element {
             <p className="text-sm font-medium text-ink-muted">教务处协同端</p>
             <h1 className="text-3xl font-bold text-ink">全校总览</h1>
             <p className="mt-0.5 text-ink-soft">节点状态、全校考勤与任务下发，一屏掌握。</p>
+          </div>
+          <div className="min-w-[12rem]">
+            <Select
+              label="学年"
+              options={schoolYears.map((y) => ({ value: y.id, label: y.schoolYearName }))}
+              value={selectedSchoolYearId ?? ''}
+              onChange={(e) => selectSchoolYear(e.target.value || null)}
+              placeholder="— 全部学年 —"
+            />
           </div>
         </div>
         <Button

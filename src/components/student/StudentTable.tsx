@@ -13,7 +13,8 @@ import { maskPhone } from '@/lib/format';
 
 export interface StudentTableProps {
   onEdit: (student: Student) => void;
-  onImport: () => void;
+  /** 导入名册入口；班级端不传（名册由教务处下发，本地不可导入），教务端传入以打开导入弹窗 */
+  onImport?: () => void;
 }
 
 type FilterTab = StudentFilter;
@@ -116,8 +117,8 @@ export function StudentTable({ onEdit, onImport }: StudentTableProps): JSX.Eleme
     return (
       <EmptyState
         title="还没有学生名册"
-        description="导入 Excel / CSV 名册后，即可开始快捷考勤与任务矩阵管理。"
-        action={<Button onClick={onImport}>导入名册</Button>}
+        description="学生名册由教务处统一下发到本班，请在教务处完成导入后同步到本端；班级端不支持本地导入。"
+        action={onImport ? <Button onClick={onImport}>导入名册</Button> : undefined}
       />
     );
   }

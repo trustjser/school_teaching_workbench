@@ -1,6 +1,5 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarCheck, ClipboardList, GraduationCap, Inbox, Users, UserPlus } from 'lucide-react';
+import { CalendarCheck, ClipboardList, GraduationCap, Inbox, Users } from 'lucide-react';
 import { useStudentStore } from '@/store/useStudentStore';
 import { useCheckinStore } from '@/store/useCheckinStore';
 import { useTaskStore } from '@/store/useTaskStore';
@@ -9,7 +8,6 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { StatCard } from '@/components/ui/StatCard';
-import { StudentImportDialog } from '@/components/student/StudentImportDialog';
 import { Stagger } from '@/components/motion/Reveal';
 
 /** 班级首页：名册导入入口 + 出勤率概览 + 任务矩阵 + 教务指令收件箱 */
@@ -19,7 +17,6 @@ export function ClientHome(): JSX.Element {
   const inbox = useBroadcastStore((s) => s.inbox);
   const unread = useBroadcastStore((s) => s.unreadCount);
   const records = useCheckinStore((s) => s.records);
-  const [importOpen, setImportOpen] = useState(false);
 
   const rosterCount = students.filter((s) => s.status !== 'transferred').length;
   const present = Object.values(records).filter(
@@ -41,9 +38,9 @@ export function ClientHome(): JSX.Element {
             <p className="mt-0.5 text-ink-soft">一键考勤、任务矩阵与教务指令，尽在掌握。</p>
           </div>
         </div>
-        <Button icon={<UserPlus className="h-5 w-5" />} onClick={() => setImportOpen(true)}>
-          导入名册
-        </Button>
+        <span className="rounded-full border border-surface-border bg-surface-muted px-3 py-1.5 text-sm text-ink-muted">
+          学生名册由教务处统一下发，无需导入
+        </span>
       </section>
 
       <Stagger className="grid grid-cols-2 gap-4 board:grid-cols-4" step={70}>
@@ -96,8 +93,6 @@ export function ClientHome(): JSX.Element {
           </Link>
         </Card>
       </Stagger>
-
-      <StudentImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   );
 }

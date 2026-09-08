@@ -66,6 +66,8 @@ const DEFAULT_RUNTIME: AppRuntimeSettings = {
   grade: null,
   className: null,
   classId: null,
+  schoolYearId: null,
+  boundClassId: null,
   schoolName: null,
   apiPort: DEFAULT_SETTINGS.apiPort,
   mdnsServiceType: DEFAULT_SETTINGS.mdnsServiceType,

@@ -86,6 +86,8 @@ export interface Grade extends BaseEntity {
 export interface Class extends BaseEntity {
   /** 关联 grades.id（软删时置空） */
   gradeId: string | null;
+  /** 关联 school_years.id（年隔离维度；为空表示未归入具体学年） */
+  schoolYearId: string | null;
   /** 冗余：年级编号 */
   gradeNo: string | null;
   /** 冗余：年级展示名 */
@@ -97,6 +99,21 @@ export interface Class extends BaseEntity {
   /** 班主任 */
   headTeacher: string | null;
   /** 班级排序 */
+  sortOrder: number;
+  remark: string | null;
+}
+
+/** 学年 / 届（教务端统一维护，全校唯一的时间维度） */
+export interface SchoolYear extends BaseEntity {
+  /** 届号，如 '2027' */
+  schoolYearNo: string;
+  /** 展示名，如 '2027届' */
+  schoolYearName: string;
+  /** 开学日期 YYYY-MM-DD */
+  startDate: string | null;
+  /** 结束日期 YYYY-MM-DD */
+  endDate: string | null;
+  /** 排序（数字越小越靠前） */
   sortOrder: number;
   remark: string | null;
 }
@@ -251,6 +268,10 @@ export interface AppRuntimeSettings {
   className: string | null;
   /** 当前班级端绑定的班级目录 id（教务端目录消费主键） */
   classId: string | null;
+  /** 当前学年 id（班级端按年隔离消费） */
+  schoolYearId: string | null;
+  /** 班级端当前绑定的学年班级 id（跨年只切绑定、不重装） */
+  boundClassId: string | null;
   schoolName: string | null;
   apiPort: number;
   mdnsServiceType: string;

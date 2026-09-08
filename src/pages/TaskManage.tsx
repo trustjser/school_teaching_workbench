@@ -13,15 +13,13 @@ import { SkeletonRows } from '@/components/ui/Skeleton';
 import {
   TASK_TYPE_OPTIONS,
   TASK_STATUS_OPTIONS,
-  COLOR_TOKENS,
-  COLOR_TOKEN_LABEL,
-  NODE_ICON_OPTIONS,
   DEFAULT_NODE_TEMPLATES,
 } from '@/constants/status';
 import { TASK_NODE_MIN, TASK_NODE_MAX } from '@/constants/app';
-import type { ColorToken, TaskScope, TaskType } from '@/types/enums';
+import type { TaskScope, TaskType, ColorToken } from '@/types/enums';
 import type { CustomTask, TaskStatusNode } from '@/types/models';
 import { uuidV4 } from '@/lib/crypto';
+import { StatusNodeEditor, type EditableNode } from '@/components/task/StatusNodeEditor';
 import { useAppStore } from '@/store/useAppStore';
 
 /** 任务管理页：任务 CRUD + 状态节点（2~4）编辑 */
@@ -57,7 +55,7 @@ export function TaskManage(): JSX.Element {
       title: data.title,
       description: data.description || null,
       taskType: data.taskType as TaskType,
-      scope: data.scope as TaskScope,
+      scope: 'class' as TaskScope,
       dueAt: data.dueAt,
       viewMode: data.viewMode,
       scoreEnabled: data.scoreEnabled,
@@ -65,7 +63,7 @@ export function TaskManage(): JSX.Element {
       status: 'active',
     });
     const now = Date.now();
-    const initNodes: TaskStatusNode[] = DEFAULT_NODE_TEMPLATES.map((n, i) => ({
+    const initNodes: TaskStatusNode[] = data.nodes.map((n, i) => ({
       id: uuidV4(),
       nodeKey: n.nodeKey,
       label: n.label,
@@ -84,7 +82,7 @@ export function TaskManage(): JSX.Element {
     await saveNodes(saved.id, initNodes);
     await loadTasks();
     await loadMatrix(saved.id);
-    pushToast({ kind: 'success', title: '任务已创建', description: '已生成默认状态节点' });
+    pushToast({ kind: 'success', title: '任务已创建', description: `已生成 ${initNodes.length} 个状态节点` });
   };
 
   const columns: TableColumn<CustomTask>[] = [
@@ -169,7 +167,7 @@ export function TaskManage(): JSX.Element {
               id: n.id ?? uuidV4(),
               nodeKey: n.nodeKey,
               label: n.label,
-              colorToken: n.colorToken,
+              colorToken: n.colorToken as ColorToken,
               iconName: n.iconName,
               nodeOrder: n.nodeOrder,
               isFinal: n.isFinal,
@@ -197,22 +195,11 @@ export function TaskManage(): JSX.Element {
 /* 类型与子组件                                                                */
 /* -------------------------------------------------------------------------- */
 
-interface EditableNode {
-  id?: string;
-  nodeKey: string;
-  label: string;
-  colorToken: ColorToken;
-  iconName: string | null;
-  nodeOrder: number;
-  isFinal: boolean;
-  isDefault: boolean;
-}
-
 interface NewTaskInput {
   title: string;
   description: string;
   taskType: string;
-  scope: string;
+  nodes: EditableNode[];
   dueAt: number | null;
   viewMode: 'grid' | 'table';
   scoreEnabled: boolean;
@@ -231,31 +218,52 @@ function CreateTaskModal({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [taskType, setTaskType] = useState('custom');
-  const [scope, setScope] = useState('class');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [scoreEnabled, setScoreEnabled] = useState(false);
   const [noteEnabled, setNoteEnabled] = useState(false);
+  const [nodes, setNodes] = useState<EditableNode[]>(() =>
+    DEFAULT_NODE_TEMPLATES.map((n, i) => ({
+      nodeKey: n.nodeKey,
+      label: n.label,
+      colorToken: n.colorToken as ColorToken,
+      iconName: n.iconName,
+      nodeOrder: i,
+      isFinal: n.isFinal,
+      isDefault: n.isDefault,
+    })),
+  );
   const [saving, setSaving] = useState(false);
 
   const reset = (): void => {
     setTitle('');
     setDescription('');
     setTaskType('custom');
-    setScope('class');
     setViewMode('grid');
     setScoreEnabled(false);
     setNoteEnabled(false);
+    setNodes(
+      DEFAULT_NODE_TEMPLATES.map((n, i) => ({
+        nodeKey: n.nodeKey,
+        label: n.label,
+        colorToken: n.colorToken as ColorToken,
+        iconName: n.iconName,
+        nodeOrder: i,
+        isFinal: n.isFinal,
+        isDefault: n.isDefault,
+      })),
+    );
   };
 
   const submit = async (): Promise<void> => {
     if (!title.trim()) return;
+    if (nodes.length < TASK_NODE_MIN || nodes.length > TASK_NODE_MAX) return;
     setSaving(true);
     try {
       await onSubmit({
         title: title.trim(),
         description,
         taskType,
-        scope,
+        nodes,
         dueAt: null,
         viewMode,
         scoreEnabled,
@@ -280,7 +288,11 @@ function CreateTaskModal({
           <Button variant="secondary" onClick={onClose}>
             取消
           </Button>
-          <Button onClick={() => void submit()} loading={saving} disabled={!title.trim()}>
+          <Button
+            onClick={() => void submit()}
+            loading={saving}
+            disabled={!title.trim() || nodes.length < TASK_NODE_MIN || nodes.length > TASK_NODE_MAX}
+          >
             创建
           </Button>
         </>
@@ -297,27 +309,21 @@ function CreateTaskModal({
             onChange={(e) => setTaskType(e.target.value)}
           />
           <Select
-            label="作用范围"
+            label="默认视图"
             options={[
-              { value: 'class', label: '班级' },
-              { value: 'grade', label: '年级' },
-              { value: 'school', label: '全校' },
+              { value: 'grid', label: '网格视图' },
+              { value: 'table', label: '表格视图' },
             ]}
-            value={scope}
-            onChange={(e) => setScope(e.target.value)}
+            value={viewMode}
+            onChange={(e) => setViewMode(e.target.value as 'grid' | 'table')}
           />
         </div>
-        <Select
-          label="默认视图"
-          options={[
-            { value: 'grid', label: '网格视图' },
-            { value: 'table', label: '表格视图' },
-          ]}
-          value={viewMode}
-          onChange={(e) => setViewMode(e.target.value as 'grid' | 'table')}
-        />
+        <div className="rounded-lg border border-surface-border bg-surface-muted px-3 py-2 text-sm text-ink-soft">
+          作用范围固定为「本班级」，班级内创建的任务仅对本班学生生效，无法选择年级或全校。
+        </div>
         <Toggle label="启用评分" checked={scoreEnabled} onChange={setScoreEnabled} />
         <Toggle label="启用备注" checked={noteEnabled} onChange={setNoteEnabled} />
+        <StatusNodeEditor nodes={nodes} onChange={setNodes} />
       </div>
     </Modal>
   );
@@ -347,7 +353,7 @@ function NodeEditorModal({
           id: n.id,
           nodeKey: n.nodeKey,
           label: n.label,
-          colorToken: n.colorToken,
+          colorToken: n.colorToken as ColorToken,
           iconName: n.iconName,
           nodeOrder: n.nodeOrder,
           isFinal: n.isFinal,
@@ -357,34 +363,6 @@ function NodeEditorModal({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, taskId]);
-
-  const patch = (idx: number, patch: Partial<EditableNode>): void => {
-    setItems((prev) => prev.map((n, i) => (i === idx ? { ...n, ...patch } : n)));
-  };
-
-  const addNode = (): void => {
-    if (items.length >= TASK_NODE_MAX) return;
-    setItems((prev) => [
-      ...prev,
-      {
-        id: undefined,
-        nodeKey: `node-${uuidV4().slice(0, 4)}`,
-        label: '新节点',
-        colorToken: (COLOR_TOKENS[prev.length % COLOR_TOKENS.length] as ColorToken) ?? 'blue',
-        iconName: 'circle',
-        nodeOrder: prev.length,
-        isFinal: false,
-        isDefault: false,
-      },
-    ]);
-  };
-
-  const removeNode = async (idx: number): Promise<void> => {
-    const target = items[idx];
-    if (items.length <= TASK_NODE_MIN) return;
-    if (target.id) await onDeleteNode(target.id);
-    setItems((prev) => prev.filter((_, i) => i !== idx).map((n, i) => ({ ...n, nodeOrder: i })));
-  };
 
   const save = async (): Promise<void> => {
     if (items.length < TASK_NODE_MIN || items.length > TASK_NODE_MAX) return;
@@ -410,48 +388,13 @@ function NodeEditorModal({
         </>
       }
     >
-      <div className="space-y-3">
-        {items.map((n, idx) => (
-          <div key={n.id ?? n.nodeKey} className="flex flex-wrap items-end gap-3 rounded-lg border border-surface-border p-3">
-            <Input
-              label="节点名称"
-              value={n.label}
-              onChange={(e) => patch(idx, { label: e.target.value })}
-              className="w-40"
-            />
-            <Select
-              label="配色"
-              options={COLOR_TOKENS.map((c) => ({ value: c, label: COLOR_TOKEN_LABEL[c] ?? c }))}
-              value={n.colorToken}
-              onChange={(e) => patch(idx, { colorToken: e.target.value as ColorToken })}
-              className="w-36"
-            />
-            <Select
-              label="图标"
-              options={NODE_ICON_OPTIONS}
-              value={n.iconName ?? 'circle'}
-              onChange={(e) => patch(idx, { iconName: e.target.value })}
-              className="w-36"
-            />
-            <Toggle
-              label="终态"
-              checked={n.isFinal}
-              onChange={(v) => patch(idx, { isFinal: v })}
-            />
-            <Button
-              variant="danger"
-              size="md"
-              disabled={items.length <= TASK_NODE_MIN}
-              onClick={() => void removeNode(idx)}
-            >
-              删除
-            </Button>
-          </div>
-        ))}
-        <Button variant="secondary" onClick={addNode} disabled={items.length >= TASK_NODE_MAX}>
-          添加节点
-        </Button>
-      </div>
+      <StatusNodeEditor
+        nodes={items}
+        onChange={setItems}
+        onRemoveNode={async (n) => {
+          if (n.id) await onDeleteNode(n.id);
+        }}
+      />
     </Modal>
   );
 }

@@ -21,6 +21,19 @@ React 18 + TypeScript 5 + Vite 5 + Tauri v2（桌面壳）+ Tailwind v3.4 + Zust
 - **SQLite 迁移坑（已踩）**：本项目捆绑的 SQLite 版本 < 3.35，**不支持 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`**（ALTER 无 IF NOT EXISTS 语法，仅 CREATE TABLE/INDEX 有）。`run_migrations`（src-tauri/src/db/mod.rs）对 `ADD COLUMN` 语句做幂等保护：先 `PRAGMA table_info` 查列是否存在，存在则跳过、否则执行普通 `ALTER TABLE ... ADD COLUMN`。**今后写迁移，给 students 等旧表加列一律写普通 `ALTER TABLE x ADD COLUMN y TYPE`（不要写 IF NOT EXISTS），幂等交给 Rust 侧**；`CREATE TABLE/INDEX IF NOT EXISTS` 仍可用。
 - 迁移只经 `run_migrations`（init_db 调用），`tauri-plugin-sql` 在 app.rs 中**未注册** migrations，勿混淆。
 
+## SQLite 表重建（改 CHECK 约束）铁律（2026-09-08 踩坑，代价：pending_queue 永久丢表）
+SQLite 不支持 `ALTER TABLE ... ALTER COLUMN` 改 CHECK，只能「改名旧表 → 建新表 → 拷数据 → 删旧表」。这条路上有三个坑，全部踩过：
+1. **`RENAME TO` 会连带改写其他表的 `REFERENCES` 子句**。`sync_log` 有 `FOREIGN KEY (queue_id) REFERENCES pending_queue(id)`，把 `pending_queue` 改名成 `_old` 后，`sync_log` 的外键被自动改写指向 `_old`；`_old` 一 DROP，外键就悬空，之后所有 `INSERT INTO sync_log` 报 `no such table: main.pending_queue_old`。
+   - 控制这个行为的开关是 **`PRAGMA foreign_keys`（不是 `legacy_alter_table`）**。官方语义：外键启用时 RENAME 会改写 REFERENCES 子句。`legacy_alter_table` 只影响**触发器体与视图定义**里的表名改写。这点我第一版方案搞错了，实测才纠正。
+   - 正确做法：结构手术前 `PRAGMA foreign_keys = OFF` + `PRAGMA legacy_alter_table = ON`，做完两个都复位（`foreign_keys = ON`）。
+2. **PRAGMA 是连接级设置，连接池会失效**。`DB_MAX_CONNECTIONS = 4`，在 `&DbPool` 上执行 PRAGMA、后续 ALTER 可能落到另一条连接。**整个手术例程必须 `pool.acquire()` 取单一连接，全部语句跑在 `&mut *conn` 上**。且 Rust 无 `finally`，每一处 `?` 提前返回都要保证 PRAGMA 已复位——否则连接带着 `foreign_keys = OFF` 回池复用，外键约束在应用余生静默失效。
+3. **建表 DDL 的表名必须是最终真名**。原 Bug 就是 DDL 里写 `CREATE TABLE pending_queue_new`，拷数据却写 `INSERT INTO pending_queue`（已被改名走），语句失败又被 `.ok()` 吞掉，第 4 步再 DROP 旧表 → 表永久消失。
+   - **禁止对结构手术类语句用 `.ok()` 吞错**；拷数据用**显式列名**，不用 `SELECT *`；例程收尾必须断言目标表存在，不存在就返回 `Err` 让启动期暴露。
+   - 修复例程写成幂等自愈式（`repair_queue_schema`，每次启动都跑）：表缺失时能从 `_new` / `_old` 残留改名恢复并抢救其中数据。注意 001 的 `CREATE TABLE IF NOT EXISTS` 会兜底建空表，所以经 `run_migrations` 的测试走不到「表已丢失」分支，验证该分支必须**直调修复例程**。
+
+## 文档同步约定（已脱节过一次）
+`src-tauri/migrations/001_init.sql` 头部声明「与 docs/02-ddl.sql 完全一致，任何修改必须两处同步」，但 002/003 的内容长期未同步进 docs（已于 2026-09-08 补齐 grades/classes/school_years/ux_classes_year 及 pending_queue CHECK）。**改迁移必须同步 docs/02-ddl.sql**，并保证 `sqlite3 :memory: < docs/02-ddl.sql` 整份可执行。建议后续加 CI 校验脚本比对两边规范化 DDL 文本。
+
 ## 布局 / 响应式约定
 - 全屏遮罩或居中卡片**避免用 `w-screen`**：一旦内容超高出现垂直滚动条，`w-screen`（100vw）会包含滚动条宽度，导致水平滚动条。改用 `w-full` 或 `min-w-full`，并给卡片加 `min-w-0`。
 - 表单控件（Input/Select/Textarea 包装器与本机元素）统一加 `min-w-0`，防止 `cols`/`size`/选项文本的内禀最小宽度撑开父容器。

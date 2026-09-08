@@ -37,6 +37,8 @@
 --    custom_tasks.broadcast_task_id  -> broadcast_tasks.id       (ON DELETE SET NULL)
 --    broadcast_receipts.broadcast_task_id -> broadcast_tasks.id  (ON DELETE CASCADE)
 --    sync_log.queue_id               -> pending_queue.id         (ON DELETE SET NULL)
+--    classes.grade_id                -> grades.id                (ON DELETE SET NULL, 迁移 002)
+--    classes.school_year_id          -> school_years.id          (无物理外键, 迁移 003, 应用层保证)
 --    注: task_records.node_id 与 custom_tasks.default_node_id 有意不建外键，
 --        避免与 task_status_nodes 形成循环依赖，由应用层保证一致性。
 -- =============================================================================
@@ -382,9 +384,12 @@ CREATE INDEX IF NOT EXISTS ix_receipt_task ON broadcast_receipts(broadcast_task_
 CREATE TABLE IF NOT EXISTS pending_queue (
     id               TEXT    NOT NULL PRIMARY KEY,
     op_type          TEXT    NOT NULL CHECK (op_type IN ('upsert','delete','ack','heartbeat','broadcast')),
+    -- 注意：grade / class 由迁移 002 引入，school_year 由迁移 003 引入；
+    --       此处必须与 src-tauri/migrations/001_init.sql 保持逐字一致，
+    --       漏掉任一取值都会让对应实体入队时报 CHECK 约束失败。
     entity_type      TEXT    NOT NULL CHECK (entity_type IN
                      ('student','checkin','custom_task','task_node','task_record',
-                      'broadcast_task','receipt','device')),
+                      'broadcast_task','receipt','device','grade','class','school_year')),
     entity_id        TEXT    NOT NULL,
     payload          TEXT    NOT NULL,                       -- JSON: 实体增量快照
     target_device_id TEXT,                                   -- 为空表示发给所有已知 master
@@ -507,3 +512,102 @@ VALUES
  ('00000000-0000-4000-8000-000000000008','queue_max_attempts','5','number','离线队列最大重试次数', 0, 0),
  ('00000000-0000-4000-8000-000000000009','ui_scale','1.25','number','大屏 UI 缩放', 0, 0),
  ('00000000-0000-4000-8000-00000000000a','theme','light','string','主题: light/dark/high-contrast', 0, 0);
+
+-- =============================================================================
+-- 15. 目录维度（迁移 002）—— 年级 / 班级 / 学生班级关联
+--     与 src-tauri/migrations/002_directory.sql 保持一致，任何修改必须两处同步。
+--     说明: 项目捆绑的 SQLite 较旧（< 3.35）不支持 `ADD COLUMN IF NOT EXISTS`，
+--           `ALTER TABLE ... ADD COLUMN` 的幂等由 Rust 侧 run_migrations 先查列存在来保证。
+-- =============================================================================
+
+-- 15.1 grades —— 年级（教务端统一维护，全校唯一）
+CREATE TABLE IF NOT EXISTS grades (
+    id          TEXT    NOT NULL PRIMARY KEY,                  -- UUID
+    grade_no    TEXT,                                          -- 年级编号，如 '3' / '2023'
+    grade_name  TEXT    NOT NULL,                              -- 展示名，如 '三年级'
+    sort_order  INTEGER NOT NULL DEFAULT 0,                    -- 排序（数字越小越靠前）
+    remark      TEXT,                                          -- 备注
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    deleted_at  INTEGER,
+    sync_state  TEXT    NOT NULL DEFAULT 'pending'
+                          CHECK (sync_state IN ('local','pending','synced','conflict')),
+    dirty       INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_grades_name
+    ON grades(grade_name) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS ix_grades_order ON grades(sort_order, grade_name);
+
+-- 15.2 classes —— 班级（归属某个年级；grade_no / grade_name 冗余存储便于免 join 聚合）
+CREATE TABLE IF NOT EXISTS classes (
+    id          TEXT    NOT NULL PRIMARY KEY,                  -- UUID
+    grade_id    TEXT,                                          -- 关联 grades.id（软删时置空）
+    grade_no    TEXT,                                          -- 冗余：年级编号
+    grade_name  TEXT,                                          -- 冗余：年级展示名
+    class_no    TEXT,                                          -- 班号，如 '2'
+    class_name  TEXT    NOT NULL,                              -- 展示名，如 '三年级二班'
+    head_teacher TEXT,                                         -- 班主任
+    sort_order  INTEGER NOT NULL DEFAULT 0,                    -- 班级排序
+    remark      TEXT,                                          -- 备注
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    deleted_at  INTEGER,
+    sync_state  TEXT    NOT NULL DEFAULT 'pending'
+                          CHECK (sync_state IN ('local','pending','synced','conflict')),
+    dirty       INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
+    FOREIGN KEY (grade_id) REFERENCES grades(id) ON DELETE SET NULL
+);
+-- 注意: 下面这条按 class_name 的唯一索引已在迁移 003 中被废弃（见 16.2），
+--       仅为还原历史演进过程而保留说明；新库执行完 16.2 后它不应存在。
+CREATE UNIQUE INDEX IF NOT EXISTS ux_classes_name
+    ON classes(class_name) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS ix_classes_grade ON classes(grade_id, sort_order, class_name);
+CREATE INDEX IF NOT EXISTS ix_classes_grade_name ON classes(grade_name, class_name);
+
+-- 15.3 students.class_id —— 关联 classes.id（可选；为空时回退用 grade/class_name 匹配）
+ALTER TABLE students ADD COLUMN class_id TEXT;
+CREATE INDEX IF NOT EXISTS ix_students_class_id
+    ON students(class_id) WHERE deleted_at IS NULL;
+
+-- =============================================================================
+-- 16. 学年 / 届维度（迁移 003）—— 班级年隔离
+--     与 src-tauri/migrations/003_school_year.sql 保持一致，任何修改必须两处同步。
+--     物理机房 / 设备永久不变（device_id 不变），学年只是时间维度：
+--     同一教室每学年的班级人员、班主任都不同，但旧数据必须保留。
+-- =============================================================================
+
+-- 16.1 school_years —— 学年目录（如 2027届 / 2028届）
+CREATE TABLE IF NOT EXISTS school_years (
+    id               TEXT    NOT NULL PRIMARY KEY,             -- UUID
+    school_year_no   TEXT,                                     -- 届号，如 '2027'
+    school_year_name TEXT    NOT NULL,                         -- 展示名，如 '2027届'
+    start_date       TEXT,                                     -- 开学日期 YYYY-MM-DD
+    end_date         TEXT,                                     -- 结束日期 YYYY-MM-DD
+    sort_order       INTEGER NOT NULL DEFAULT 0,               -- 排序（数字越小越靠前）
+    remark           TEXT,                                     -- 备注
+    created_at       INTEGER,                                  -- 创建时间（毫秒）
+    updated_at       INTEGER,                                  -- 更新时间（毫秒）
+    deleted_at       INTEGER,                                  -- 软删时间（毫秒）
+    sync_state       TEXT    NOT NULL DEFAULT 'pending'
+                          CHECK (sync_state IN ('local','pending','synced','conflict')),
+    dirty            INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_school_years_name
+    ON school_years(school_year_name) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS ix_school_years_order ON school_years(sort_order, school_year_name);
+
+-- 16.2 classes.school_year_id —— 班级年隔离
+--      班级真正身份 = (school_year_id, grade_id, class_no)；class_name 退为展示名。
+ALTER TABLE classes ADD COLUMN school_year_id TEXT;
+
+-- 新建年隔离唯一索引（部分索引，软删不计入）。
+CREATE UNIQUE INDEX IF NOT EXISTS ux_classes_year
+    ON classes(school_year_id, grade_id, class_no) WHERE deleted_at IS NULL;
+
+-- 删除旧的唯一索引（按 class_name）：与新索引语义冲突，
+-- 且年隔离后同名班级会跨学年重复出现，class_name 不再具备唯一性。
+DROP INDEX IF EXISTS ux_classes_name;
+
+-- 说明: 学年实体也要参与同步，故 pending_queue.entity_type 的 CHECK 必须包含
+--       'school_year'（见第 11 节）。历史上漏掉该取值会导致教务处新建学年时
+--       入队失败，并触发 Rust 侧的 pending_queue 重建路径。

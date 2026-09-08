@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { IconButton, resolveIcon } from '@/components/ui/IconButton';
+import { Plus, RefreshCw } from 'lucide-react';
 import { useBroadcastStore, summarizeReceipts } from '@/store/useBroadcastStore';
 import { useDeviceStore } from '@/store/useDeviceStore';
 import { useAppStore } from '@/store/useAppStore';
@@ -15,15 +14,8 @@ import { Badge } from '@/components/ui/Badge';
 import { Toggle } from '@/components/ui/Toggle';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SkeletonRows } from '@/components/ui/Skeleton';
-import {
-  TASK_TYPE_OPTIONS,
-  PRIORITY_OPTIONS,
-  COLOR_TOKENS,
-  COLOR_TOKEN_HEX,
-  COLOR_TOKEN_LABEL,
-  NODE_ICON_OPTIONS,
-  DEFAULT_NODE_TEMPLATES,
-} from '@/constants/status';
+import { StatusNodeEditor, type EditableNode } from '@/components/task/StatusNodeEditor';
+import { TASK_TYPE_OPTIONS, PRIORITY_OPTIONS, DEFAULT_NODE_TEMPLATES } from '@/constants/status';
 import { TASK_NODE_MIN, TASK_NODE_MAX } from '@/constants/app';
 import type { BroadcastPriority, BroadcastTargetType, ColorToken } from '@/types/enums';
 import type { BroadcastTask } from '@/types/broadcast';
@@ -34,7 +26,6 @@ import {
   type BroadcastTaskTemplate,
 } from '@/types/broadcast';
 import type { BroadcastReceipt } from '@/types/broadcast';
-import { uuidV4 } from '@/lib/crypto';
 
 /** 任务下发中心（教务处端）：创建广播任务 → 选择目标 → 下发 */
 export function BroadcastCenter(): JSX.Element {
@@ -177,16 +168,6 @@ export function BroadcastCenter(): JSX.Element {
 /* 子组件：新建广播任务弹窗                                                      */
 /* -------------------------------------------------------------------------- */
 
-interface EditableBroadcastNode {
-  nodeKey: string;
-  label: string;
-  colorToken: ColorToken;
-  iconName: string | null;
-  nodeOrder: number;
-  isFinal: boolean;
-  isDefault: boolean;
-}
-
 export interface CreatePayload {
   title: string;
   description: string;
@@ -199,132 +180,6 @@ export interface CreatePayload {
   targetType: BroadcastTargetType;
   targetValues: string[];
   nodes: BroadcastNodeTemplate[];
-}
-
-/** 节点配色色板：直接在选项中展示颜色 */
-function ColorSwatchPicker({
-  value,
-  onChange,
-}: {
-  value: ColorToken;
-  onChange: (color: ColorToken) => void;
-}): JSX.Element {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      {COLOR_TOKENS.map((token) => {
-        const hex = COLOR_TOKEN_HEX[token] ?? '#64748b';
-        const selected = value === token;
-        return (
-          <button
-            key={token}
-            type="button"
-            title={COLOR_TOKEN_LABEL[token] ?? token}
-            aria-label={`配色：${COLOR_TOKEN_LABEL[token] ?? token}`}
-            onClick={() => onChange(token as ColorToken)}
-            className={[
-              'h-7 w-7 min-h-7 shrink-0 aspect-square box-border rounded-full border-2 transition-transform',
-              selected ? 'scale-110 border-ink shadow-sm' : 'border-transparent hover:scale-105',
-            ].join(' ')}
-            style={{ backgroundColor: hex }}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-/** 节点图标选择器：直接在选项中展示图标 */
-function IconPicker({
-  value,
-  onChange,
-}: {
-  value: string | null;
-  onChange: (icon: string) => void;
-}): JSX.Element {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      {NODE_ICON_OPTIONS.map((opt) => {
-        const Icon = resolveIcon(opt.value);
-        const selected = value === opt.value || (value == null && opt.value === 'circle');
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            title={opt.label}
-            aria-label={`图标：${opt.label}`}
-            onClick={() => onChange(opt.value)}
-            className={[
-              'inline-flex h-9 w-9 min-h-9 items-center justify-center rounded-lg border transition-colors',
-              selected
-                ? 'border-brand-600 bg-brand-50 text-brand-700'
-                : 'border-surface-border bg-surface-raised text-ink-soft hover:bg-surface-muted hover:text-ink',
-            ].join(' ')}
-          >
-            <Icon className="h-4 w-4" />
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-/** 单条状态节点编辑卡：预览 + 名称 + 颜色/图标选项 + 终态 */
-function NodeEditorCard({
-  node,
-  canRemove,
-  onChange,
-  onRemove,
-}: {
-  node: EditableBroadcastNode;
-  canRemove: boolean;
-  onChange: (patch: Partial<EditableBroadcastNode>) => void;
-  onRemove: () => void;
-}): JSX.Element {
-  const Icon = resolveIcon(node.iconName);
-  const hex = COLOR_TOKEN_HEX[node.colorToken] ?? '#64748b';
-  return (
-    <div className="rounded-xl border border-surface-border bg-surface-raised p-4">
-      <div className="flex items-start gap-4">
-        <div
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full shadow-sm"
-          style={{ backgroundColor: hex }}
-          aria-label="节点预览"
-        >
-          <Icon className="h-6 w-6 text-white" />
-        </div>
-        <div className="min-w-0 flex-1 space-y-4">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="min-w-0 flex-1">
-              <Input
-                label="节点名称"
-                value={node.label}
-                onChange={(e) => onChange({ label: e.target.value })}
-              />
-            </div>
-            <div>
-              <Toggle label='终态' checked={node.isFinal} onChange={(v) => onChange({ isFinal: v })} className="py-0 px-0" />
-            </div>
-          </div>
-          <div className="space-y-1">
-            <span className="text-sm font-semibold text-ink-muted">配色</span>
-            <ColorSwatchPicker value={node.colorToken} onChange={(c) => onChange({ colorToken: c })} />
-          </div>
-          <div className="space-y-1">
-            <span className="text-sm font-semibold text-ink-muted">图标</span>
-            <IconPicker value={node.iconName} onChange={(i) => onChange({ iconName: i })} />
-          </div>
-        </div>
-        <IconButton
-          icon={<Trash2 className="h-5 w-5" />}
-          label="删除节点"
-          variant="ghost"
-          disabled={!canRemove}
-          onClick={onRemove}
-          className="text-ink-muted hover:text-red-600"
-        />
-      </div>
-    </div>
-  );
 }
 
 function CreateBroadcastModal({
@@ -348,7 +203,7 @@ function CreateBroadcastModal({
   const [targetType, setTargetType] = useState<BroadcastTargetType>('school');
   const [targetText, setTargetText] = useState('');
   const [targetDevices, setTargetDevices] = useState<string[]>([]);
-  const [nodes, setNodes] = useState<EditableBroadcastNode[]>(() =>
+  const [nodes, setNodes] = useState<EditableNode[]>(() =>
     DEFAULT_NODE_TEMPLATES.map((n, i) => ({
       nodeKey: n.nodeKey,
       label: n.label,
@@ -360,31 +215,6 @@ function CreateBroadcastModal({
     })),
   );
   const [saving, setSaving] = useState(false);
-
-  const patchNode = (idx: number, patch: Partial<EditableBroadcastNode>): void => {
-    setNodes((prev) => prev.map((n, i) => (i === idx ? { ...n, ...patch } : n)));
-  };
-
-  const addNode = (): void => {
-    if (nodes.length >= TASK_NODE_MAX) return;
-    setNodes((prev) => [
-      ...prev,
-      {
-        nodeKey: `node-${uuidV4().slice(0, 4)}`,
-        label: '新节点',
-        colorToken: (COLOR_TOKENS[prev.length % COLOR_TOKENS.length] as ColorToken) ?? 'blue',
-        iconName: 'circle',
-        nodeOrder: prev.length,
-        isFinal: false,
-        isDefault: false,
-      },
-    ]);
-  };
-
-  const removeNode = (idx: number): void => {
-    if (nodes.length <= TASK_NODE_MIN) return;
-    setNodes((prev) => prev.filter((_, i) => i !== idx).map((n, i) => ({ ...n, nodeOrder: i })));
-  };
 
   const resolveTargetValues = (): string[] => {
     if (targetType === 'school') return [];
@@ -543,23 +373,7 @@ function CreateBroadcastModal({
           <Toggle label="启用备注" checked={noteEnabled} onChange={setNoteEnabled} />
         </div>
 
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-base font-semibold text-ink">状态节点（{nodes.length} 个，2~4）</p>
-            <Button variant="secondary" size="md" onClick={addNode} disabled={nodes.length >= TASK_NODE_MAX}>
-              添加节点
-            </Button>
-          </div>
-          {nodes.map((n, idx) => (
-            <NodeEditorCard
-              key={n.nodeKey}
-              node={n}
-              canRemove={nodes.length > TASK_NODE_MIN}
-              onChange={(patch) => patchNode(idx, patch)}
-              onRemove={() => removeNode(idx)}
-            />
-          ))}
-        </div>
+        <StatusNodeEditor nodes={nodes} onChange={setNodes} />
       </div>
     </Modal>
   );

@@ -50,7 +50,7 @@ export function AppShell({
               aria-label="展开导航"
               aria-expanded={navOpen}
               onClick={() => setNavOpen((v) => !v)}
-              className="group fixed bottom-6 left-4 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-surface-raised/90 text-ink-soft shadow-soft backdrop-blur-sm transition-[transform,box-shadow] hover:scale-105 hover:shadow-md active:scale-95 border border-surface-border"
+              className="group absolute bottom-2 left-4 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-surface-raised/90 text-ink-soft shadow-soft backdrop-blur-sm transition-[transform,box-shadow] hover:scale-105 hover:shadow-md active:scale-95 border border-surface-border"
             >
               <Menu className="h-5 w-5 transition-transform group-hover:rotate-3" aria-hidden />
             </button>

@@ -13,13 +13,14 @@ use crate::error::AppResult;
 use crate::state::AppState;
 use crate::sync::outbox;
 
-/// 班级列表（可按 grade_id 过滤；空表示全部）。
+/// 班级列表（可按 grade_id / school_year_id 过滤；空表示全部）。
 #[tauri::command]
 pub async fn class_list(
     state: State<'_, Arc<AppState>>,
     grade_id: Option<String>,
+    school_year_id: Option<String>,
 ) -> AppResult<Vec<Class>> {
-    class_repo::list(&state.pool, grade_id.as_deref()).await
+    class_repo::list(&state.pool, grade_id.as_deref(), school_year_id.as_deref()).await
 }
 
 /// 新增或修改班级，并写入待发队列。

@@ -363,6 +363,8 @@ pub struct Class {
     pub id: String,
     /// 关联 grades.id（软删时置空）。
     pub grade_id: Option<String>,
+    /// 关联 school_years.id（年隔离维度；为空表示未归入具体学年）。
+    pub school_year_id: Option<String>,
     /// 冗余：年级编号。
     pub grade_no: Option<String>,
     /// 冗余：年级展示名。
@@ -374,6 +376,42 @@ pub struct Class {
     /// 班主任。
     pub head_teacher: Option<String>,
     /// 班级排序。
+    pub sort_order: i64,
+    /// 备注。
+    pub remark: Option<String>,
+    /// 创建时间（毫秒）。
+    pub created_at: i64,
+    /// 更新时间（毫秒）。
+    pub updated_at: i64,
+    /// 软删时间（毫秒）。
+    pub deleted_at: Option<i64>,
+    /// 同步状态。
+    pub sync_state: String,
+    /// 是否待推送。
+    pub dirty: bool,
+}
+
+/// 学年 / 届（`school_years`）。
+///
+/// 物理机房 / 设备永久不变（device_id 不变），学年只是时间维度：
+/// 同一教室每学年的班级人员、班主任都不同，但旧数据必须保留。
+/// 班级真正身份 = (school_year_id, grade_id, class_no)，class_name 退为展示名。
+/// 教务端统一维护，经离线队列同步到班级端（entity_type = 'school_year'）。
+/// 前端按 `Partial<SchoolYear>` 提交，见 `Grade` 说明。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SchoolYear {
+    /// 主键 UUID。
+    pub id: String,
+    /// 届号，如 '2027'。
+    pub school_year_no: String,
+    /// 展示名，如 '2027届'。
+    pub school_year_name: String,
+    /// 开学日期 `YYYY-MM-DD`。
+    pub start_date: Option<String>,
+    /// 结束日期 `YYYY-MM-DD`。
+    pub end_date: Option<String>,
+    /// 排序（数字越小越靠前）。
     pub sort_order: i64,
     /// 备注。
     pub remark: Option<String>,

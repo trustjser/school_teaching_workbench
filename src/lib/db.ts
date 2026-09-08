@@ -12,6 +12,7 @@ import type {
   Grade,
   OfflinePackage,
   PendingQueueItem,
+  SchoolYear,
   Student,
   SyncLogEntry,
   TaskRecord,
@@ -63,6 +64,10 @@ export interface CompleteSetupArgs {
   className: string | null;
   /** 班级端绑定的班级目录 id（教务端目录消费主键） */
   classId?: string | null;
+  /** 当前学年 id（班级端按年隔离消费） */
+  schoolYearId?: string | null;
+  /** 班级端当前绑定的学年班级 id（跨年只切绑定、不重装） */
+  boundClassId?: string | null;
   schoolName?: string | null;
   /** Base64 共享密钥；为空表示由 Rust 侧生成 */
   secret: string | null;
@@ -75,6 +80,8 @@ export async function settingsCompleteSetup(args: CompleteSetupArgs): Promise<vo
     grade: args.grade,
     className: args.className,
     classId: args.classId ?? null,
+    schoolYearId: args.schoolYearId ?? null,
+    boundClassId: args.boundClassId ?? null,
     schoolName: args.schoolName ?? null,
     secret: args.secret,
   });
@@ -115,6 +122,8 @@ export function toRuntimeSettings(list: AppSetting[]): AppRuntimeSettings {
     grade: map.grade || null,
     className: map.class_name || null,
     classId: map.class_id || null,
+    schoolYearId: map.school_year_id || null,
+    boundClassId: map.bound_class_id || map.class_id || null,
     schoolName: map.school_name || null,
     apiPort: num('api_port', DEFAULT_SETTINGS.apiPort),
     mdnsServiceType: map.mdns_service_type || DEFAULT_SETTINGS.mdnsServiceType,
@@ -199,8 +208,14 @@ export async function gradeDelete(id: string): Promise<void> {
   await invokeCmd<void>('grade_delete', { id });
 }
 
-export async function classList(gradeId?: string | null): Promise<Class[]> {
-  return invokeCmd<Class[]>('class_list', { gradeId: gradeId ?? null });
+export async function classList(
+  gradeId?: string | null,
+  schoolYearId?: string | null,
+): Promise<Class[]> {
+  return invokeCmd<Class[]>('class_list', {
+    gradeId: gradeId ?? null,
+    schoolYearId: schoolYearId ?? null,
+  });
 }
 
 export async function classUpsert(klass: Partial<Class> & { className: string }): Promise<Class> {
@@ -209,6 +224,24 @@ export async function classUpsert(klass: Partial<Class> & { className: string })
 
 export async function classDelete(id: string): Promise<void> {
   await invokeCmd<void>('class_delete', { id });
+}
+
+/* -------------------------------------------------------------------------- */
+/* school year（学年 / 届）                                                      */
+/* -------------------------------------------------------------------------- */
+
+export async function schoolYearList(): Promise<SchoolYear[]> {
+  return invokeCmd<SchoolYear[]>('school_year_list');
+}
+
+export async function schoolYearUpsert(
+  schoolYear: Partial<SchoolYear> & { schoolYearName: string },
+): Promise<SchoolYear> {
+  return invokeCmd<SchoolYear>('school_year_upsert', { schoolYear });
+}
+
+export async function schoolYearDelete(id: string): Promise<void> {
+  await invokeCmd<void>('school_year_delete', { id });
 }
 
 /* -------------------------------------------------------------------------- */

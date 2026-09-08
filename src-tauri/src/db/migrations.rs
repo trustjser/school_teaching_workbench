@@ -11,6 +11,9 @@ pub const INIT_SQL: &str = include_str!("../../migrations/001_init.sql");
 /// 目录（年级 / 班级）迁移 SQL 原文（编译期内嵌）。
 pub const DIRECTORY_SQL: &str = include_str!("../../migrations/002_directory.sql");
 
+/// 学年 / 届维度迁移 SQL 原文（编译期内嵌）。
+pub const SCHOOL_YEAR_SQL: &str = include_str!("../../migrations/003_school_year.sql");
+
 /// 迁移版本号。
 pub const INIT_VERSION: i64 = 1;
 
@@ -90,11 +93,19 @@ pub fn directory_statements() -> &'static [String] {
     STMTS.as_slice()
 }
 
-/// 返回全部迁移语句（001 初始化 + 002 目录），供 `run_migrations` 与
+/// 返回学年 / 届维度迁移语句数组。
+pub fn school_year_statements() -> &'static [String] {
+    use once_cell::sync::Lazy;
+    static STMTS: Lazy<Vec<String>> = Lazy::new(|| split_sql(SCHOOL_YEAR_SQL));
+    STMTS.as_slice()
+}
+
+/// 返回全部迁移语句（001 初始化 + 002 目录 + 003 学年），供 `run_migrations` 与
 /// `tauri_migrations` 共用，版本号连续递增。
 pub fn all_statements() -> Vec<String> {
     let mut out = split_sql(INIT_SQL);
     out.extend(split_sql(DIRECTORY_SQL));
+    out.extend(split_sql(SCHOOL_YEAR_SQL));
     out
 }
 

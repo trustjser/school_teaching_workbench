@@ -401,7 +401,7 @@ CREATE TABLE IF NOT EXISTS pending_queue (
     op_type          TEXT    NOT NULL CHECK (op_type IN ('upsert','delete','ack','heartbeat','broadcast')),
     entity_type      TEXT    NOT NULL CHECK (entity_type IN
                      ('student','checkin','custom_task','task_node','task_record',
-                      'broadcast_task','receipt','device','grade','class')),
+                      'broadcast_task','receipt','device','grade','class','school_year')),
     entity_id        TEXT    NOT NULL,
     payload          TEXT    NOT NULL,                       -- JSON: 实体增量快照
     target_device_id TEXT,                                   -- 为空表示发给所有已知 master

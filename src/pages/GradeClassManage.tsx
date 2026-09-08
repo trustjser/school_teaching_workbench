@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Pencil, Plus, Trash2, Users } from 'lucide-react';
+import { CalendarPlus, Pencil, Plus, Trash2, Users } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -12,7 +13,7 @@ import { StudentEditDrawer } from '@/components/student/StudentEditDrawer';
 import { StudentImportDialog } from '@/components/student/StudentImportDialog';
 import { useDirectoryStore } from '@/store/useDirectoryStore';
 import { useStudentStore } from '@/store/useStudentStore';
-import type { Class, Student } from '@/types/models';
+import type { Class, SchoolYear, Student } from '@/types/models';
 
 interface GradeDraft {
   id?: string;
@@ -29,41 +30,77 @@ interface ClassDraft {
   headTeacher: string;
   sortOrder: string;
   remark: string;
+  /** 归入的学年（年隔离维度） */
+  schoolYearId?: string | null;
+}
+
+interface SchoolYearDraft {
+  id?: string;
+  schoolYearName: string;
+  schoolYearNo: string;
+  startDate: string;
+  endDate: string;
+  sortOrder: string;
+  remark: string;
 }
 
 const EMPTY_GRADE: GradeDraft = { gradeName: '', gradeNo: '', sortOrder: '0', remark: '' };
-const EMPTY_CLASS: ClassDraft = { className: '', classNo: '', headTeacher: '', sortOrder: '0', remark: '' };
+const EMPTY_CLASS: ClassDraft = {
+  className: '',
+  classNo: '',
+  headTeacher: '',
+  sortOrder: '0',
+  remark: '',
+  schoolYearId: null,
+};
+const EMPTY_YEAR: SchoolYearDraft = {
+  schoolYearName: '',
+  schoolYearNo: '',
+  startDate: '',
+  endDate: '',
+  sortOrder: '0',
+  remark: '',
+};
 
 /**
  * 年级 / 班级目录管理（教务处端）。
  *
- * 教务端在此统一维护「年级 → 班级」结构，并为每个班级维护学生名单；
- * 班级端通过绑定的 classId 消费对应班级的名册。目录变更经离线队列同步到班级端。
+ * 教务端在此统一维护「学年 → 年级 → 班级」结构，并为每个班级维护学生名单；
+ * 班级端通过绑定的 schoolYearId + classId 消费对应学年班级的名册。目录变更经
+ * 离线队列同步到班级端。学年是时间维度：同一教室每学年的班级人员、班主任不同，
+ * 但旧数据保留（班级真正身份 = (school_year_id, grade_id, class_no)）。
  */
 export function GradeClassManage(): JSX.Element {
   const {
     grades,
     classes,
+    schoolYears,
     gradesLoading,
     classesLoading,
     selectedGradeId,
     selectedClassId,
+    selectedSchoolYearId,
     loadGrades,
     loadClasses,
+    loadSchoolYears,
     selectGrade,
     selectClass,
+    selectSchoolYear,
     upsertGrade,
     removeGrade,
     upsertClass,
     removeClass,
+    upsertSchoolYear,
+    removeSchoolYear,
   } = useDirectoryStore();
 
   const loadStudents = useStudentStore((s) => s.load);
 
   const [gradeDraft, setGradeDraft] = useState<GradeDraft | null>(null);
   const [classDraft, setClassDraft] = useState<ClassDraft | null>(null);
+  const [yearDraft, setYearDraft] = useState<SchoolYearDraft | null>(null);
   const [pendingDelete, setPendingDelete] = useState<
-    { kind: 'grade' | 'class'; id: string; name: string } | null
+    { kind: 'grade' | 'class' | 'year'; id: string; name: string } | null
   >(null);
 
   const [editTarget, setEditTarget] = useState<Student | null>(null);
@@ -71,7 +108,8 @@ export function GradeClassManage(): JSX.Element {
 
   useEffect(() => {
     void loadGrades();
-  }, [loadGrades]);
+    void loadSchoolYears();
+  }, [loadGrades, loadSchoolYears]);
 
   useEffect(() => {
     if (selectedGradeId) void loadClasses(selectedGradeId);
@@ -79,6 +117,7 @@ export function GradeClassManage(): JSX.Element {
 
   const selectedGrade = grades.find((g) => g.id === selectedGradeId) ?? null;
   const selectedClass = classes.find((c) => c.id === selectedClassId) ?? null;
+  const selectedYear = schoolYears.find((y) => y.id === selectedSchoolYearId) ?? null;
 
   // 选中班级后联动加载该班名册
   useEffect(() => {
@@ -118,6 +157,7 @@ export function GradeClassManage(): JSX.Element {
       headTeacher: klass?.headTeacher ?? '',
       sortOrder: klass ? String(klass.sortOrder) : '0',
       remark: klass?.remark ?? '',
+      schoolYearId: klass?.schoolYearId ?? selectedSchoolYearId ?? null,
     });
   };
 
@@ -129,6 +169,7 @@ export function GradeClassManage(): JSX.Element {
       gradeId: selectedGradeId,
       gradeNo: selectedGrade?.gradeNo || null,
       gradeName: selectedGrade?.gradeName || null,
+      schoolYearId: classDraft.schoolYearId ?? null,
       className: classDraft.className.trim(),
       classNo: classDraft.classNo.trim() || null,
       headTeacher: classDraft.headTeacher.trim() || null,
@@ -138,10 +179,38 @@ export function GradeClassManage(): JSX.Element {
     setClassDraft(null);
   };
 
+  const openYearEdit = (year?: SchoolYear): void => {
+    setYearDraft({
+      id: year?.id,
+      schoolYearName: year?.schoolYearName ?? '',
+      schoolYearNo: year?.schoolYearNo ?? '',
+      startDate: year?.startDate ?? '',
+      endDate: year?.endDate ?? '',
+      sortOrder: year ? String(year.sortOrder) : '0',
+      remark: year?.remark ?? '',
+    });
+  };
+
+  const saveYear = async (): Promise<void> => {
+    if (!yearDraft) return;
+    if (!yearDraft.schoolYearName.trim()) return;
+    await upsertSchoolYear({
+      id: yearDraft.id,
+      schoolYearName: yearDraft.schoolYearName.trim(),
+      schoolYearNo: yearDraft.schoolYearNo.trim(),
+      startDate: yearDraft.startDate.trim() || null,
+      endDate: yearDraft.endDate.trim() || null,
+      sortOrder: Number.parseInt(yearDraft.sortOrder, 10) || 0,
+      remark: yearDraft.remark.trim() || null,
+    });
+    setYearDraft(null);
+  };
+
   const confirmDelete = async (): Promise<void> => {
     if (!pendingDelete) return;
     if (pendingDelete.kind === 'grade') await removeGrade(pendingDelete.id);
-    else await removeClass(pendingDelete.id);
+    else if (pendingDelete.kind === 'class') await removeClass(pendingDelete.id);
+    else await removeSchoolYear(pendingDelete.id);
     setPendingDelete(null);
   };
 
@@ -157,6 +226,51 @@ export function GradeClassManage(): JSX.Element {
         >
           新增年级
         </Button>
+      </div>
+
+      {/* 学年维度选择器 */}
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-surface-border bg-surface-muted p-3">
+        <span className="text-sm font-semibold text-ink">学年</span>
+        <div className="min-w-[12rem] flex-1">
+          <Select
+            label=""
+            options={schoolYears.map((y) => ({ value: y.id, label: y.schoolYearName }))}
+            value={selectedSchoolYearId ?? ''}
+            onChange={(e) => selectSchoolYear(e.target.value || null)}
+            placeholder="— 全部学年 —"
+          />
+        </div>
+        <Button
+          variant="secondary"
+          size="md"
+          icon={<CalendarPlus className="h-4 w-4" />}
+          onClick={() => openYearEdit()}
+          disabled={!!yearDraft}
+        >
+          新增学年
+        </Button>
+        {selectedYear && (
+          <Button
+            variant="ghost"
+            size="md"
+            icon={<Pencil className="h-4 w-4" />}
+            onClick={() => openYearEdit(selectedYear)}
+          >
+            编辑
+          </Button>
+        )}
+        {selectedYear && (
+          <Button
+            variant="ghost"
+            size="md"
+            icon={<Trash2 className="h-4 w-4" />}
+            onClick={() =>
+              setPendingDelete({ kind: 'year', id: selectedYear.id, name: selectedYear.schoolYearName })
+            }
+          >
+            删除
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[20rem_1fr]">
@@ -225,6 +339,11 @@ export function GradeClassManage(): JSX.Element {
                 <div className="mb-3 flex items-center justify-between">
                   <p className="text-xl font-bold text-ink">
                     {selectedGrade.gradeName} · 班级
+                    {selectedYear && (
+                      <span className="ml-2 text-base font-normal text-ink-muted">
+                        （{selectedYear.schoolYearName}）
+                      </span>
+                    )}
                   </p>
                   <Button
                     variant="secondary"
@@ -398,6 +517,13 @@ export function GradeClassManage(): JSX.Element {
                 inputMode="numeric"
               />
             </div>
+            <Select
+              label="所属学年"
+              options={schoolYears.map((y) => ({ value: y.id, label: y.schoolYearName }))}
+              value={classDraft.schoolYearId ?? ''}
+              onChange={(e) => setClassDraft({ ...classDraft, schoolYearId: e.target.value || null })}
+              placeholder="— 未指定学年 —"
+            />
             <Input
               label="班主任"
               value={classDraft.headTeacher}
@@ -414,16 +540,85 @@ export function GradeClassManage(): JSX.Element {
         )}
       </Modal>
 
+      {/* 学年编辑弹窗 */}
+      <Modal
+        open={yearDraft !== null}
+        onClose={() => setYearDraft(null)}
+        title={yearDraft?.id ? '编辑学年' : '新增学年'}
+        widthClass="max-w-lg"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setYearDraft(null)}>
+              取消
+            </Button>
+            <Button onClick={saveYear} disabled={!yearDraft?.schoolYearName.trim()}>
+              保存
+            </Button>
+          </>
+        }
+      >
+        {yearDraft && (
+          <div className="space-y-4">
+            <Input
+              label="学年名称"
+              value={yearDraft.schoolYearName}
+              onChange={(e) => setYearDraft({ ...yearDraft, schoolYearName: e.target.value })}
+              placeholder="如：2027届"
+            />
+            <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-3">
+              <Input
+                label="届号"
+                value={yearDraft.schoolYearNo}
+                onChange={(e) => setYearDraft({ ...yearDraft, schoolYearNo: e.target.value })}
+                placeholder="如：2027"
+              />
+              <Input
+                label="开学日期"
+                value={yearDraft.startDate}
+                onChange={(e) => setYearDraft({ ...yearDraft, startDate: e.target.value })}
+                placeholder="YYYY-MM-DD"
+              />
+              <Input
+                label="结束日期"
+                value={yearDraft.endDate}
+                onChange={(e) => setYearDraft({ ...yearDraft, endDate: e.target.value })}
+                placeholder="YYYY-MM-DD"
+              />
+            </div>
+            <Input
+              label="排序"
+              value={yearDraft.sortOrder}
+              onChange={(e) => setYearDraft({ ...yearDraft, sortOrder: e.target.value })}
+              inputMode="numeric"
+            />
+            <Textarea
+              label="备注"
+              value={yearDraft.remark}
+              onChange={(e) => setYearDraft({ ...yearDraft, remark: e.target.value })}
+              rows={3}
+            />
+          </div>
+        )}
+      </Modal>
+
       {/* 删除确认 */}
       <ConfirmDialog
         open={pendingDelete !== null}
         danger
-        title={pendingDelete?.kind === 'grade' ? '删除年级' : '删除班级'}
+        title={
+          pendingDelete?.kind === 'grade'
+            ? '删除年级'
+            : pendingDelete?.kind === 'class'
+              ? '删除班级'
+              : '删除学年'
+        }
         message={`确定删除「${pendingDelete?.name}」吗？`}
         detail={
           pendingDelete?.kind === 'grade'
             ? '其下班级的年级关联将置空，但班级与学生记录保留。'
-            : '该班级的学生名单保留，仅解除与班级的关联。'
+            : pendingDelete?.kind === 'class'
+              ? '该班级的学生名单保留，仅解除与班级的关联。'
+              : '该学年的班级 school_year_id 保留，历史数据不丢失；仅解除「当前学年」语义。'
         }
         confirmText="删除"
         onCancel={() => setPendingDelete(null)}
