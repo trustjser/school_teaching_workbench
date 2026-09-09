@@ -51,6 +51,15 @@ pub async fn task_node_list(state: State<'_, Arc<AppState>>, task_id: String) ->
 #[tauri::command]
 pub async fn task_record_upsert(state: State<'_, Arc<AppState>>, record: TaskRecord) -> AppResult<TaskRecord> {
     let saved = task_repo::record_upsert(&state.pool, record).await?;
+    // 兼容旧版本已接收的广播任务：旧逻辑只在班级端生成本地任务，
+    // 没有把任务定义和状态节点回传教务端。更新记录时补发任务快照，
+    // 这样教务端的完成统计可以关联到对应任务。
+    if let Some(task) = task_repo::get(&state.pool, &saved.task_id).await? {
+        if task.source == "broadcast" {
+            let nodes = task_repo::node_list(&state.pool, &saved.task_id).await?;
+            crate::commands::broadcast_cmd::enqueue_task_snapshot(&state.pool, &task, &nodes).await?;
+        }
+    }
     outbox::enqueue_entity(&state.pool, "task_record", &saved.id, "upsert", &saved, None, None).await?;
     Ok(saved)
 }
@@ -75,13 +84,17 @@ pub async fn task_completion_stats(state: State<'_, Arc<AppState>>, since_ts: Op
         "SELECT
             t.id AS task_id,
             t.title AS title,
+            t.class_name AS class_name,
+            t.grade AS grade,
             (SELECT COUNT(*) FROM task_records tr WHERE tr.task_id=t.id AND tr.deleted_at IS NULL) AS total,
             (SELECT COUNT(*) FROM task_records tr JOIN task_status_nodes n ON n.id=tr.node_id
-                WHERE tr.task_id=t.id AND tr.deleted_at IS NULL AND n.is_final=1) AS done,
+                WHERE tr.task_id=t.id AND tr.deleted_at IS NULL AND n.is_final=1) AS final_count,
             CASE WHEN (SELECT COUNT(*) FROM task_records tr WHERE tr.task_id=t.id AND tr.deleted_at IS NULL)=0 THEN 0.0 ELSE
                 CAST((SELECT COUNT(*) FROM task_records tr JOIN task_status_nodes n ON n.id=tr.node_id
                     WHERE tr.task_id=t.id AND tr.deleted_at IS NULL AND n.is_final=1) AS REAL)
-                / (SELECT COUNT(*) FROM task_records tr WHERE tr.task_id=t.id AND tr.deleted_at IS NULL) END AS completion_rate
+                / (SELECT COUNT(*) FROM task_records tr WHERE tr.task_id=t.id AND tr.deleted_at IS NULL) END AS completion_rate,
+            (SELECT AVG(tr.score) FROM task_records tr
+                WHERE tr.task_id=t.id AND tr.deleted_at IS NULL AND tr.score IS NOT NULL) AS avg_score
          FROM custom_tasks t
          WHERE t.deleted_at IS NULL AND (? IS NULL OR t.updated_at >= ?)
          ORDER BY t.created_at DESC",

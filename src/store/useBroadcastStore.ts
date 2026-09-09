@@ -9,6 +9,7 @@ import {
   broadcastSend,
 } from '@/lib/db';
 import { useAppStore } from './useAppStore';
+import { useTaskStore } from './useTaskStore';
 
 interface BroadcastState {
   /** 教务处端：已下发任务 */
@@ -64,6 +65,12 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
     try {
       const list = await broadcastList('in');
       set({ inbox: list });
+      // 接收链路异常或旧版本已入库但未生成待办时，刷新收件箱做一次幂等补偿。
+      // 后端按 broadcast_task_id 去重，因此不会重复创建任务。
+      if (useAppStore.getState().settings.appMode === 'client') {
+        await Promise.allSettled(list.map((task) => broadcastAccept(task.id)));
+        await useTaskStore.getState().loadTasks();
+      }
     } catch (err) {
       app.toastError(err, '加载收件箱失败');
     } finally {

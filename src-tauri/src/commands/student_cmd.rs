@@ -59,7 +59,10 @@ pub async fn student_batch_import(
     ).await?;
     // 仅成功导入时入队同步。
     if report.success_rows > 0 {
-        outbox::enqueue_entity(&state.pool, "student", &report.batch_id, "upsert", &serde_json::json!({ "batchId": report.batch_id }), None, None).await.ok();
+        let imported = student_repo::list_by_import_batch(&state.pool, &report.batch_id).await?;
+        for student in imported {
+            outbox::enqueue_entity(&state.pool, "student", &student.id, "upsert", &student, None, None).await?;
+        }
     }
     let _ = state.app.emit(Events::DATA_IMPORTED, serde_json::json!({ "batchId": report.batch_id, "type": "student" }));
     Ok(report)

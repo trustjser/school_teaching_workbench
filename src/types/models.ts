@@ -208,6 +208,20 @@ export interface Device extends BaseEntity {
   isSelf: boolean;
 }
 
+/** 固定物理教室；设备与学年班级通过绑定关系关联。 */
+export interface Classroom extends BaseEntity {
+  roomName: string;
+  deviceId: string | null;
+  remark: string | null;
+}
+
+/** 教室在某学年服务的班级。 */
+export interface ClassroomAssignment extends BaseEntity {
+  classroomId: string;
+  schoolYearId: string;
+  classId: string;
+}
+
 /** 离线待发队列条目（Outbox） */
 export interface PendingQueueItem extends BaseEntity {
   opType: OpType;

@@ -3,16 +3,12 @@
 use crate::db::DbPool;
 use crate::db::repo::settings_repo;
 use crate::error::AppResult;
-use crate::security::keystore;
 
 /// 播种首次运行所需的全部默认配置项；幂等（已存在则跳过）。
 pub async fn ensure_defaults(pool: &DbPool) -> AppResult<()> {
     if settings_repo::get_raw(pool, "device_id").await?.is_none() {
         settings_repo::set_raw(pool, "device_id", Some(&uuid::Uuid::new_v4().to_string()), "string").await?;
     }
-
-    // 共享密钥与 kid（缺失则生成并落库）。
-    keystore::ensure(pool).await?;
 
     if settings_repo::get_raw(pool, "device_name").await?.is_none() {
         settings_repo::set_raw(pool, "device_name", Some("未命名设备"), "string").await?;

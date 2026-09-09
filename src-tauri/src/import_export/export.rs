@@ -185,7 +185,7 @@ fn write_task_sheet(ws: &mut Worksheet, fmt: &Format, rows: &[TaskCompletionRow]
         ws.write_string(r, 0, &tr.task_id).map_err(xlsx_err)?;
         ws.write_string(r, 1, &tr.title).map_err(xlsx_err)?;
         ws.write_number(r, 2, tr.total as f64).map_err(xlsx_err)?;
-        ws.write_number(r, 3, tr.done as f64).map_err(xlsx_err)?;
+        ws.write_number(r, 3, tr.final_count as f64).map_err(xlsx_err)?;
         ws.write_number(r, 4, tr.completion_rate).map_err(xlsx_err)?;
     }
     Ok(())
@@ -267,13 +267,17 @@ async fn task_completion(pool: &DbPool, since: Option<i64>) -> AppResult<Vec<Tas
         "SELECT
             t.id AS task_id,
             t.title AS title,
+            t.class_name AS class_name,
+            t.grade AS grade,
             (SELECT COUNT(*) FROM task_records tr WHERE tr.task_id=t.id AND tr.deleted_at IS NULL) AS total,
             (SELECT COUNT(*) FROM task_records tr JOIN task_status_nodes n ON n.id=tr.node_id
-                WHERE tr.task_id=t.id AND tr.deleted_at IS NULL AND n.is_final=1) AS done,
+                WHERE tr.task_id=t.id AND tr.deleted_at IS NULL AND n.is_final=1) AS final_count,
             CASE WHEN (SELECT COUNT(*) FROM task_records tr WHERE tr.task_id=t.id AND tr.deleted_at IS NULL)=0 THEN 0.0 ELSE
                 CAST((SELECT COUNT(*) FROM task_records tr JOIN task_status_nodes n ON n.id=tr.node_id
                     WHERE tr.task_id=t.id AND tr.deleted_at IS NULL AND n.is_final=1) AS REAL)
-                / (SELECT COUNT(*) FROM task_records tr WHERE tr.task_id=t.id AND tr.deleted_at IS NULL) END AS completion_rate
+                / (SELECT COUNT(*) FROM task_records tr WHERE tr.task_id=t.id AND tr.deleted_at IS NULL) END AS completion_rate,
+            (SELECT AVG(tr.score) FROM task_records tr
+                WHERE tr.task_id=t.id AND tr.deleted_at IS NULL AND tr.score IS NOT NULL) AS avg_score
          FROM custom_tasks t
          WHERE t.deleted_at IS NULL AND (? IS NULL OR t.updated_at >= ?)
          ORDER BY t.created_at DESC",

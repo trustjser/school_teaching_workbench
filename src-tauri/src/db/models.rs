@@ -246,6 +246,34 @@ pub struct Device {
     pub deleted_at: Option<i64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct Classroom {
+    pub id: String,
+    pub room_name: String,
+    pub device_id: Option<String>,
+    pub remark: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub deleted_at: Option<i64>,
+    pub sync_state: String,
+    pub dirty: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassroomAssignment {
+    pub id: String,
+    pub classroom_id: String,
+    pub school_year_id: String,
+    pub class_id: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub deleted_at: Option<i64>,
+    pub sync_state: String,
+    pub dirty: bool,
+}
+
 /// 导入批次（`import_batches`）。
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -1205,10 +1233,40 @@ pub struct TaskCompletionRow {
     pub task_id: String,
     /// 任务标题。
     pub title: String,
+    /// 所属班级。
+    pub class_name: Option<String>,
+    /// 所属年级。
+    pub grade: Option<String>,
     /// 参与学生数。
     pub total: i64,
     /// 到达终态数。
-    pub done: i64,
+    pub final_count: i64,
     /// 完成率（0–1）。
     pub completion_rate: f64,
+    /// 已评分记录的平均分。
+    pub avg_score: Option<f64>,
+}
+
+#[cfg(test)]
+mod task_completion_row_tests {
+    use super::TaskCompletionRow;
+
+    #[test]
+    fn serializes_the_completion_fields_consumed_by_the_frontend() {
+        let row = TaskCompletionRow {
+            task_id: "task-1".into(),
+            title: "任务".into(),
+            class_name: Some("一年级1班".into()),
+            grade: Some("一年级".into()),
+            total: 28,
+            final_count: 3,
+            completion_rate: 3.0 / 28.0,
+            avg_score: Some(92.5),
+        };
+        let json = serde_json::to_value(row).expect("序列化统计行");
+        assert_eq!(json["className"], "一年级1班");
+        assert_eq!(json["grade"], "一年级");
+        assert_eq!(json["finalCount"], 3);
+        assert_eq!(json["avgScore"], 92.5);
+    }
 }

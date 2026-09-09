@@ -46,7 +46,11 @@ pub async fn verify(
         return Err(app_err(StatusCode::UNAUTHORIZED, AppError::nonce_replay()));
     }
 
-    let inner = open(&state.secret, &method, &path, &env)
+    let secret = state.secret();
+    if secret.is_empty() {
+        return Err(app_err(StatusCode::UNAUTHORIZED, AppError::validation("本机尚未配置共享密钥")));
+    }
+    let inner = open(&secret, &method, &path, &env)
         .map_err(|e| app_err(status_for(&e), e))?;
 
     let mut reconstructed = Request::from_parts(parts, axum::body::Body::empty());

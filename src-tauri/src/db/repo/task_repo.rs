@@ -288,6 +288,9 @@ pub async fn record_upsert(pool: &SqlitePool, mut record: TaskRecord) -> AppResu
     }
     record.updated_at = now;
     record.dirty = true;
+    if record.sync_state.is_empty() {
+        record.sync_state = "pending".to_string();
+    }
 
     sqlx::query(
         "INSERT INTO task_records (id, task_id, student_id, node_id, node_key, score, note,

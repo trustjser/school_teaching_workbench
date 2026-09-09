@@ -35,8 +35,11 @@ pub async fn broadcast_send(
     id: String,
     targets: Vec<String>,
 ) -> AppResult<SendReport> {
-    let task = broadcast_repo::get(&state.pool, &id).await?
+    let mut task = broadcast_repo::get(&state.pool, &id).await?
         .ok_or_else(|| AppError::not_found("广播任务"))?;
+
+    // 先落发送时间，再构造推送包，保证班级端收件箱能显示真实下发时间。
+    task = broadcast_repo::update_status(&state.pool, &task.id, "sending", 0).await?;
 
     // 从 payload 中抽取状态节点模板。
     let payload_val: Value = serde_json::from_str(&task.payload).unwrap_or(Value::Null);
@@ -76,8 +79,7 @@ pub async fn broadcast_send(
         outbox::enqueue_broadcast_targets(&state.pool, &task.id, push_value, &resolved).await?
     };
 
-    // 更新任务状态与预期回执数。
-    broadcast_repo::update_status(&state.pool, &task.id, "sending", 0).await.ok();
+    // 更新预期回执数。
     let _ = crate::db::repo::settings_repo::set_raw(&state.pool, "broadcast_expect", Some(&resolved.len().to_string()), "number").await;
 
     let _ = state.app.emit(Events::SYNC_QUEUE_CHANGED, serde_json::json!({ "broadcast": task.id }));
@@ -103,11 +105,20 @@ pub async fn broadcast_receipts(state: State<'_, Arc<AppState>>, broadcast_task_
     broadcast_repo::receipts(&state.pool, &broadcast_task_id).await
 }
 
-/// 班级端一键接受下发任务：生成本地待办任务并登记回执，回执异步回传教务处。
-#[tauri::command]
-pub async fn broadcast_accept(state: State<'_, Arc<AppState>>, broadcast_task_id: String) -> AppResult<CustomTask> {
+/// 将广播任务转换为班级待办。网络重投递时按 broadcast_task_id 幂等返回已有待办。
+pub async fn accept_broadcast_task(state: &AppState, broadcast_task_id: &str) -> AppResult<CustomTask> {
     let bt = broadcast_repo::get(&state.pool, &broadcast_task_id).await?
         .ok_or_else(|| AppError::not_found("广播任务"))?;
+
+    if let Some(existing) = sqlx::query_as::<_, CustomTask>(
+        "SELECT id,title,description,task_type,scope,grade,class_name,due_at,status,view_mode,score_enabled,note_enabled,default_node_id,owner_device_id,broadcast_task_id,source,sort_order,created_at,updated_at,deleted_at,sync_state,dirty FROM custom_tasks WHERE broadcast_task_id=? AND deleted_at IS NULL LIMIT 1",
+    )
+    .bind(&broadcast_task_id)
+    .fetch_optional(&state.pool)
+    .await?
+    {
+        return Ok(existing);
+    }
 
     let payload: Value = serde_json::from_str(&bt.payload).unwrap_or(Value::Null);
     let str_or = |v: Option<&Value>, d: &str| v.and_then(Value::as_str).unwrap_or(d).to_string();
@@ -139,6 +150,7 @@ pub async fn broadcast_accept(state: State<'_, Arc<AppState>>, broadcast_task_id
     let saved = task_repo::upsert(&state.pool, local_task).await?;
 
     // 节点模板。
+    let mut generated_nodes = Vec::new();
     if let Some(arr) = payload.get("statusNodes").or_else(|| payload.get("nodes")).and_then(Value::as_array) {
         for (idx, node_val) in arr.iter().enumerate() {
             let n = TaskStatusNode {
@@ -157,9 +169,13 @@ pub async fn broadcast_accept(state: State<'_, Arc<AppState>>, broadcast_task_id
                 sync_state: "pending".to_string(),
                 dirty: true,
             };
-            task_repo::node_upsert(&state.pool, n).await.ok();
+            generated_nodes.push(task_repo::node_upsert(&state.pool, n).await?);
         }
     }
+
+    // 班级端生成的本地任务定义和状态节点也要回传教务端，
+    // 否则教务端只能收到 task_record，却无法在完成统计中关联到任务。
+    enqueue_task_snapshot(&state.pool, &saved, &generated_nodes).await?;
 
     // 初始化本班学生的任务记录。
     let students = student_repo::list_for_task(&state.pool, saved.class_name.as_deref()).await?;
@@ -198,6 +214,75 @@ pub async fn broadcast_accept(state: State<'_, Arc<AppState>>, broadcast_task_id
     Ok(saved)
 }
 
+/// 将班级端由广播生成的任务快照及状态节点放入回传队列。
+pub(crate) async fn enqueue_task_snapshot(
+    pool: &sqlx::SqlitePool,
+    task: &CustomTask,
+    nodes: &[TaskStatusNode],
+) -> AppResult<()> {
+    outbox::enqueue_entity(pool, "custom_task", &task.id, "upsert", task, None, None).await?;
+    for node in nodes {
+        outbox::enqueue_entity(pool, "task_node", &node.id, "upsert", node, None, None).await?;
+    }
+    Ok(())
+}
+
+/// 班级端手动补生成待办（兼容旧入口）。
+#[tauri::command]
+pub async fn broadcast_accept(state: State<'_, Arc<AppState>>, broadcast_task_id: String) -> AppResult<CustomTask> {
+    accept_broadcast_task(&state, &broadcast_task_id).await
+}
+
 /// 占位：保留 `AppError` 引用一致性。
 #[allow(dead_code)]
 fn _assert(_e: AppError) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn generated_broadcast_task_snapshot_is_enqueued_for_master_stats() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("连接测试数据库");
+        crate::db::run_migrations(&pool).await.expect("执行迁移");
+
+        let task = CustomTask {
+            id: "local-task-1".into(),
+            title: "广播任务".into(),
+            task_type: "broadcast".into(),
+            scope: "class".into(),
+            class_name: Some("一年级1班".into()),
+            status: "active".into(),
+            view_mode: "grid".into(),
+            source: "broadcast".into(),
+            broadcast_task_id: Some("broadcast-1".into()),
+            ..Default::default()
+        };
+        let nodes = vec![TaskStatusNode {
+            id: "local-node-1".into(),
+            task_id: task.id.clone(),
+            node_key: "todo".into(),
+            label: "待办".into(),
+            is_default: true,
+            ..Default::default()
+        }];
+
+        enqueue_task_snapshot(&pool, &task, &nodes)
+            .await
+            .expect("任务快照应进入同步队列");
+
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT entity_type, entity_id FROM pending_queue WHERE deleted_at IS NULL ORDER BY entity_type",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("读取同步队列");
+        assert!(rows.iter().any(|(kind, id)| kind == "custom_task" && id == "local-task-1"));
+        assert!(rows.iter().any(|(kind, id)| kind == "task_node" && id == "local-node-1"));
+    }
+}

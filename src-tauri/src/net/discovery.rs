@@ -79,7 +79,7 @@ fn build_self_info(state: &AppState) -> AppResult<ServiceInfo> {
     props.insert(TXT_DID.to_string(), state.device_id.clone());
     props.insert(TXT_ROLE.to_string(), state.mode().as_str().to_string());
     props.insert(TXT_API.to_string(), MDNS_TXT_VERSION.to_string());
-    props.insert(TXT_KID.to_string(), state.kid.clone());
+    props.insert(TXT_KID.to_string(), state.kid());
     props.insert(TXT_PORT.to_string(), port.to_string());
     // 这些来自设置，缺失时为 None，用空串跳过。
     let name = get_setting("device_name");
@@ -125,19 +125,27 @@ async fn on_resolved(state: &Arc<AppState>, info: &ServiceInfo) {
         .map(|ip| ip.to_string());
     let port = Some(info.get_port() as i32);
     let role = info.get_property_val_str(TXT_ROLE).unwrap_or("unknown").to_string();
-    let name = info.get_property_val_str(TXT_NAME).unwrap_or("未知设备").to_string();
+    let advertised_name = info.get_property_val_str(TXT_NAME).unwrap_or("").trim().to_string();
     let grade = info.get_property_val_str(TXT_GRADE).map(|s| s.to_string());
     let class = info.get_property_val_str(TXT_CLASS).map(|s| s.to_string());
     let api_ver = info.get_property_val_str(TXT_API).map(|s| s.to_string());
     let kid = info.get_property_val_str(TXT_KID).map(|s| s.to_string());
     let mdns_fullname = Some(info.get_fullname().to_string());
 
-    // 首次发现 vs 已有记录。
-    let was_known = device_repo::get_by_device_id(&state.pool, &peer_id)
-        .await
-        .ok()
-        .flatten()
-        .is_some();
+    // 首次发现 vs 已有记录。旧版本客户端可能把占位文本发布到 mDNS，
+    // 不能让它覆盖已经保存的设备名；首次发现则给出稳定的可识别名称。
+    let existing = device_repo::get_by_device_id(&state.pool, &peer_id).await.ok().flatten();
+    let was_known = existing.is_some();
+    let name = if is_placeholder_name(&advertised_name) {
+        existing
+            .as_ref()
+            .map(|device| device.device_name.trim())
+            .filter(|value| !is_placeholder_name(value))
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("班级端-{}", &peer_id.chars().take(8).collect::<String>()))
+    } else {
+        advertised_name
+    };
 
     let result = device_repo::upsert(
         &state.pool,
@@ -168,24 +176,19 @@ async fn on_resolved(state: &Arc<AppState>, info: &ServiceInfo) {
     }
 }
 
+fn is_placeholder_name(name: &str) -> bool {
+    name.is_empty() || matches!(name, "未命名设备" | "未知设备")
+}
+
 /// 对端消失：标记离线并推送事件。
 async fn on_removed(state: &Arc<AppState>, fullname: &str) {
     let peer_id = peer_from_fullname(fullname);
     if peer_id == state.device_id {
         return;
     }
-    // 直接软标记为离线（绕过 miss 计数）。
-    if let Ok(existing) = device_repo::get_by_device_id(&state.pool, &peer_id).await {
-        if existing.is_some() {
-            let _ = sqlx::query("UPDATE devices SET status = 'offline', updated_at = ? WHERE device_id = ? AND deleted_at IS NULL AND status <> 'blocked'")
-                .bind(crate::db::repo::now_ms())
-                .bind(&peer_id)
-                .execute(&state.pool)
-                .await;
-            let _ = state.app.emit(Events::DEVICE_OFFLINE, serde_json::json!({ "deviceId": peer_id }));
-            let _ = state.app.emit(Events::DEVICE_CHANGED, serde_json::json!({ "deviceId": peer_id }));
-        }
-    }
+    // mDNS 的 ServiceRemoved 可能只是网卡切换、服务重宣告或瞬时丢包，
+    // 不能据此立即把节点置为离线。由心跳 miss_count + TTL 统一判定，避免 UI 闪断。
+    tracing::debug!(device_id = %peer_id, "mDNS 服务暂时移除，等待心跳确认");
 }
 
 /// 从 mDNS 全名（`{instance}._schworkbench._tcp.local.`）提取实例名即设备 ID。

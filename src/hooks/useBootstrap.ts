@@ -6,6 +6,7 @@ import { useDeviceStore } from '@/store/useDeviceStore';
 import { useQueueStore } from '@/store/useQueueStore';
 import { useStudentStore } from '@/store/useStudentStore';
 import { useBroadcastStore } from '@/store/useBroadcastStore';
+import { useTaskStore } from '@/store/useTaskStore';
 import { TAURI_EVENTS } from '@/types/events';
 import { reloadCheckin } from '@/store/useCheckinStore';
 
@@ -91,17 +92,24 @@ export function useBootstrap(): void {
           void reloadCheckin();
         },
         [TAURI_EVENTS.TASK_UPDATED]: ({ taskId }) => {
-          const taskStore = useAppStore.getState();
-          if (taskStore.settings.appMode !== 'client') return;
-          // 任务矩阵页自行订阅刷新；此处仅提示
+          const app = useAppStore.getState();
+          if (app.settings.appMode === 'master') {
+            // 教务端收到班级端的任务定义、节点或记录后，
+            // 统计页可能正处于打开状态，需要立即重新查询。
+            void useTaskStore.getState().loadCompletionStats();
+          }
+          // 任务矩阵页自行订阅刷新；此处仅保证事件不会被丢弃。
           void taskId;
         },
         [TAURI_EVENTS.BROADCAST_RECEIVED]: (task) => {
           useBroadcastStore.getState().pushIncoming(task);
+          void useBroadcastStore.getState().accept(task.id).then(() => {
+            void useTaskStore.getState().loadTasks();
+          });
           useAppStore.getState().pushToast({
             kind: 'info',
-            title: '收到教务指令',
-            description: task.title,
+            title: '收到新任务',
+            description: `${task.title}${task.sentAt ? ` · 下发于 ${new Date(task.sentAt).toLocaleString()}` : ''}`,
             duration: 5000,
           });
         },

@@ -19,8 +19,8 @@ use crate::state::AppState;
 ///
 /// 设计原则：**只有 `init_db` 失败才算致命**，其余步骤（播种/读设置/读密钥）失败一律
 /// 降级处理（空值 + 警告），确保 `AppState` 一定能注册到 Tauri。前端首屏命令
-/// （`settings_get_all` 等）因此总能拿到状态；首次启动的真实密钥由
-/// `settings_complete_setup` 走 `keystore::rotate` 落盘。
+/// （`settings_get_all` 等）因此总能拿到状态；教务处端密钥在首次设置时落盘，
+/// 班级端可以先完成设备初始化，再从设置页录入教务处密钥。
 ///
 /// 每一步同时 `eprintln!` 到 stderr 并写入应用数据目录的 `bootstrap.log`，便于
 /// 排查首启动异常（替代之前仅 `tracing::error!` 导致用户看不到真实原因）。
@@ -67,16 +67,7 @@ async fn bootstrap(app: tauri::AppHandle) -> Result<AppState, AppError> {
         Err(e) => { step!("WARN 读 device_id 失败: {} (用空串)", e); String::new() }
     };
 
-    // 5) 共享密钥（降级：失败则用空 secret/kid，首启向导会重新生成）
-    let (secret, kid) = match keystore::ensure(&pool).await {
-        Ok((s, k)) => { step!("keystore OK (secret_len={}, kid={})", s.len(), k); (s, k) }
-        Err(e) => {
-            step!("WARN keystore::ensure 失败: {} (用空 secret/kid，请尽快完成首次设置)", e);
-            (String::new(), String::new())
-        }
-    };
-
-    // 6) 运行模式（降级）
+    // 5) 运行模式（降级）
     let mode_str = settings_repo::get_string(&pool, "app_mode", "client")
         .await
         .unwrap_or_else(|e| {
@@ -86,6 +77,26 @@ async fn bootstrap(app: tauri::AppHandle) -> Result<AppState, AppError> {
     let mode = AppMode::parse(&mode_str);
     step!("mode = {:?}", mode);
 
+    // 6) 共享密钥：教务处端首次启动时自动准备；班级端允许暂未配置，
+    // 待用户在设置页录入教务处提供的密钥后再刷新内存状态。
+    let (secret, kid) = if matches!(mode, AppMode::Master) {
+        match keystore::ensure(&pool).await {
+            Ok((s, k)) => { step!("keystore OK (secret_len={}, kid={})", s.len(), k); (s, k) }
+            Err(e) => {
+                step!("WARN keystore::ensure 失败: {} (用空 secret/kid)", e);
+                (String::new(), String::new())
+            }
+        }
+    } else {
+        match keystore::read(&pool).await {
+            Ok((s, k)) => { step!("client keystore OK (secret_len={}, kid={})", s.len(), k); (s, k) }
+            Err(e) => {
+                step!("client 尚未配置共享密钥: {}", e);
+                (String::new(), String::new())
+            }
+        }
+    };
+
     let _ = fs::write(&log_path, log.join(""));
     step!("bootstrap 完成");
 
@@ -93,8 +104,8 @@ async fn bootstrap(app: tauri::AppHandle) -> Result<AppState, AppError> {
         app,
         pool,
         device_id,
-        secret,
-        kid,
+        secret: std::sync::RwLock::new(secret),
+        kid: std::sync::RwLock::new(kid),
         mode: Mutex::new(mode),
         api_port: Mutex::new(0),
         daemon: tokio::sync::Mutex::new(None),
@@ -174,6 +185,11 @@ pub fn run() {
             crate::commands::class_cmd::class_list,
             crate::commands::class_cmd::class_upsert,
             crate::commands::class_cmd::class_delete,
+            crate::commands::classroom_cmd::classroom_list,
+            crate::commands::classroom_cmd::classroom_assignments,
+            crate::commands::classroom_cmd::classroom_upsert,
+            crate::commands::classroom_cmd::classroom_delete,
+            crate::commands::classroom_cmd::classroom_assign,
             // ---- 学年 ----
             crate::commands::school_year_cmd::school_year_list,
             crate::commands::school_year_cmd::school_year_upsert,

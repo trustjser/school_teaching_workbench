@@ -85,7 +85,7 @@ pub async fn run_migrations(pool: &DbPool) -> AppResult<usize> {
         executed += 1;
     }
     // 兼容 / 自愈旧库：修复 pending_queue 与 sync_log 的历史结构问题
-    // （表名错建、外键悬空、CHECK 约束缺 grade/class/school_year）。
+    // （表名错建、外键悬空、CHECK 约束缺 grade/class/school_year/classroom）。
     // 每次启动都跑，幂等；失败时直接向上抛错，让问题在启动期暴露。
     repair_queue_schema(pool).await?;
     Ok(executed)
@@ -216,7 +216,8 @@ CREATE TABLE IF NOT EXISTS pending_queue (
     op_type          TEXT    NOT NULL CHECK (op_type IN ('upsert','delete','ack','heartbeat','broadcast')),
     entity_type      TEXT    NOT NULL CHECK (entity_type IN
                      ('student','checkin','custom_task','task_node','task_record',
-                      'broadcast_task','receipt','device','grade','class','school_year')),
+                      'broadcast_task','receipt','device','grade','class','school_year',
+                      'classroom','classroom_assignment')),
     entity_id        TEXT    NOT NULL,
     payload          TEXT    NOT NULL,
     target_device_id TEXT,
@@ -525,7 +526,7 @@ async fn salvage_stale_queue_tables(conn: &mut Conn) -> AppResult<()> {
     Ok(())
 }
 
-/// D. 若 `pending_queue` 的 CHECK 约束尚未包含 `school_year`，则原地重建该表。
+/// D. 若 `pending_queue` 的 CHECK 约束尚未包含最新目录实体，则原地重建该表。
 ///
 /// SQLite 不支持 `ALTER TABLE ... ALTER COLUMN` 修改 CHECK，只能
 /// 「改名旧表 → 建规范新表 → 按显式列名拷回 → 删旧表」。
@@ -536,11 +537,11 @@ async fn upgrade_pending_queue_check(conn: &mut Conn) -> AppResult<()> {
         Some(sql) => sql,
         None => return Ok(()), // 上游已保证表存在；此处仅作防御
     };
-    if sql.contains("school_year") {
+    if sql.contains("school_year") && sql.contains("classroom") {
         return Ok(()); // 约束已是新版
     }
 
-    tracing::warn!("检测到旧版 pending_queue CHECK 约束（缺少 school_year），正在原地升级");
+    tracing::warn!("检测到旧版 pending_queue CHECK 约束（缺少目录实体），正在原地升级");
     if let Err(err) = enter_schema_surgery(conn).await {
         leave_schema_surgery(conn).await; // 半开状态也要复位，连接会放回池中复用
         return Err(err);
@@ -589,7 +590,7 @@ fn preview(statement: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::models::Student;
+    use crate::db::models::{Classroom, CustomTask, Student, TaskRecord};
 
     #[tokio::test]
     async fn migration_adds_class_id_idempotently() {
@@ -662,6 +663,18 @@ mod tests {
             .execute(&pool)
             .await
             .ok();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn classroom_binding_migration_is_idempotent() {
+        let dir = std::env::temp_dir().join(format!("lanwb_room_migtest_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        let pool = create_pool(&dir.join("test.db")).await.expect("建池");
+        run_migrations(&pool).await.expect("首次迁移");
+        assert!(column_exists(&pool, "classrooms", "room_name").await.unwrap());
+        assert!(column_exists(&pool, "classroom_assignments", "school_year_id").await.unwrap());
+        run_migrations(&pool).await.expect("二次迁移幂等");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -794,6 +807,9 @@ CREATE TABLE pending_queue (
         insert_queue_row(&pool, "q-school-year", "school_year")
             .await
             .expect("school_year 入队应成功");
+        insert_queue_row(&pool, "q-classroom", "classroom")
+            .await
+            .expect("classroom 入队应成功");
 
         // sync_log 外键仍指向 pending_queue，写日志必须成功。
         insert_sync_log_row(&pool, "log-1", "q-school-year")
@@ -1052,6 +1068,100 @@ CREATE TABLE pending_queue (
             .expect("读取 status");
         assert_eq!(saved, "active", "空串 status 应被 DEFAULT 'active' 接管");
 
+        pool.close().await;
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 回归：教务端补发学生时，班级端必须能通过远端合并落库。
+    #[tokio::test]
+    async fn merge_remote_student_inserts_record() {
+        let (dir, pool) = temp_pool("merge_remote_student").await;
+        run_migrations(&pool).await.expect("迁移");
+        let remote = Student {
+            id: "remote-student-1".into(),
+            student_no: "001".into(),
+            name: "远端学生".into(),
+            gender: "unknown".into(),
+            grade: Some("一年级".into()),
+            class_name: Some("一年级1班".into()),
+            class_id: None,
+            seat_no: Some(1),
+            status: "active".into(),
+            status_since: None,
+            note: None,
+            phone: None,
+            import_batch_id: Some("source-batch".into()),
+            created_at: 1,
+            updated_at: 2,
+            deleted_at: None,
+            sync_state: "pending".into(),
+            dirty: true,
+        };
+        crate::db::repo::student_repo::merge_remote(&pool, &remote)
+            .await
+            .expect("远端学生应可合并");
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM students WHERE id='remote-student-1'")
+            .fetch_one(&pool)
+            .await
+            .expect("读取学生");
+        assert_eq!(count, 1);
+        let batch: Option<String> = sqlx::query_scalar("SELECT import_batch_id FROM students WHERE id='remote-student-1'")
+            .fetch_one(&pool)
+            .await
+            .expect("读取导入批次");
+        assert!(batch.is_none(), "目标端不存在的来源批次应被清空");
+        pool.close().await;
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn classroom_soft_delete_hides_room() {
+        let (dir, pool) = temp_pool("classroom_soft_delete").await;
+        run_migrations(&pool).await.expect("迁移");
+        crate::db::repo::classroom_repo::upsert(
+            &pool,
+            Classroom {
+                id: "room-1".into(),
+                room_name: "101".into(),
+                device_id: None,
+                remark: None,
+                created_at: 1,
+                updated_at: 1,
+                deleted_at: None,
+                sync_state: "pending".into(),
+                dirty: true,
+            },
+        )
+        .await
+        .expect("新增教室");
+        crate::db::repo::classroom_repo::soft_delete(&pool, "room-1")
+            .await
+            .expect("删除教室");
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM classrooms WHERE id='room-1' AND deleted_at IS NULL")
+            .fetch_one(&pool)
+            .await
+            .expect("读取教室");
+        assert_eq!(count, 0);
+        pool.close().await;
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn task_record_empty_sync_state_defaults_to_pending() {
+        let (dir, pool) = temp_pool("task_record_sync_state").await;
+        run_migrations(&pool).await.expect("迁移");
+        crate::db::repo::task_repo::upsert(&pool, CustomTask {
+            id: "task-1".into(), title: "任务".into(), task_type: "custom".into(), scope: "class".into(), view_mode: "grid".into(), status: "active".into(), source: "local".into(), ..Default::default()
+        }).await.expect("新增任务");
+        crate::db::repo::student_repo::upsert(&pool, Student {
+            id: "student-1".into(), student_no: "001".into(), name: "学生".into(), gender: "unknown".into(), status: "active".into(), ..Default::default()
+        }).await.expect("新增学生");
+        crate::db::repo::task_repo::record_upsert(&pool, TaskRecord {
+            task_id: "task-1".into(), student_id: "student-1".into(), node_key: "todo".into(), ..Default::default()
+        }).await.expect("空同步状态应自动归一化");
+        let state: String = sqlx::query_scalar("SELECT sync_state FROM task_records WHERE task_id='task-1' AND student_id='student-1'")
+            .fetch_one(&pool).await.expect("读取同步状态");
+        assert_eq!(state, "pending");
         pool.close().await;
         std::fs::remove_dir_all(&dir).ok();
     }

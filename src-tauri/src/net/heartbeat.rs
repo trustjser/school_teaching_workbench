@@ -29,6 +29,10 @@ pub fn start(state: Arc<AppState>) {
 
 /// 一轮心跳：对每个在线非自身节点发 ping。
 async fn tick(state: &Arc<AppState>) {
+    // 班级端可先完成设备初始化，密钥稍后从设置页录入；未配置前不把节点误标为离线。
+    if state.secret().is_empty() {
+        return;
+    }
     let devices = match device_repo::list(&state.pool, true).await {
         Ok(devices) => devices,
         Err(e) => {

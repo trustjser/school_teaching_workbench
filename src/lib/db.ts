@@ -6,6 +6,8 @@ import type {
   AppSetting,
   CheckinRecord,
   Class,
+  Classroom,
+  ClassroomAssignment,
   CustomTask,
   DailySummary,
   Device,
@@ -57,9 +59,16 @@ export async function settingsSet(
   await invokeCmd<void>('settings_set', { key, value, valueType });
 }
 
+export async function settingsSetSharedSecret(secret: string, kid: string): Promise<void> {
+  await settingsSet('shared_secret_b64', secret, 'secret');
+  await settingsSet('key_id', kid, 'string');
+}
+
 export interface CompleteSetupArgs {
   mode: AppMode;
   deviceName: string;
+  /** 班级端固定教室名称，首次配置时用于绑定本机设备 */
+  roomName?: string | null;
   grade: string | null;
   className: string | null;
   /** 班级端绑定的班级目录 id（教务端目录消费主键） */
@@ -69,7 +78,7 @@ export interface CompleteSetupArgs {
   /** 班级端当前绑定的学年班级 id（跨年只切绑定、不重装） */
   boundClassId?: string | null;
   schoolName?: string | null;
-  /** Base64 共享密钥；为空表示由 Rust 侧生成 */
+  /** Base64 共享密钥；班级端可为空，稍后从设置页录入 */
   secret: string | null;
 }
 
@@ -224,6 +233,26 @@ export async function classUpsert(klass: Partial<Class> & { className: string })
 
 export async function classDelete(id: string): Promise<void> {
   await invokeCmd<void>('class_delete', { id });
+}
+
+export async function classroomList(): Promise<Classroom[]> {
+  return invokeCmd<Classroom[]>('classroom_list');
+}
+
+export async function classroomAssignments(schoolYearId?: string | null): Promise<ClassroomAssignment[]> {
+  return invokeCmd<ClassroomAssignment[]>('classroom_assignments', { schoolYearId: schoolYearId ?? null });
+}
+
+export async function classroomUpsert(room: Partial<Classroom> & { roomName: string }): Promise<Classroom> {
+  return invokeCmd<Classroom>('classroom_upsert', { classroom: room });
+}
+
+export async function classroomDelete(id: string): Promise<void> {
+  await invokeCmd<void>('classroom_delete', { id });
+}
+
+export async function classroomAssign(classroomId: string, schoolYearId: string, classId: string): Promise<ClassroomAssignment> {
+  return invokeCmd<ClassroomAssignment>('classroom_assign', { classroomId, schoolYearId, classId });
 }
 
 /* -------------------------------------------------------------------------- */

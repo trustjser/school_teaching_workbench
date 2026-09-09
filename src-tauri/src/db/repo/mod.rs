@@ -3,6 +3,7 @@
 pub mod broadcast_repo;
 pub mod checkin_repo;
 pub mod class_repo;
+pub mod classroom_repo;
 pub mod device_repo;
 pub mod grade_repo;
 pub mod school_year_repo;

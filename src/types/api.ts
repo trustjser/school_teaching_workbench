@@ -78,6 +78,7 @@ export interface FlushReport {
 export interface KeyInfo {
   kid: string;
   fingerprint: string;
+  configured?: boolean;
 }
 
 /** 教务处端：全校汇总 */

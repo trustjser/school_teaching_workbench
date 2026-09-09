@@ -16,6 +16,23 @@ use crate::error::{AppError, AppResult};
 use crate::security::keystore;
 use crate::state::AppState;
 
+/// 校验首次设置中的共享密钥。班级端允许暂不填写，教务处端必须填写。
+fn validate_setup_secret(mode: AppMode, secret: Option<&str>) -> AppResult<Option<&str>> {
+    let secret = secret.map(str::trim).filter(|value| !value.is_empty());
+    if matches!(mode, AppMode::Master) && secret.is_none() {
+        return Err(AppError::validation("教务处端共享密钥不能为空"));
+    }
+    if let Some(secret) = secret {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(secret)
+            .map_err(|_| AppError::validation("共享密钥格式无效（应为 base64）"))?;
+        if bytes.len() != 32 {
+            return Err(AppError::validation("共享密钥长度无效（需 32 字节）"));
+        }
+    }
+    Ok(secret)
+}
+
 /// 读取全部配置项（secret 类型脱敏）。
 #[tauri::command]
 pub async fn settings_get_all(state: State<'_, Arc<AppState>>) -> AppResult<Vec<AppSetting>> {
@@ -32,6 +49,21 @@ pub async fn settings_set(
 ) -> AppResult<()> {
     if key.trim().is_empty() {
         return Err(AppError::validation("配置键不能为空"));
+    }
+    if key == "shared_secret_b64" {
+        let secret = value.as_deref().map(str::trim).filter(|v| !v.is_empty())
+            .ok_or_else(|| AppError::validation("共享密钥不能为空"))?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(secret)
+            .map_err(|_| AppError::validation("共享密钥格式无效（应为 base64）"))?;
+        if bytes.len() != 32 {
+            return Err(AppError::validation("共享密钥长度无效（需 32 字节）"));
+        }
+        let kid = keystore::fingerprint(secret)?;
+        settings_repo::set_raw(&state.pool, &key, Some(secret), "secret").await?;
+        settings_repo::set_raw(&state.pool, "key_id", Some(&kid), "string").await?;
+        state.set_key(secret.to_string(), kid);
+        return Ok(());
     }
     settings_repo::set_raw(&state.pool, &key, value.as_deref(), &value_type).await
 }
@@ -52,6 +84,7 @@ pub async fn settings_complete_setup(
     secret: Option<String>,
 ) -> AppResult<()> {
     let mode = AppMode::parse(&mode);
+    let secret = validate_setup_secret(mode, secret.as_deref())?;
     settings_repo::set_raw(&state.pool, "app_mode", Some(mode.as_str()), "string").await?;
     settings_repo::set_raw(&state.pool, "device_name", Some(&device_name), "string").await?;
     settings_repo::set_raw(&state.pool, "grade", grade.as_deref(), "string").await?;
@@ -65,24 +98,31 @@ pub async fn settings_complete_setup(
     // 避免「每次启动都进入首次运行配置」的回归（该键由迁移播种为 false 且此前从未被置为 true）。
     settings_repo::set_raw(&state.pool, "first_run_done", Some("true"), "boolean").await?;
 
-    if let Some(secret) = secret.as_deref() {
-        if !secret.trim().is_empty() {
-            // 校验为合法 base64 32 字节密钥。
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(secret)
-                .map_err(|_| AppError::validation("共享密钥格式无效（应为 base64）"))?;
-            if bytes.len() != 32 {
-                return Err(AppError::validation("共享密钥长度无效（需 32 字节）"));
-            }
-            let kid = keystore::fingerprint(secret)?;
-            settings_repo::set_raw(&state.pool, "shared_secret", Some(secret), "secret").await?;
-            settings_repo::set_raw(&state.pool, "key_kid", Some(&kid), "string").await?;
-        }
+    if let Some(secret) = secret {
+      let kid = keystore::fingerprint(secret)?;
+      settings_repo::set_raw(&state.pool, "shared_secret_b64", Some(secret), "secret").await?;
+      settings_repo::set_raw(&state.pool, "key_id", Some(&kid), "string").await?;
+      state.set_key(secret.to_string(), kid);
     }
 
     state.set_mode(mode);
     let _ = state.app.emit(Events::MODE_CHANGED, serde_json::json!({ "mode": mode.as_str() }));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn client_setup_can_defer_secret() {
+        assert!(validate_setup_secret(AppMode::Client, None).unwrap().is_none());
+    }
+
+    #[test]
+    fn master_setup_requires_secret() {
+        assert!(validate_setup_secret(AppMode::Master, None).is_err());
+    }
 }
 
 /// 运行模式热切换（班级端 ↔ 教务处端）。
@@ -99,15 +139,17 @@ pub async fn settings_switch_mode(state: State<'_, Arc<AppState>>, mode: String)
 #[tauri::command]
 pub async fn settings_rotate_key(state: State<'_, Arc<AppState>>) -> AppResult<crate::db::models::KeyInfo> {
     let info = keystore::rotate(&state.pool).await?;
-    // 刷新内存中的密钥。
-    let _ = crate::db::repo::settings_repo::get_raw(&state.pool, "shared_secret").await;
+    state.set_key(info.secret_b64.clone(), info.kid.clone());
     Ok(info)
 }
 
 /// 返回当前密钥标识与指纹，便于人工核对各端一致性。
 #[tauri::command]
 pub async fn settings_key_info(state: State<'_, Arc<AppState>>) -> AppResult<serde_json::Value> {
-    let (secret, kid) = keystore::read(&state.pool).await?;
+    let (secret, kid) = match keystore::read(&state.pool).await {
+        Ok(value) => value,
+        Err(_) => return Ok(serde_json::json!({ "kid": "", "fingerprint": "", "configured": false })),
+    };
     let fingerprint = keystore::fingerprint(&secret)?;
-    Ok(serde_json::json!({ "kid": kid, "fingerprint": fingerprint }))
+    Ok(serde_json::json!({ "kid": kid, "fingerprint": fingerprint, "configured": true }))
 }

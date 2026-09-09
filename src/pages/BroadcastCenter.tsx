@@ -26,6 +26,7 @@ import {
   type BroadcastTaskTemplate,
 } from '@/types/broadcast';
 import type { BroadcastReceipt } from '@/types/broadcast';
+import { formatDateTime } from '@/lib/format';
 
 /** 任务下发中心（教务处端）：创建广播任务 → 选择目标 → 下发 */
 export function BroadcastCenter(): JSX.Element {
@@ -101,6 +102,11 @@ export function BroadcastCenter(): JSX.Element {
       key: 'status',
       header: '状态',
       render: (t) => <Badge tone={t.status === 'sent' ? 'success' : 'neutral'}>{t.status}</Badge>,
+    },
+    {
+      key: 'sentAt',
+      header: '下发时间',
+      accessor: (t) => (t.sentAt ? formatDateTime(t.sentAt) : '—'),
     },
     {
       key: 'expect',

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useBroadcastStore } from '@/store/useBroadcastStore';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -13,9 +14,9 @@ import { formatDateTime } from '@/lib/format';
 export function InboxPage(): JSX.Element {
   const inbox = useBroadcastStore((s) => s.inbox);
   const loadInbox = useBroadcastStore((s) => s.loadInbox);
-  const accept = useBroadcastStore((s) => s.accept);
   const markAllRead = useBroadcastStore((s) => s.markAllRead);
   const [booting, setBooting] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     void loadInbox();
@@ -68,9 +69,7 @@ export function InboxPage(): JSX.Element {
                       ))}
                     </div>
                   )}
-                  <div className="mt-3">
-                    <Button onClick={() => void accept(task.id)}>接受并生成班级待办</Button>
-                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-3"><p className="text-sm text-emerald-700">已自动生成班级待办</p><Button size="md" onClick={() => navigate(`/client/matrix?broadcast=${encodeURIComponent(task.id)}`)}>进入任务看板</Button></div>
                 </Card>
               </div>
             );

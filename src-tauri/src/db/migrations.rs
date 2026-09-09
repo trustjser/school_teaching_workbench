@@ -13,6 +13,7 @@ pub const DIRECTORY_SQL: &str = include_str!("../../migrations/002_directory.sql
 
 /// 学年 / 届维度迁移 SQL 原文（编译期内嵌）。
 pub const SCHOOL_YEAR_SQL: &str = include_str!("../../migrations/003_school_year.sql");
+pub const CLASSROOM_SQL: &str = include_str!("../../migrations/004_classroom_binding.sql");
 
 /// 迁移版本号。
 pub const INIT_VERSION: i64 = 1;
@@ -100,12 +101,13 @@ pub fn school_year_statements() -> &'static [String] {
     STMTS.as_slice()
 }
 
-/// 返回全部迁移语句（001 初始化 + 002 目录 + 003 学年），供 `run_migrations` 与
+/// 返回全部迁移语句（001 初始化 + 002 目录 + 003 学年 + 004 教室绑定），供 `run_migrations` 与
 /// `tauri_migrations` 共用，版本号连续递增。
 pub fn all_statements() -> Vec<String> {
     let mut out = split_sql(INIT_SQL);
     out.extend(split_sql(DIRECTORY_SQL));
     out.extend(split_sql(SCHOOL_YEAR_SQL));
+    out.extend(split_sql(CLASSROOM_SQL));
     out
 }
 

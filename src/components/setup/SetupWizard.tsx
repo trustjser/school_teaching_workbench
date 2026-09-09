@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
-import { classList, settingsCompleteSetup, settingsGetAll } from '@/lib/db';
+import { classList, classroomAssign, classroomList, classroomUpsert, settingsCompleteSetup, settingsGetAll, toRuntimeSettings } from '@/lib/db';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import type { AppMode } from '@/types/enums';
-import type { Class } from '@/types/models';
+import type { Class, Classroom } from '@/types/models';
 
 /** 共享密钥必须是 base64 编码的 32 字节 */
 function isBase64Secret(s: string): boolean {
@@ -31,7 +31,7 @@ function randomSecret(): string {
 
 /**
  * 首次运行配置向导。
- * 收集运行模式、学校/年级/班级、设备名与（可选）共享密钥，提交到
+ * 收集运行模式、学校/年级/班级、设备名与共享密钥，提交到
  * `settingsCompleteSetup`；成功后重载运行期配置并进入主框架。
  *
  * 注意：Rust 侧把「已完成」写入 `completed_setup`，而前端 `firstRunDone`
@@ -46,8 +46,6 @@ export function SetupWizard(): JSX.Element {
 
   const [mode, setMode] = useState<AppMode>('client');
   const [schoolName, setSchoolName] = useState('');
-  const [grade, setGrade] = useState('');
-  const [className, setClassName] = useState('');
   const [deviceName, setDeviceName] = useState('');
   const [secret, setSecret] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -56,25 +54,26 @@ export function SetupWizard(): JSX.Element {
   // 班级端：从教务端目录选择绑定班级（目录为空时回退手动填写）
   const [dirClasses, setDirClasses] = useState<Class[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
-  const [manualScope, setManualScope] = useState(false);
+  const [dirRooms, setDirRooms] = useState<Classroom[]>([]);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
 
   useEffect(() => {
     if (mode === 'client') {
       classList()
         .then(setDirClasses)
         .catch(() => setDirClasses([]));
+      classroomList()
+        .then(setDirRooms)
+        .catch(() => setDirRooms([]));
     }
   }, [mode]);
 
   const boundClass = dirClasses.find((c) => c.id === selectedClassId) ?? null;
   const secretBad = secret.trim() !== '' && !isBase64Secret(secret.trim());
-  const scopeOk =
-    mode === 'master' ||
-    selectedClassId !== null ||
-    grade.trim().length > 0 ||
-    className.trim().length > 0;
+  const secretMissing = secret.trim() === '';
+  const secretRequired = mode === 'master';
   const canSubmit =
-    deviceName.trim().length > 0 && scopeOk && !secretBad && !submitting;
+    deviceName.trim().length > 0 && (!secretRequired || !secretMissing) && !secretBad && !submitting;
 
   const submit = async (): Promise<void> => {
     setSubmitting(true);
@@ -83,16 +82,24 @@ export function SetupWizard(): JSX.Element {
       await settingsCompleteSetup({
         mode,
         deviceName: deviceName.trim(),
-        grade: boundClass ? boundClass.gradeName : grade.trim() || null,
-        className: boundClass ? boundClass.className : className.trim() || null,
+        grade: boundClass ? boundClass.gradeName : null,
+        className: boundClass ? boundClass.className : null,
         classId: boundClass ? boundClass.id : null,
         schoolYearId: boundClass ? boundClass.schoolYearId : null,
         boundClassId: boundClass ? boundClass.id : null,
-        schoolName: schoolName.trim() || null,
+        schoolName: mode === 'master' ? schoolName.trim() || null : null,
         secret: secret.trim() || null,
       });
       // 重载运行期配置（写入 completed_setup / app_mode / school_name 等），再进入主框架
       const raw = await settingsGetAll();
+      if (mode === 'client' && selectedRoomId) {
+        const runtime = toRuntimeSettings(raw);
+        const room = dirRooms.find((item) => item.id === selectedRoomId);
+        if (room) {
+          await classroomUpsert({ id: room.id, roomName: room.roomName, deviceId: runtime.deviceId, remark: room.remark });
+          if (boundClass?.schoolYearId) await classroomAssign(room.id, boundClass.schoolYearId, boundClass.id);
+        }
+      }
       applySettings(raw);
       setPhase('ready');
       pushToast({
@@ -159,34 +166,25 @@ export function SetupWizard(): JSX.Element {
             placeholder="如：三年二班-前台机"
             error={deviceName.trim() === '' && submitting ? '必填' : undefined}
           />
-          <Input
-            label="学校名（可选）"
-            value={schoolName}
-            onChange={(e) => setSchoolName(e.target.value)}
-            placeholder="如：阳光小学"
-          />
+          {mode === 'master' && (
+            <Input
+              label="学校名（可选）"
+              value={schoolName}
+              onChange={(e) => setSchoolName(e.target.value)}
+              placeholder="如：阳光小学"
+            />
+          )}
         </div>
 
         {/* 班级端：绑定年级 / 班级 */}
         {mode === 'client' && (
           <div className="mt-4 space-y-3 rounded-lg bg-surface-muted p-4">
             <div className="flex items-center justify-between">
-              <p className="text-base font-semibold text-ink">年级与班级（班级端必填）</p>
-              {dirClasses.length > 0 && (
-                <Button
-                  variant="secondary"
-                  size="md"
-                  onClick={() => {
-                    setManualScope((v) => !v);
-                    setSelectedClassId(null);
-                  }}
-                >
-                  {manualScope ? '从目录选择' : '手动填写'}
-                </Button>
-              )}
+              <p className="text-base font-semibold text-ink">班级与教室（由教务处维护）</p>
+              {dirClasses.length === 0 && <span className="text-sm text-ink-muted">等待教务处目录同步</span>}
             </div>
 
-            {dirClasses.length > 0 && !manualScope ? (
+            {dirClasses.length > 0 ? (
               <Select
                 label="选择本机所属班级"
                 options={dirClasses.map((c) => ({
@@ -197,28 +195,21 @@ export function SetupWizard(): JSX.Element {
                 onChange={(e) => setSelectedClassId(e.target.value || null)}
                 placeholder="— 请选择班级 —"
               />
-            ) : (
-              <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
-                <Input
-                  label="年级"
-                  value={grade}
-                  onChange={(e) => setGrade(e.target.value)}
-                  placeholder="如：三年级"
-                  error={!scopeOk ? '需填年级或班级' : undefined}
-                />
-                <Input
-                  label="班级"
-                  value={className}
-                  onChange={(e) => setClassName(e.target.value)}
-                  placeholder="如：三年级二班"
-                  error={!scopeOk ? '需填年级或班级' : undefined}
-                />
-              </div>
+            ) : null}
+
+            {dirClasses.length > 0 && (
+              <Select
+                label="选择本机所在教室"
+                options={dirRooms.map((room) => ({ value: room.id, label: room.roomName }))}
+                value={selectedRoomId ?? ''}
+                onChange={(e) => setSelectedRoomId(e.target.value || null)}
+                placeholder="— 请选择教室 —"
+              />
             )}
 
             {dirClasses.length === 0 && (
               <p className="text-sm text-ink-muted">
-                教务端尚未同步年级 / 班级目录，请手动填写；待目录同步后可在此重新绑定。
+                教务端尚未同步年级 / 班级 / 教室目录。可以先完成设备配置，目录同步后再绑定班级和教室；班级端不需要手动维护这些信息。
               </p>
             )}
           </div>
@@ -227,7 +218,9 @@ export function SetupWizard(): JSX.Element {
         {/* 共享密钥 */}
         <div className="mt-5">
           <div className="mb-1.5 flex items-center justify-between">
-            <p className="text-base font-semibold text-ink">共享密钥（可选）</p>
+            <p className="text-base font-semibold text-ink">
+              共享密钥{mode === 'master' ? '（必填）' : '（可稍后在设置中录入）'}
+            </p>
             <Button
               variant="secondary"
               size="md"
@@ -241,8 +234,12 @@ export function SetupWizard(): JSX.Element {
             rows={2}
             value={secret}
             onChange={(e) => setSecret(e.target.value)}
-            placeholder="留空则由本机自动生成；两端粘贴同一串 base64 密钥即可互通"
+            placeholder="请输入或随机生成一串 base64 密钥；所有设备需使用同一密钥"
           />
+          {mode === 'client' && secretMissing && (
+            <p className="mt-1 text-sm text-ink-muted">班级端可先完成设备初始化；进入应用后打开“设置”录入教务处提供的密钥，再刷新目录完成绑定。</p>
+          )}
+          {secretRequired && secretMissing && submitting && <p className="mt-1 text-sm text-red-600">共享密钥不能为空</p>}
           {secretBad && (
             <p className="mt-1 text-sm text-red-600">密钥需为 base64 编码的 32 字节字符串</p>
           )}

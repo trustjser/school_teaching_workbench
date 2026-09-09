@@ -49,7 +49,9 @@ CREATE TABLE IF NOT EXISTS classes (
     dirty       INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0, 1)),
     FOREIGN KEY (grade_id) REFERENCES grades(id) ON DELETE SET NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS ux_classes_name
+-- class_name 仅用于展示，跨学年可能重复；这里使用普通索引。
+-- 旧版唯一索引由 003_school_year 清理，不能在重复历史数据上重新创建唯一索引。
+CREATE INDEX IF NOT EXISTS ix_classes_name
     ON classes(class_name) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ix_classes_grade ON classes(grade_id, sort_order, class_name);
 CREATE INDEX IF NOT EXISTS ix_classes_grade_name ON classes(grade_name, class_name);

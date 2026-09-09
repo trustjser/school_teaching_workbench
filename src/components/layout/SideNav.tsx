@@ -29,6 +29,7 @@ const CLIENT_NAV: NavItem[] = [
   { to: '/client/checkin', label: '快捷考勤', icon: CalendarCheck },
   { to: '/client/students', label: '学生名册', icon: Users },
   { to: '/client/tasks', label: '任务中心', icon: ClipboardList },
+  { to: '/client/matrix', label: '任务看板', icon: LayoutGrid },
   { to: '/client/inbox', label: '通知资料', icon: Inbox },
 ];
 

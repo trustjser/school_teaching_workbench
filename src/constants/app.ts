@@ -105,7 +105,7 @@ export const DEFAULT_SETTINGS = {
   appMode: 'client',
   apiPort: API_PORT,
   mdnsServiceType: MDNS_SERVICE_TYPE,
-  uiScale: 1.25,
+  uiScale: 0.75,
   theme: 'light',
   heartbeatInterval: HEARTBEAT_INTERVAL_SEC,
   offlineTtlSec: OFFLINE_TTL_SEC,

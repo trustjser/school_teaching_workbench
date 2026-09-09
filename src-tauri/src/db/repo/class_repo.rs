@@ -4,6 +4,7 @@
 //! (school_year_id, grade_id, class_no)，由教务端统一维护，经离线队列同步到
 //! 班级端（entity_type = 'class'）。
 
+use std::collections::HashMap;
 use sqlx::SqlitePool;
 
 use crate::db::models::Class;
@@ -24,7 +25,7 @@ pub async fn list(
     )
     .fetch_all(pool)
     .await?;
-    Ok(rows.into_iter().filter(|c| {
+    let filtered = rows.into_iter().filter(|c| {
         let grade_ok = match grade_id {
             Some(id) if !id.is_empty() => c.grade_id.as_deref() == Some(id),
             _ => true,
@@ -34,7 +35,26 @@ pub async fn list(
             _ => true,
         };
         grade_ok && year_ok
-    }).collect())
+    });
+    // 历史版本允许同一学年/年级下产生重复展示名；客户端选择绑定时只保留
+    // 最新记录，避免同名班级被显示成两个可选项。
+    let mut unique: HashMap<String, Class> = HashMap::new();
+    for class in filtered {
+        let key = format!(
+            "{}|{}|{}|{}",
+            class.school_year_id.as_deref().unwrap_or_default(),
+            class.grade_id.as_deref().unwrap_or_default(),
+            class.class_no.as_deref().unwrap_or_default(),
+            class.class_name
+        );
+        match unique.get(&key) {
+            Some(existing) if existing.updated_at >= class.updated_at => {}
+            _ => {
+                unique.insert(key, class);
+            }
+        }
+    }
+    Ok(unique.into_values().collect())
 }
 
 /// 按学年查询该学年下全部有效班级（班级端按年隔离消费用）。
@@ -153,6 +173,18 @@ pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
 
 /// 合并远端班级（last-write-wins）。
 pub async fn merge_remote(pool: &SqlitePool, remote: &Class) -> AppResult<MergeOutcome> {
+    if remote.deleted_at.is_some() {
+        sqlx::query(
+            "UPDATE classes SET deleted_at = ?, updated_at = ?, dirty = 0, sync_state = 'synced'
+             WHERE id = ?",
+        )
+        .bind(remote.deleted_at)
+        .bind(remote.updated_at)
+        .bind(&remote.id)
+        .execute(pool)
+        .await?;
+        return Ok(MergeOutcome::Deleted);
+    }
     let local: Option<(i64,)> = sqlx::query_as::<_, (i64,)>("SELECT updated_at FROM classes WHERE id = ?")
         .bind(&remote.id)
         .fetch_optional(pool)

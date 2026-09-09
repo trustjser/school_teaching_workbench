@@ -56,6 +56,7 @@ export function StudentImportDialog({
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<{ success: number; failed: number } | null>(null);
   const [errorList, setErrorList] = useState<ImportRowError[]>([]);
+  const [existingStudents, setExistingStudents] = useState<import('@/types/models').Student[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const reset = useCallback(() => {
@@ -69,6 +70,7 @@ export function StudentImportDialog({
     setProgress(0);
     setResult(null);
     setErrorList([]);
+    setExistingStudents([]);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -80,7 +82,10 @@ export function StudentImportDialog({
     async (file: File | null) => {
       if (!file) return;
       try {
-        const parsed = await parseStudentFile(file);
+        const parsed = await parseStudentFile(file, {
+          defaultClassName: classContext?.className ?? null,
+          defaultGrade: classContext?.grade ?? null,
+        });
         setFileName(file.name);
         setEncoding(parsed.encoding);
         setHeaders(parsed.headers);
@@ -88,16 +93,34 @@ export function StudentImportDialog({
         setRows(parsed.parsed);
         setErrorList(parsed.parsed.flatMap((r) => r.errors));
         setBatchName(`${file.name.replace(/\.[^.]+$/, '')} 导入`);
+        // 在预览阶段同时读取当前名册，用稳定学号计算变更摘要。
+        const existing = await studentList({ classId: classContext?.classId ?? null });
+        setExistingStudents(existing);
         setStep('map');
       } catch (err) {
         app.toastError(err, '解析文件失败');
       }
     },
-    [app],
+    [app, classContext?.classId],
   );
 
   const validRows = useMemo(() => rows.filter((r) => r.errors.length === 0), [rows]);
   const invalidRows = useMemo(() => rows.filter((r) => r.errors.length > 0), [rows]);
+  const rosterDiff = useMemo(() => {
+    const existingByNo = new Map(existingStudents.map((s) => [s.studentNo, s]));
+    const incomingByNo = new Map(validRows.map((r) => [r.studentNo, r]));
+    let added = 0;
+    let moved = 0;
+    let updated = 0;
+    validRows.forEach((row) => {
+      const old = existingByNo.get(row.studentNo);
+      if (!old) added += 1;
+      else if ((old.className ?? '') !== row.className || (old.grade ?? '') !== row.grade) moved += 1;
+      else if (old.name !== row.name || (old.seatNo ?? null) !== (row.seatNo ?? null)) updated += 1;
+    });
+    const removed = existingStudents.filter((s) => !incomingByNo.has(s.studentNo)).length;
+    return { added, moved, updated, removed };
+  }, [existingStudents, validRows]);
 
   const columnMapOptions = useMemo(
     () => [
@@ -268,6 +291,13 @@ export function StudentImportDialog({
               <p className="text-2xl font-bold text-red-800">{invalidRows.length}</p>
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <DiffStat label="新增学生" value={rosterDiff.added} tone="text-green-700" />
+            <DiffStat label="转班变化" value={rosterDiff.moved} tone="text-amber-700" />
+            <DiffStat label="信息更新" value={rosterDiff.updated} tone="text-blue-700" />
+            <DiffStat label="名单缺失" value={rosterDiff.removed} tone="text-red-700" />
+          </div>
+          <p className="text-sm text-ink-muted">变更摘要仅按学号匹配；名单缺失的学生不会被自动删除，会保留并可在确认后单独处理。</p>
           <Input
             label="导入批次名"
             value={batchName}
@@ -339,4 +369,8 @@ export function StudentImportDialog({
       )}
     </Modal>
   );
+}
+
+function DiffStat({ label, value, tone }: { label: string; value: number; tone: string }): JSX.Element {
+  return <div className="rounded-lg border border-surface-border bg-surface-muted p-3"><p className="text-sm text-ink-muted">{label}</p><p className={`text-2xl font-bold ${tone}`}>{value}</p></div>;
 }

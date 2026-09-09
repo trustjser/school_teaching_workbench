@@ -31,7 +31,9 @@ pub struct Envelope {
     pub ts: i64,
     /// nonce（Base64）。
     pub nonce: String,
-    /// 密文（`iv || cipher || tag` 的 Base64）。
+    /// AES-GCM IV（Base64）。
+    pub iv: String,
+    /// 密文与认证标签（`cipher || tag` 的 Base64）。
     pub ciphertext: String,
     /// HMAC 签名（`v1=<b64>`）。
     pub sig: String,
@@ -84,7 +86,8 @@ pub fn seal(
         from: from.to_string(),
         to: to.to_string(),
         ts,
-        nonce: hmac::b64_encode(&iv),
+        nonce,
+        iv: hmac::b64_encode(&iv),
         ciphertext: hmac::b64_encode(&combined),
         sig,
         body_sha256: body_sha,
@@ -109,7 +112,7 @@ pub fn open(root_secret_b64: &str, method: &str, path: &str, env: &Envelope) -> 
     let secret = hmac::b64_decode(root_secret_b64)?;
     let key = cipher::derive_session_key(&secret, &env.from, &env.to, &env.kid)?;
 
-    let iv = hmac::b64_decode(&env.nonce)?;
+    let iv = hmac::b64_decode(&env.iv)?;
     let combined = hmac::b64_decode(&env.ciphertext)?;
     let plaintext = cipher::decrypt_blob(&key, &iv, &combined, aad_canon.as_bytes())?;
 
@@ -125,4 +128,19 @@ pub fn open(root_secret_b64: &str, method: &str, path: &str, env: &Envelope) -> 
     }
 
     serde_json::from_slice(&plaintext).map_err(|err| AppError::crypto().with_detail(format!("inner 解析失败: {}", err)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine;
+
+    #[test]
+    fn seal_open_roundtrip_preserves_replay_nonce_and_iv() {
+        let secret = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
+        let body = serde_json::json!({ "probe": true });
+        let env = seal(&secret, "test-kid", "from", "to", "POST", "/api/v1/ping", &body).unwrap();
+        assert_ne!(env.nonce, env.iv);
+        assert_eq!(open(&secret, "POST", "/api/v1/ping", &env).unwrap(), body);
+    }
 }

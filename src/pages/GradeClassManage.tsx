@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CalendarPlus, Pencil, Plus, Trash2, Users } from 'lucide-react';
+import { CalendarPlus, Pencil, Plus, Trash2, Users, Monitor } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -13,7 +13,9 @@ import { StudentEditDrawer } from '@/components/student/StudentEditDrawer';
 import { StudentImportDialog } from '@/components/student/StudentImportDialog';
 import { useDirectoryStore } from '@/store/useDirectoryStore';
 import { useStudentStore } from '@/store/useStudentStore';
-import type { Class, SchoolYear, Student } from '@/types/models';
+import { useDeviceStore } from '@/store/useDeviceStore';
+import { classroomAssign, classroomAssignments, classroomDelete, classroomList, classroomUpsert } from '@/lib/db';
+import type { Class, Classroom, ClassroomAssignment, SchoolYear, Student } from '@/types/models';
 
 interface GradeDraft {
   id?: string;
@@ -41,6 +43,12 @@ interface SchoolYearDraft {
   startDate: string;
   endDate: string;
   sortOrder: string;
+  remark: string;
+}
+
+interface ClassroomDraft {
+  id?: string;
+  roomName: string;
   remark: string;
 }
 
@@ -95,12 +103,18 @@ export function GradeClassManage(): JSX.Element {
   } = useDirectoryStore();
 
   const loadStudents = useStudentStore((s) => s.load);
+  const devices = useDeviceStore((s) => s.devices);
+  const loadDevices = useDeviceStore((s) => s.load);
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [assignments, setAssignments] = useState<ClassroomAssignment[]>([]);
+  const [roomName, setRoomName] = useState('');
 
   const [gradeDraft, setGradeDraft] = useState<GradeDraft | null>(null);
   const [classDraft, setClassDraft] = useState<ClassDraft | null>(null);
   const [yearDraft, setYearDraft] = useState<SchoolYearDraft | null>(null);
+  const [classroomDraft, setClassroomDraft] = useState<ClassroomDraft | null>(null);
   const [pendingDelete, setPendingDelete] = useState<
-    { kind: 'grade' | 'class' | 'year'; id: string; name: string } | null
+    { kind: 'grade' | 'class' | 'year' | 'classroom'; id: string; name: string } | null
   >(null);
 
   const [editTarget, setEditTarget] = useState<Student | null>(null);
@@ -109,7 +123,58 @@ export function GradeClassManage(): JSX.Element {
   useEffect(() => {
     void loadGrades();
     void loadSchoolYears();
+    void loadDevices();
   }, [loadGrades, loadSchoolYears]);
+
+  useEffect(() => {
+    void classroomList().then(setClassrooms).catch(() => undefined);
+    void classroomAssignments(selectedSchoolYearId).then(setAssignments).catch(() => undefined);
+  }, [selectedSchoolYearId]);
+
+  const refreshClassrooms = async (): Promise<void> => {
+    const [rooms, current] = await Promise.all([
+      classroomList(),
+      classroomAssignments(selectedSchoolYearId),
+    ]);
+    setClassrooms(rooms);
+    setAssignments(current);
+  };
+
+  const addClassroom = async (): Promise<void> => {
+    if (!roomName.trim()) return;
+    await classroomUpsert({ roomName: roomName.trim(), deviceId: null, remark: null });
+    setRoomName('');
+    await refreshClassrooms();
+  };
+
+  const saveClassroom = async (): Promise<void> => {
+    if (!classroomDraft?.roomName.trim()) return;
+    const current = classrooms.find((room) => room.id === classroomDraft.id);
+    await classroomUpsert({
+      id: classroomDraft.id,
+      roomName: classroomDraft.roomName.trim(),
+      deviceId: current?.deviceId ?? null,
+      remark: classroomDraft.remark.trim() || null,
+    });
+    setClassroomDraft(null);
+    await refreshClassrooms();
+  };
+
+  const bindSelectedClass = async (room: Classroom): Promise<void> => {
+    if (!selectedSchoolYearId || !selectedClass) return;
+    await classroomAssign(room.id, selectedSchoolYearId, selectedClass.id);
+    await refreshClassrooms();
+  };
+
+  const bindDevice = async (room: Classroom, deviceId: string): Promise<void> => {
+    await classroomUpsert({
+      id: room.id,
+      roomName: room.roomName,
+      deviceId: deviceId || null,
+      remark: room.remark,
+    });
+    await refreshClassrooms();
+  };
 
   useEffect(() => {
     if (selectedGradeId) void loadClasses(selectedGradeId);
@@ -210,7 +275,11 @@ export function GradeClassManage(): JSX.Element {
     if (!pendingDelete) return;
     if (pendingDelete.kind === 'grade') await removeGrade(pendingDelete.id);
     else if (pendingDelete.kind === 'class') await removeClass(pendingDelete.id);
-    else await removeSchoolYear(pendingDelete.id);
+    else if (pendingDelete.kind === 'year') await removeSchoolYear(pendingDelete.id);
+    else {
+      await classroomDelete(pendingDelete.id);
+      await refreshClassrooms();
+    }
     setPendingDelete(null);
   };
 
@@ -272,6 +341,47 @@ export function GradeClassManage(): JSX.Element {
           </Button>
         )}
       </div>
+
+      <Card className="p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xl font-bold text-ink">教室（物理位置）与设备</p>
+            <p className="text-sm text-ink-muted">教室长期保留，设备可以更换；按当前学年绑定服务班级，换学年无需重装设备。</p>
+          </div>
+          <div className="flex gap-2">
+            <Input label="" aria-label="教室名称" placeholder="新增教室，如 301" value={roomName} onChange={(e) => setRoomName(e.target.value)} />
+            <Button size="md" onClick={() => void addClassroom()} disabled={!roomName.trim()}>新增教室</Button>
+          </div>
+        </div>
+        {classrooms.length === 0 ? <p className="text-sm text-ink-muted">还没有教室记录。</p> : (
+          <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+            {classrooms.map((room) => {
+              const assignment = assignments.find((a) => a.classroomId === room.id);
+              const device = devices.find((d) => d.deviceId === room.deviceId);
+              const assignedClass = classes.find((c) => c.id === assignment?.classId);
+              return <div key={room.id} className="rounded-lg border border-surface-border p-3">
+                <div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2"><Monitor className="h-4 w-4 text-brand-600" /><span className="font-semibold text-ink">{room.roomName}</span></div><div className="flex gap-1"><Button variant="ghost" icon={<Pencil className="h-4 w-4" />} onClick={() => setClassroomDraft({ id: room.id, roomName: room.roomName, remark: room.remark ?? '' })}>编辑</Button><Button variant="ghost" icon={<Trash2 className="h-4 w-4" />} onClick={() => setPendingDelete({ kind: 'classroom', id: room.id, name: room.roomName })}>删除</Button></div></div>
+                <div className="mt-2">
+                  <Select
+                    label="绑定设备"
+                    options={[
+                      { value: '', label: '未绑定设备' },
+                      ...devices
+                        .filter((d) => d.isSelf || d.deviceId === room.deviceId || !classrooms.some((other) => other.id !== room.id && other.deviceId === d.deviceId))
+                        .map((d) => ({ value: d.deviceId, label: d.deviceName })),
+                    ]}
+                    value={room.deviceId ?? ''}
+                    onChange={(e) => void bindDevice(room, e.target.value)}
+                  />
+                </div>
+                <p className="mt-1 text-sm text-ink-muted">当前：{device?.deviceName ?? room.deviceId ?? '未绑定'}</p>
+                <p className="text-sm text-ink-muted">当前班级：{assignedClass?.className ?? '未分配'}</p>
+                <Button className="mt-2" size="md" variant="secondary" disabled={!selectedClass || !selectedSchoolYearId} onClick={() => void bindSelectedClass(room)}>绑定当前班级</Button>
+              </div>;
+            })}
+          </div>
+        )}
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[20rem_1fr]">
         {/* 年级列表 */}
@@ -601,6 +711,16 @@ export function GradeClassManage(): JSX.Element {
         )}
       </Modal>
 
+      <Modal
+        open={classroomDraft !== null}
+        onClose={() => setClassroomDraft(null)}
+        title="编辑教室"
+        widthClass="max-w-lg"
+        footer={<><Button variant="secondary" onClick={() => setClassroomDraft(null)}>取消</Button><Button onClick={() => void saveClassroom()} disabled={!classroomDraft?.roomName.trim()}>保存</Button></>}
+      >
+        {classroomDraft && <div className="space-y-4"><Input label="教室名称" value={classroomDraft.roomName} onChange={(e) => setClassroomDraft({ ...classroomDraft, roomName: e.target.value })} /><Textarea label="备注" value={classroomDraft.remark} onChange={(e) => setClassroomDraft({ ...classroomDraft, remark: e.target.value })} rows={3} /></div>}
+      </Modal>
+
       {/* 删除确认 */}
       <ConfirmDialog
         open={pendingDelete !== null}
@@ -610,7 +730,9 @@ export function GradeClassManage(): JSX.Element {
             ? '删除年级'
             : pendingDelete?.kind === 'class'
               ? '删除班级'
-              : '删除学年'
+              : pendingDelete?.kind === 'year'
+                ? '删除学年'
+                : '删除教室'
         }
         message={`确定删除「${pendingDelete?.name}」吗？`}
         detail={
@@ -618,7 +740,9 @@ export function GradeClassManage(): JSX.Element {
             ? '其下班级的年级关联将置空，但班级与学生记录保留。'
             : pendingDelete?.kind === 'class'
               ? '该班级的学生名单保留，仅解除与班级的关联。'
-              : '该学年的班级 school_year_id 保留，历史数据不丢失；仅解除「当前学年」语义。'
+              : pendingDelete?.kind === 'year'
+                ? '该学年的班级 school_year_id 保留，历史数据不丢失；仅解除「当前学年」语义。'
+                : '教室及其学年班级绑定会被移出目录，设备不会被删除。'
         }
         confirmText="删除"
         onCancel={() => setPendingDelete(null)}

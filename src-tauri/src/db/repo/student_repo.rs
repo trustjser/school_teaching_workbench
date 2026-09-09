@@ -35,12 +35,12 @@ pub async fn list(pool: &SqlitePool, filter: StudentFilter) -> AppResult<Vec<Stu
     }
     if let Some(class_id) = &filter.class_id {
         if !class_id.is_empty() {
-            // 目录消费主路径：按 class_id 命中；无 class_id 的旧数据回退按 class_name 命中。
-            // 注意回退用展示名（filter.class_name）而非 id，否则旧数据会整体落空。
+            // 目录消费主路径：按 class_id 命中；班级被重建或合并后，
+            // 旧名册可能仍携带旧 class_id，此时按同一展示名回退，避免名册消失。
             let cn = filter.class_name.clone().unwrap_or_default();
             sql.push_str(" AND (class_id = ");
             sql.push_str(&quote(class_id));
-            sql.push_str(" OR (class_id IS NULL AND class_name = ");
+            sql.push_str(" OR (class_name = ");
             sql.push_str(&quote(&cn));
             sql.push_str("))");
         } else if let Some(class_name) = &filter.class_name {
@@ -82,6 +82,18 @@ pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Option<Student>> {
     .fetch_optional(pool)
     .await?;
     Ok(row)
+}
+
+/// 查询某次导入成功写入的学生，用于把批量导入结果逐条放入同步队列。
+pub async fn list_by_import_batch(pool: &SqlitePool, batch_id: &str) -> AppResult<Vec<Student>> {
+    Ok(sqlx::query_as::<_, Student>(
+        "SELECT id, student_no, name, gender, grade, class_name, class_id, seat_no, status, status_since,
+                note, phone, import_batch_id, created_at, updated_at, deleted_at, sync_state, dirty
+         FROM students WHERE import_batch_id = ? AND deleted_at IS NULL ORDER BY student_no",
+    )
+    .bind(batch_id)
+    .fetch_all(pool)
+    .await?)
 }
 
 /// 按 `(grade, class_name, student_no)` 查询有效学生。
@@ -456,6 +468,19 @@ pub async fn merge_remote(
 
     let state = merged_sync_state(outcome);
     let mut merged = remote.clone();
+    // 导入批次属于来源端的本地审计信息，并不随目录增量同步。
+    // 目标端没有对应批次时保留该外键会触发 FK 失败，导致整条学生记录被静默拒绝。
+    if let Some(batch_id) = merged.import_batch_id.as_deref() {
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM import_batches WHERE id = ? AND deleted_at IS NULL",
+        )
+        .bind(batch_id)
+        .fetch_one(pool)
+        .await?;
+        if exists == 0 {
+            merged.import_batch_id = None;
+        }
+    }
     merged.sync_state = state.to_string();
     merged.dirty = false;
     upsert(pool, merged).await?;
