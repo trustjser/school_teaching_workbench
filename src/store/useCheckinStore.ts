@@ -45,7 +45,7 @@ interface CheckinState_ {
   /** 循环切换状态（点击卡片主入口） */
   cycle: (student: Student) => Promise<void>;
   /** 显式设置状态（late 等） */
-  setState: (student: Student, state: CheckinState) => Promise<void>;
+  setState: (student: Student, state: CheckinState, note?: string | null) => Promise<void>;
   /** 批量设置（一键全勤 / 异常名单复核） */
   batchSetState: (students: Student[], state: CheckinState) => Promise<void>;
   /** 取有效状态（无记录 → present） */
@@ -59,7 +59,7 @@ interface CheckinState_ {
 
 export const useCheckinStore = create<CheckinState_>((set, get) => ({
   date: toDateKey(Date.now()),
-  period: 'am',
+  period: 'all',
   periodLabel: null,
   records: {},
   loading: false,
@@ -68,12 +68,12 @@ export const useCheckinStore = create<CheckinState_>((set, get) => ({
   lastError: null,
 
   setDate: (date) => set({ date }),
-  setPeriod: (period, label) => set({ period, periodLabel: label ?? null }),
+  setPeriod: (_period, _label) => set({ period: 'all', periodLabel: null }),
 
   load: async (students, date, period) => {
     const app = useAppStore.getState();
     const targetDate = date ?? get().date;
-    const targetPeriod = period ?? get().period;
+    const targetPeriod: CheckinPeriod = 'all';
     set({ loading: true, lastError: null });
     try {
       const list = await checkinList(targetDate, targetPeriod);
@@ -98,28 +98,37 @@ export const useCheckinStore = create<CheckinState_>((set, get) => ({
     await get().setState(student, next);
   },
 
-  setState: async (student, nextState) => {
+  setState: async (student, nextState, note) => {
     const app = useAppStore.getState();
-    const { date, period, periodLabel } = get();
+    const { date } = get();
+    const period: CheckinPeriod = 'all';
     const prevRecord = get().records[student.id] ?? null;
     const prevState = prevRecord?.state ?? 'present';
 
-    if (prevState === nextState && prevRecord) return;
+    if (prevState === nextState && prevRecord && note === undefined) return;
 
     // ---- ① 乐观更新：立即构造虚拟记录并写入缓存 ----
     const now = Date.now();
     const optimistic: CheckinRecord = prevRecord
-      ? { ...prevRecord, state: nextState, markedAt: now, updatedAt: now }
+      ? {
+          ...prevRecord,
+          state: nextState,
+          period: 'all',
+          periodLabel: null,
+          note: note === undefined ? prevRecord.note : note,
+          markedAt: now,
+          updatedAt: now,
+        }
       : {
           id: `tmp-${student.id}-${date}-${period}`,
           studentId: student.id,
           checkinDate: date,
           period,
-          periodLabel: periodLabel ?? null,
+          periodLabel: null,
           state: nextState,
           markedBy: app.settings.deviceName || null,
           markedAt: now,
-          note: null,
+          note: note ?? null,
           source: 'local',
           createdAt: now,
           updatedAt: now,
@@ -141,7 +150,7 @@ export const useCheckinStore = create<CheckinState_>((set, get) => ({
         date,
         period,
         state: nextState,
-        note: prevRecord?.note ?? null,
+        note: note === undefined ? (prevRecord?.note ?? null) : note,
       });
       // ---- ③ 用服务端返回的真实记录替换乐观记录 ----
       set((s) => ({
@@ -174,7 +183,8 @@ export const useCheckinStore = create<CheckinState_>((set, get) => ({
 
   batchSetState: async (students, nextState) => {
     const app = useAppStore.getState();
-    const { date, period } = get();
+    const { date } = get();
+    const period: CheckinPeriod = 'all';
     const snapshot = { ...get().records };
 
     const optimisticMap: Record<string, CheckinRecord> = {};
@@ -182,13 +192,13 @@ export const useCheckinStore = create<CheckinState_>((set, get) => ({
     students.forEach((st) => {
       const prev = get().records[st.id] ?? null;
       optimisticMap[st.id] = prev
-        ? { ...prev, state: nextState, markedAt: now, updatedAt: now }
+        ? { ...prev, state: nextState, period: 'all', periodLabel: null, markedAt: now, updatedAt: now }
         : {
             id: `tmp-${st.id}-${date}-${period}`,
             studentId: st.id,
             checkinDate: date,
-            period,
-            periodLabel: get().periodLabel ?? null,
+            period: 'all',
+            periodLabel: null,
             state: nextState,
             markedBy: app.settings.deviceName || null,
             markedAt: now,
@@ -209,6 +219,7 @@ export const useCheckinStore = create<CheckinState_>((set, get) => ({
         date,
         period,
         state: nextState,
+        note: get().records[st.id]?.note ?? null,
       }));
       const savedList = await checkinBatchMark(items);
       const merged = { ...get().records };

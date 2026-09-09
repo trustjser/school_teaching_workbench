@@ -220,6 +220,16 @@ export const TASK_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: 'archived', label: '已归档' },
 ];
 
+/** 教务任务下发的生命周期状态（对应 broadcast_tasks.status）。 */
+export const BROADCAST_STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: 'draft', label: '草稿' },
+  { value: 'sending', label: '发送中' },
+  { value: 'sent', label: '已发送' },
+  { value: 'partial', label: '部分完成' },
+  { value: 'closed', label: '已关闭' },
+  { value: 'cancelled', label: '已取消' },
+];
+
 /** 广播优先级选项 */
 export const PRIORITY_OPTIONS: { value: string; label: string }[] = [
   { value: 'low', label: '普通' },

@@ -28,7 +28,8 @@ export function TaskManage(): JSX.Element {
   const tasks = useTaskStore((s) => s.tasks);
   const currentTaskId = useTaskStore((s) => s.currentTaskId);
   const nodes = useTaskStore((s) => (currentTaskId ? s.nodes[currentTaskId] ?? [] : []));
-  const loadTasks = useTaskStore((s) => s.loadTasks);
+  const loadTaskPage = useTaskStore((s) => s.loadTaskPage);
+  const taskPage = useTaskStore((s) => s.taskPage);
   const loadMatrix = useTaskStore((s) => s.loadMatrix);
   const setCurrentTask = useTaskStore((s) => s.setCurrentTask);
   const upsertTask = useTaskStore((s) => s.upsertTask);
@@ -40,18 +41,23 @@ export function TaskManage(): JSX.Element {
   const [createOpen, setCreateOpen] = useState(false);
   const [editNodesOpen, setEditNodesOpen] = useState(false);
   const [booting, setBooting] = useState(true);
+  const [keyword, setKeyword] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
 
   useEffect(() => {
-    void loadTasks();
+    void loadTaskPage(page, pageSize, keyword, statusFilter);
     const t = setTimeout(() => setBooting(false), 450);
     return () => clearTimeout(t);
-  }, [loadTasks]);
+  }, [loadTaskPage, page, pageSize, keyword, statusFilter]);
 
   useEffect(() => {
     if (currentTaskId && nodes.length === 0) void loadMatrix(currentTaskId);
   }, [currentTaskId, nodes.length, loadMatrix]);
 
   const handleCreate = async (data: NewTaskInput): Promise<void> => {
+    const runtimeSettings = useAppStore.getState().settings;
     const saved = await upsertTask({
       title: data.title,
       description: data.description || null,
@@ -62,6 +68,8 @@ export function TaskManage(): JSX.Element {
       scoreEnabled: data.scoreEnabled,
       noteEnabled: data.noteEnabled,
       status: 'active',
+      grade: runtimeSettings.grade,
+      className: runtimeSettings.className,
     });
     const now = Date.now();
     const initNodes: TaskStatusNode[] = data.nodes.map((n, i) => ({
@@ -81,7 +89,7 @@ export function TaskManage(): JSX.Element {
       dirty: false,
     }));
     await saveNodes(saved.id, initNodes);
-    await loadTasks();
+    await loadTaskPage(page, pageSize, keyword, statusFilter);
     await loadMatrix(saved.id);
     pushToast({ kind: 'success', title: '任务已创建', description: `已生成 ${initNodes.length} 个状态节点` });
   };
@@ -121,9 +129,11 @@ export function TaskManage(): JSX.Element {
             状态节点
           </Button>
           <Link to={`/client/matrix?task=${encodeURIComponent(t.id)}`}><Button size="md" variant="secondary">打开看板</Button></Link>
-          <Button size="md" variant="danger" onClick={() => void removeTask(t.id)}>
-            删除
-          </Button>
+          {t.source === 'broadcast' ? (
+            <span className="px-2 py-2 text-sm font-semibold text-ink-muted">教务下发 · 不可删除</span>
+          ) : (
+            <Button size="md" variant="danger" onClick={() => void removeTask(t.id)}>删除</Button>
+          )}
         </div>
       ),
     },
@@ -137,6 +147,11 @@ export function TaskManage(): JSX.Element {
       </div>
 
       <Card>
+        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(240px,1fr)_minmax(180px,220px)_auto]">
+          <Input label="搜索任务" value={keyword} onChange={(event) => { setKeyword(event.target.value); setPage(1); }} placeholder="按标题搜索" />
+          <Select label="状态" options={TASK_STATUS_OPTIONS} value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }} placeholder="全部状态" />
+          <Button variant="secondary" className="self-end" onClick={() => void loadTaskPage(page, pageSize, keyword, statusFilter)}>搜索</Button>
+        </div>
         {booting && tasks.length === 0 ? (
           <SkeletonRows rows={5} />
         ) : (
@@ -146,6 +161,15 @@ export function TaskManage(): JSX.Element {
             rowKey={(t) => t.id}
             empty={<span>还没有任务，点击「新建任务」创建第一个自定义任务。</span>}
           />
+        )}
+        {taskPage && taskPage.total > pageSize && (
+          <div className="mt-4 flex items-center justify-between gap-3 text-sm text-ink-muted">
+            <span>共 {taskPage.total} 个任务，第 {taskPage.page} / {Math.ceil(taskPage.total / pageSize)} 页</span>
+            <div className="flex gap-2">
+              <Button size="md" variant="secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>上一页</Button>
+              <Button size="md" variant="secondary" disabled={page >= Math.ceil(taskPage.total / pageSize)} onClick={() => setPage((value) => value + 1)}>下一页</Button>
+            </div>
+          </div>
         )}
       </Card>
 

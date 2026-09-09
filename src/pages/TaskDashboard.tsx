@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, ClipboardCheck, RefreshCw } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTaskStore } from '@/store/useTaskStore';
 import { Card } from '@/components/ui/Card';
-import { Select } from '@/components/ui/Select';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { Table, type TableColumn } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -15,21 +15,33 @@ import type { TaskProgressRow } from '@/types/api';
 /** 教务端任务全局处理看板：任务总览 → 班级进度 → 学生明细。 */
 export function TaskDashboard(): JSX.Element {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const tasks = useTaskStore((s) => s.tasks);
   const completion = useTaskStore((s) => s.completionStats);
   const progress = useTaskStore((s) => s.progress);
   const loadTasks = useTaskStore((s) => s.loadTasks);
   const loadCompletion = useTaskStore((s) => s.loadCompletionStats);
   const loadProgress = useTaskStore((s) => s.loadProgress);
-  const [selectedTaskId, setSelectedTaskId] = useState('');
-  const [grade, setGrade] = useState('');
-  const [className, setClassName] = useState('');
+  const [selectedTaskId, setSelectedTaskId] = useState(() => searchParams.get('task') ?? '');
+  const [grade, setGrade] = useState(() => searchParams.get('grade') ?? '');
+  const [className, setClassName] = useState(() => searchParams.get('class') ?? '');
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (selectedTaskId) next.set('task', selectedTaskId);
+    if (grade) next.set('grade', grade);
+    if (className) next.set('class', className);
+    setSearchParams(next, { replace: true });
+  }, [className, grade, selectedTaskId, setSearchParams]);
 
   const refresh = async (): Promise<void> => {
     await Promise.all([loadTasks(), loadCompletion()]);
-    const taskId = selectedTaskId || useTaskStore.getState().tasks[0]?.id;
+    const availableTasks = useTaskStore.getState().tasks;
+    const taskId = availableTasks.some((task) => task.id === selectedTaskId)
+      ? selectedTaskId
+      : availableTasks[0]?.id ?? '';
     if (taskId) {
-      setSelectedTaskId(taskId);
+      if (taskId !== selectedTaskId) setSelectedTaskId(taskId);
       await loadProgress(taskId, grade || null, className || null);
     }
   };
@@ -47,11 +59,17 @@ export function TaskDashboard(): JSX.Element {
 
   const selectedSummary = completion.find((row) => row.taskId === selectedTaskId);
   const gradeOptions = useMemo(
-    () => Array.from(new Set(progress.map((row) => row.grade).filter(Boolean) as string[])).map((value) => ({ value, label: value })),
+    () => [
+      { value: '', label: '全部年级' },
+      ...Array.from(new Set(progress.map((row) => row.grade).filter(Boolean) as string[])).map((value) => ({ value, label: value })),
+    ],
     [progress],
   );
   const classOptions = useMemo(
-    () => Array.from(new Set(progress.map((row) => row.className))).map((value) => ({ value, label: value })),
+    () => [
+      { value: '', label: '全部班级' },
+      ...Array.from(new Set(progress.map((row) => row.className))).map((value) => ({ value, label: value })),
+    ],
     [progress],
   );
 
@@ -116,16 +134,16 @@ export function TaskDashboard(): JSX.Element {
       </div>
 
       <Card>
-        <div className="grid gap-3 board:grid-cols-[minmax(240px,1.5fr)_minmax(180px,1fr)_minmax(180px,1fr)]">
-          <Select label="任务" options={taskOptions} placeholder="选择任务" value={selectedTaskId} onChange={(e) => { setSelectedTaskId(e.target.value); setGrade(''); setClassName(''); }} />
-          <Select label="年级" options={gradeOptions} placeholder="全部年级" value={grade} onChange={(e) => { setGrade(e.target.value); setClassName(''); }} />
-          <Select label="班级" options={classOptions} placeholder="全部班级" value={className} onChange={(e) => setClassName(e.target.value)} />
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(240px,1.5fr)_minmax(180px,1fr)_minmax(180px,1fr)]">
+          <SearchableSelect label="任务" options={taskOptions} placeholder="选择任务" value={selectedTaskId} onChange={(value) => { setSelectedTaskId(value); setGrade(''); setClassName(''); }} />
+          <SearchableSelect label="年级" options={gradeOptions} placeholder="全部年级" value={grade} onChange={(value) => { setGrade(value); setClassName(''); }} />
+          <SearchableSelect label="班级" options={classOptions} placeholder="全部班级" value={className} onChange={setClassName} />
         </div>
       </Card>
 
       {selectedSummary && (
         <div className="grid gap-3 grid-cols-2 board:grid-cols-4">
-          <Card><p className="text-sm text-ink-muted">参与人数</p><p className="mt-1 text-3xl font-bold text-ink">{selectedSummary.total}</p></Card>
+          <Card><p className="text-sm text-ink-muted">班级人数</p><p className="mt-1 text-3xl font-bold text-ink">{selectedSummary.total}</p></Card>
           <Card><p className="text-sm text-ink-muted">已完成</p><p className="mt-1 text-3xl font-bold text-green-700">{selectedSummary.finalCount}</p></Card>
           <Card><p className="text-sm text-ink-muted">完成率</p><p className="mt-1 text-3xl font-bold text-brand-700">{formatPercent(selectedSummary.completionRate * 100)}</p></Card>
           <Card><p className="text-sm text-ink-muted">平均分</p><p className="mt-1 text-3xl font-bold text-violet-700">{selectedSummary.avgScore == null ? '—' : selectedSummary.avgScore.toFixed(1)}</p></Card>
@@ -137,7 +155,15 @@ export function TaskDashboard(): JSX.Element {
           columns={columns}
           data={progress}
           rowKey={(row) => `${row.taskId}:${row.className}`}
-          onRowClick={(row) => navigate(`/master/tasks/${encodeURIComponent(row.taskId)}?class=${encodeURIComponent(row.className)}`)}
+          onRowClick={(row) => {
+            const returnParams = new URLSearchParams();
+            if (selectedTaskId) returnParams.set('task', selectedTaskId);
+            if (grade) returnParams.set('grade', grade);
+            if (className) returnParams.set('class', className);
+            const returnTo = `/master/tasks${returnParams.toString() ? `?${returnParams.toString()}` : ''}`;
+            const detailParams = new URLSearchParams({ class: row.className, return: returnTo });
+            navigate(`/master/tasks/${encodeURIComponent(row.taskId)}?${detailParams.toString()}`);
+          }}
           empty={<span className="text-ink-muted">暂无班级任务记录</span>}
         />
       </Card>

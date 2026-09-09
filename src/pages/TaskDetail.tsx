@@ -17,6 +17,7 @@ export function TaskDetail(): JSX.Element {
   const { taskId = '' } = useParams();
   const [params] = useSearchParams();
   const className = params.get('class') ?? '';
+  const returnTo = params.get('return') || '/master/tasks';
   const tasks = useTaskStore((s) => s.tasks);
   const progress = useTaskStore((s) => s.progress);
   const loadTasks = useTaskStore((s) => s.loadTasks);
@@ -40,13 +41,13 @@ export function TaskDetail(): JSX.Element {
   }, [className, loadClassMatrix, loadProgress, taskId]);
 
   if (!task || !className) {
-    return <EmptyState title="找不到任务班级" description="请从任务看板选择一个班级进入详情。" action={<Button onClick={() => navigate('/master/tasks')}>返回任务看板</Button>} />;
+    return <EmptyState title="找不到任务班级" description="请从任务看板选择一个班级进入详情。" action={<Button onClick={() => navigate(returnTo)}>返回任务看板</Button>} />;
   }
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-3">
-        <Button variant="ghost" icon={<ArrowLeft className="h-5 w-5" />} onClick={() => navigate('/master/tasks')}>返回看板</Button>
+        <Button variant="ghost" icon={<ArrowLeft className="h-5 w-5" />} onClick={() => navigate(returnTo)}>返回看板</Button>
         <div>
           <h1 className="text-3xl font-bold text-ink">{task.title} · {className}</h1>
           <p className="mt-1 text-base text-ink-muted">学生级别处理明细，可直接编辑状态、评分和备注。</p>
@@ -56,7 +57,7 @@ export function TaskDetail(): JSX.Element {
       <div className="grid gap-4 board:grid-cols-[1.4fr_1fr]">
         <Card title="班级处理摘要">
           <div className="grid grid-cols-2 gap-3 board:grid-cols-4">
-            <div><p className="text-sm text-ink-muted">参与人数</p><p className="mt-1 text-2xl font-bold text-ink">{summary?.total ?? 0}</p></div>
+            <div><p className="text-sm text-ink-muted">班级人数</p><p className="mt-1 text-2xl font-bold text-ink">{summary?.total ?? 0}</p></div>
             <div><p className="text-sm text-ink-muted">已完成</p><p className="mt-1 text-2xl font-bold text-green-700">{summary?.finalCount ?? 0}</p></div>
             <div><p className="text-sm text-ink-muted">处理中</p><p className="mt-1 text-2xl font-bold text-brand-700">{summary?.processingCount ?? 0}</p></div>
             <div><p className="text-sm text-ink-muted">平均分</p><p className="mt-1 text-2xl font-bold text-violet-700">{summary?.avgScore == null ? '—' : summary.avgScore.toFixed(1)}</p></div>
@@ -79,4 +80,3 @@ export function TaskDetail(): JSX.Element {
     </div>
   );
 }
-

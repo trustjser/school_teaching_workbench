@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::db::models::{
-    CustomTask, TaskCompletionRow, TaskMatrix, TaskProgressRow, TaskRecord, TaskStatusNode,
+    CustomTask, Page, TaskCompletionRow, TaskMatrix, TaskProgressRow, TaskRecord, TaskStatusNode,
 };
 use crate::db::repo::task_repo;
 use crate::error::{AppError, AppResult};
@@ -24,6 +24,24 @@ pub async fn task_list(
     task_repo::list(&state.pool, status.as_deref(), None).await
 }
 
+#[tauri::command]
+pub async fn task_page(
+    state: State<'_, Arc<AppState>>,
+    page: i64,
+    page_size: i64,
+    keyword: Option<String>,
+    status: Option<String>,
+) -> AppResult<Page<CustomTask>> {
+    task_repo::page(
+        &state.pool,
+        page,
+        page_size,
+        keyword.as_deref(),
+        status.as_deref(),
+    )
+    .await
+}
+
 /// 新增或修改任务，并写入待发队列。
 #[tauri::command]
 pub async fn task_upsert(
@@ -31,16 +49,18 @@ pub async fn task_upsert(
     task: CustomTask,
 ) -> AppResult<CustomTask> {
     let saved = task_repo::upsert(&state.pool, task).await?;
-    outbox::enqueue_entity(
-        &state.pool,
-        "custom_task",
-        &saved.id,
-        "upsert",
-        &saved,
-        None,
-        None,
-    )
-    .await?;
+    if should_sync_task(&state, &saved).await {
+        outbox::enqueue_entity(
+            &state.pool,
+            "custom_task",
+            &saved.id,
+            "upsert",
+            &saved,
+            None,
+            None,
+        )
+        .await?;
+    }
     Ok(saved)
 }
 
@@ -51,16 +71,18 @@ pub async fn task_node_upsert(
     node: TaskStatusNode,
 ) -> AppResult<TaskStatusNode> {
     let saved = task_repo::node_upsert(&state.pool, node).await?;
-    outbox::enqueue_entity(
-        &state.pool,
-        "task_node",
-        &saved.id,
-        "upsert",
-        &saved,
-        None,
-        None,
-    )
-    .await?;
+    if should_sync_task_id(&state, &saved.task_id).await {
+        outbox::enqueue_entity(
+            &state.pool,
+            "task_node",
+            &saved.id,
+            "upsert",
+            &saved,
+            None,
+            None,
+        )
+        .await?;
+    }
     Ok(saved)
 }
 
@@ -89,23 +111,71 @@ pub async fn task_record_upsert(
     // 兼容旧版本已接收的广播任务：旧逻辑只在班级端生成本地任务，
     // 没有把任务定义和状态节点回传教务端。更新记录时补发任务快照，
     // 这样教务端的完成统计可以关联到对应任务。
-    if let Some(task) = task_repo::get(&state.pool, &saved.task_id).await? {
+    let task = task_repo::get(&state.pool, &saved.task_id).await?;
+    if let Some(task) = &task {
         if task.source == "broadcast" {
             let nodes = task_repo::node_list(&state.pool, &saved.task_id).await?;
             crate::commands::broadcast_cmd::enqueue_task_snapshot(&state.pool, &task, &nodes)
                 .await?;
         }
     }
-    outbox::enqueue_entity(
-        &state.pool,
-        "task_record",
-        &saved.id,
-        "upsert",
-        &saved,
-        None,
-        None,
-    )
-    .await?;
+    let should_sync = match &task {
+        Some(task) => should_sync_task(&state, task).await,
+        None => false,
+    };
+    if should_sync {
+        outbox::enqueue_entity(
+            &state.pool,
+            "task_record",
+            &saved.id,
+            "upsert",
+            &saved,
+            None,
+            None,
+        )
+        .await?;
+    }
+    Ok(saved)
+}
+
+/// 批量更新任务状态（事务提交，供班级端一键标记全班）。
+#[tauri::command]
+pub async fn task_records_batch_upsert(
+    state: State<'_, Arc<AppState>>,
+    records: Vec<TaskRecord>,
+) -> AppResult<Vec<TaskRecord>> {
+    if records.is_empty() {
+        return Ok(Vec::new());
+    }
+    let task_id = records[0].task_id.clone();
+    if records.iter().any(|record| record.task_id != task_id) {
+        return Err(AppError::validation("批量任务记录必须属于同一个任务"));
+    }
+    let saved = task_repo::record_batch_upsert(&state.pool, &records).await?;
+    let task = task_repo::get(&state.pool, &task_id).await?;
+    if let Some(task) = &task {
+        if task.source == "broadcast" {
+            let nodes = task_repo::node_list(&state.pool, &task_id).await?;
+            crate::commands::broadcast_cmd::enqueue_task_snapshot(&state.pool, &task, &nodes)
+                .await?;
+        }
+    }
+    if let Some(task) = &task {
+        if should_sync_task(&state, task).await {
+            for record in &saved {
+                outbox::enqueue_entity(
+                    &state.pool,
+                    "task_record",
+                    &record.id,
+                    "upsert",
+                    record,
+                    None,
+                    None,
+                )
+                .await?;
+            }
+        }
+    }
     Ok(saved)
 }
 
@@ -159,22 +229,34 @@ pub async fn task_completion_stats(
 ) -> AppResult<Vec<TaskCompletionRow>> {
     let since = since_ts;
     let rows = sqlx::query_as::<_, TaskCompletionRow>(
-        "SELECT
+        "WITH roster AS (
+            SELECT t.id AS task_id, s.id AS student_id
+            FROM custom_tasks t
+            JOIN students s ON s.deleted_at IS NULL AND s.status <> 'transferred'
+              AND (
+                t.scope = 'school'
+                OR (t.scope = 'grade' AND t.grade IS NOT NULL AND s.grade = t.grade)
+                OR (t.scope = 'class' AND t.class_name IS NOT NULL AND s.class_name = t.class_name)
+                OR (t.scope = 'class' AND t.class_name IS NULL AND s.class_name = (SELECT d0.txt_class_name FROM devices d0 WHERE d0.device_id = t.owner_device_id AND d0.deleted_at IS NULL LIMIT 1))
+              )
+            WHERE t.deleted_at IS NULL
+         )
+         SELECT
             t.id AS task_id,
             t.title AS title,
             t.class_name AS class_name,
             t.grade AS grade,
-            (SELECT COUNT(*) FROM task_records tr WHERE tr.task_id=t.id AND tr.deleted_at IS NULL) AS total,
-            (SELECT COUNT(*) FROM task_records tr JOIN task_status_nodes n ON n.id=tr.node_id
-                WHERE tr.task_id=t.id AND tr.deleted_at IS NULL AND n.is_final=1) AS final_count,
-            CASE WHEN (SELECT COUNT(*) FROM task_records tr WHERE tr.task_id=t.id AND tr.deleted_at IS NULL)=0 THEN 0.0 ELSE
-                CAST((SELECT COUNT(*) FROM task_records tr JOIN task_status_nodes n ON n.id=tr.node_id
-                    WHERE tr.task_id=t.id AND tr.deleted_at IS NULL AND n.is_final=1) AS REAL)
-                / (SELECT COUNT(*) FROM task_records tr WHERE tr.task_id=t.id AND tr.deleted_at IS NULL) END AS completion_rate,
-            (SELECT AVG(tr.score) FROM task_records tr
-                WHERE tr.task_id=t.id AND tr.deleted_at IS NULL AND tr.score IS NOT NULL) AS avg_score
+            COUNT(r.student_id) AS total,
+            COALESCE(SUM(CASE WHEN n.is_final = 1 THEN 1 ELSE 0 END), 0) AS final_count,
+            CASE WHEN COUNT(r.student_id) = 0 THEN 0.0 ELSE
+                CAST(COALESCE(SUM(CASE WHEN n.is_final = 1 THEN 1 ELSE 0 END), 0) AS REAL) / COUNT(r.student_id) END AS completion_rate,
+            AVG(tr.score) AS avg_score
          FROM custom_tasks t
+         LEFT JOIN roster r ON r.task_id = t.id
+         LEFT JOIN task_records tr ON tr.task_id = r.task_id AND tr.student_id = r.student_id AND tr.deleted_at IS NULL
+         LEFT JOIN task_status_nodes n ON n.id = tr.node_id AND n.deleted_at IS NULL
          WHERE t.deleted_at IS NULL AND (? IS NULL OR t.updated_at >= ?)
+         GROUP BY t.id, t.title, t.class_name, t.grade, t.created_at
          ORDER BY t.created_at DESC",
     )
     .bind(since)
@@ -182,6 +264,37 @@ pub async fn task_completion_stats(
     .fetch_all(&state.pool)
     .await?;
     Ok(rows)
+}
+
+/// 班级端自定义任务只保存在本机；教务下发任务仍需回传处理记录。
+pub(crate) fn should_enqueue_task_entity(app_mode: &str, source: &str) -> bool {
+    source == "broadcast" || app_mode == "master"
+}
+
+async fn should_sync_task(state: &AppState, task: &CustomTask) -> bool {
+    let app_mode = crate::db::repo::settings_repo::get_string(&state.pool, "app_mode", "client")
+        .await
+        .unwrap_or_else(|_| "client".to_string());
+    should_enqueue_task_entity(&app_mode, &task.source)
+}
+
+async fn should_sync_task_id(state: &AppState, task_id: &str) -> bool {
+    match task_repo::get(&state.pool, task_id).await {
+        Ok(Some(task)) => should_sync_task(state, &task).await,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_enqueue_task_entity;
+
+    #[test]
+    fn client_local_tasks_stay_local_but_broadcast_tasks_sync() {
+        assert!(!should_enqueue_task_entity("client", "local"));
+        assert!(should_enqueue_task_entity("client", "broadcast"));
+        assert!(should_enqueue_task_entity("master", "local"));
+    }
 }
 
 /// 占位：保留 `AppError` 的引用一致性（避免未使用告警）。

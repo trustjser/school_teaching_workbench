@@ -5,6 +5,8 @@ import { Tabs } from '@/components/ui/Tabs';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Select } from '@/components/ui/Select';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
+import { Button } from '@/components/ui/Button';
 import { COLOR_TOKEN_HEX } from '@/constants/status';
 import { resolveIcon } from '@/components/ui/IconButton';
 import { TaskRecordEditor } from './TaskRecordEditor';
@@ -34,6 +36,7 @@ export function TaskMatrixView({ className, hideTaskSelect = false }: TaskMatrix
   const setViewMode = useTaskStore((s) => s.setViewMode);
   const setCellNode = useTaskStore((s) => s.setCellNode);
   const saveRecordPatch = useTaskStore((s) => s.saveRecordPatch);
+  const batchSetNode = useTaskStore((s) => s.batchSetNode);
   const effectiveNodeKey = useTaskStore((s) => s.effectiveNodeKey);
   const nodeDistribution = useTaskStore((s) => s.nodeDistribution);
 
@@ -43,11 +46,18 @@ export function TaskMatrixView({ className, hideTaskSelect = false }: TaskMatrix
     [className, students],
   );
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
+  const [bulkNodeKey, setBulkNodeKey] = useState('');
   const task = tasks.find((item) => item.id === currentTaskId) ?? null;
   const editingStudent = roster.find((student) => student.id === editingStudentId) ?? null;
   const editingSaving = useTaskStore((s) =>
     task && editingStudent ? Boolean(s.saving[`${task.id}:${editingStudent.id}`]) : false,
   );
+
+  useEffect(() => {
+    if (nodes.length > 0 && !nodes.some((node) => node.nodeKey === bulkNodeKey)) {
+      setBulkNodeKey(nodes.find((node) => node.isDefault)?.nodeKey ?? nodes[0].nodeKey);
+    }
+  }, [bulkNodeKey, nodes]);
 
   useEffect(() => {
     void loadTasks();
@@ -76,12 +86,12 @@ export function TaskMatrixView({ className, hideTaskSelect = false }: TaskMatrix
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         {!hideTaskSelect && (
-          <Select
+          <SearchableSelect
             label="选择任务"
             placeholder="请选择任务"
             options={taskOptions}
             value={currentTaskId ?? ''}
-            onChange={(e) => setCurrentTask(e.target.value || null)}
+            onChange={(value) => setCurrentTask(value || null)}
           />
         )}
         <Tabs
@@ -92,6 +102,21 @@ export function TaskMatrixView({ className, hideTaskSelect = false }: TaskMatrix
           value={viewMode}
           onChange={(v) => setViewMode(v as 'grid' | 'table')}
         />
+        {currentTaskId && roster.length > 0 && nodes.length > 0 && (
+          <div className="flex flex-1 flex-wrap items-end justify-end gap-2">
+            <div className="min-w-[10rem]">
+              <Select
+                label="全班状态"
+                options={nodes.map((node) => ({ value: node.nodeKey, label: node.label }))}
+                value={bulkNodeKey}
+                onChange={(event) => setBulkNodeKey(event.target.value)}
+              />
+            </div>
+            <Button variant="secondary" onClick={() => void batchSetNode(currentTaskId, roster.map((student) => student.id), bulkNodeKey)}>
+              一键标记全班
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2">

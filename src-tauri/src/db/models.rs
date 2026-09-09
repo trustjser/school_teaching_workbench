@@ -1267,6 +1267,16 @@ pub struct TaskProgressRow {
     pub last_updated_at: Option<i64>,
 }
 
+/// 通用分页响应。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Page<T> {
+    pub items: Vec<T>,
+    pub total: i64,
+    pub page: i64,
+    pub page_size: i64,
+}
+
 #[cfg(test)]
 mod task_completion_row_tests {
     use super::TaskCompletionRow;

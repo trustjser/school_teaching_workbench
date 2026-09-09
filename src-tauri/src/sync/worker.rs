@@ -11,7 +11,7 @@ use crate::config::constants::{
     Events, QUEUE_BATCH_SIZE, SYNC_IDLE_INTERVAL_MS, SYNC_POLL_INTERVAL_MS,
 };
 use crate::db::models::{IngestItem, IngestRequest};
-use crate::db::repo::{device_repo, queue_repo, sync_repo};
+use crate::db::repo::{device_repo, queue_repo, settings_repo, sync_repo};
 use crate::error::ErrorCode;
 use crate::net::client;
 use crate::state::AppState;
@@ -50,7 +50,37 @@ async fn run_once(state: &Arc<AppState>) {
 
     let mut sent = 0i64;
     let mut failed = 0i64;
+    let mut discarded = 0i64;
+    let app_mode = settings_repo::get_string(&state.pool, "app_mode", "client")
+        .await
+        .unwrap_or_else(|_| "client".to_string());
     for item in pending {
+        if app_mode == "client"
+            && matches!(
+                item.entity_type.as_str(),
+                "custom_task" | "task_node" | "task_record"
+            )
+        {
+            let is_broadcast = serde_json::from_str::<Value>(&item.payload)
+                .ok()
+                .map(|payload| {
+                    payload
+                        .get("entity")
+                        .and_then(|entity| entity.get("source"))
+                        .and_then(Value::as_str)
+                        == Some("broadcast")
+                })
+                .unwrap_or(false);
+            if should_discard_client_task_entity(
+                &item.entity_type,
+                is_broadcast.then_some("broadcast"),
+            ) {
+                // 旧版本可能已经把班级自定义任务写进队列；标记完成以免继续重试。
+                queue_repo::mark_done(&state.pool, &item.id).await.ok();
+                discarded += 1;
+                continue;
+            }
+        }
         queue_repo::mark_sending(&state.pool, &item.id).await.ok();
         let started = std::time::Instant::now();
         match deliver_item(state, &item).await {
@@ -118,11 +148,11 @@ async fn run_once(state: &Arc<AppState>) {
         }
     }
 
-    if sent + failed > 0 {
+    if sent + failed + discarded > 0 {
         let _ = state.app.emit(
             Events::SYNC_QUEUE_CHANGED,
             serde_json::json!({
-                "sent": sent, "failed": failed
+                "sent": sent, "failed": failed, "discarded": discarded
             }),
         );
     }
@@ -190,6 +220,30 @@ async fn deliver_item(
             Ok(status)
         }
         _ => deliver_ingest(state, item).await,
+    }
+}
+
+pub(crate) fn should_discard_client_task_entity(entity_type: &str, source: Option<&str>) -> bool {
+    matches!(entity_type, "custom_task" | "task_node" | "task_record")
+        && source != Some("broadcast")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_discard_client_task_entity;
+
+    #[test]
+    fn client_discards_local_task_queue_items_but_keeps_broadcast_items() {
+        assert!(should_discard_client_task_entity(
+            "custom_task",
+            Some("local")
+        ));
+        assert!(should_discard_client_task_entity("task_node", None));
+        assert!(!should_discard_client_task_entity(
+            "task_record",
+            Some("broadcast")
+        ));
+        assert!(!should_discard_client_task_entity("student", Some("local")));
     }
 }
 

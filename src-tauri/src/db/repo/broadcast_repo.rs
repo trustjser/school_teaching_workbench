@@ -2,7 +2,7 @@
 
 use sqlx::SqlitePool;
 
-use crate::db::models::{BroadcastReceipt, BroadcastTask};
+use crate::db::models::{BroadcastReceipt, BroadcastTask, Page};
 use crate::db::repo::{decide_merge, new_id, now_ms, MergeOutcome};
 use crate::error::{AppError, AppResult};
 
@@ -97,6 +97,60 @@ pub async fn list(
         query = query.bind(status);
     }
     Ok(query.fetch_all(pool).await?)
+}
+
+/// 分页查询广播任务，支持标题关键词和状态筛选。
+pub async fn page(
+    pool: &SqlitePool,
+    direction: Option<&str>,
+    page: i64,
+    page_size: i64,
+    keyword: Option<&str>,
+    status: Option<&str>,
+) -> AppResult<Page<BroadcastTask>> {
+    let page = page.max(1);
+    let page_size = page_size.clamp(1, 100);
+    let keyword = keyword.map(str::trim).filter(|value| !value.is_empty());
+    let status = status.map(str::trim).filter(|value| !value.is_empty());
+    let pattern = keyword.map(|value| format!("%{}%", value));
+    let total = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM broadcast_tasks
+         WHERE deleted_at IS NULL AND (? IS NULL OR direction = ?)
+           AND (? IS NULL OR title LIKE ?) AND (? IS NULL OR status = ?)",
+    )
+    .bind(direction)
+    .bind(direction)
+    .bind(&pattern)
+    .bind(&pattern)
+    .bind(status)
+    .bind(status)
+    .fetch_one(pool)
+    .await?;
+    let rows = sqlx::query_as::<_, BroadcastTask>(
+        "SELECT id, title, description, payload, target_type, target_value, due_at, priority,
+                publisher_device_id, publisher_name, direction, status, sent_at, closed_at,
+                expect_count, ack_count, created_at, updated_at, deleted_at
+         FROM broadcast_tasks
+         WHERE deleted_at IS NULL AND (? IS NULL OR direction = ?)
+           AND (? IS NULL OR title LIKE ?) AND (? IS NULL OR status = ?)
+         ORDER BY created_at DESC LIMIT ? OFFSET ?",
+    )
+    .bind(direction)
+    .bind(direction)
+    .bind(&pattern)
+    .bind(&pattern)
+    .bind(status)
+    .bind(status)
+    .bind(page_size)
+    .bind((page - 1) * page_size)
+    .fetch_all(pool)
+    .await?;
+    Ok(Page {
+        items: rows,
+        total,
+        page,
+        page_size,
+    })
 }
 
 /// 更新广播任务状态（可同时推进 `sent_at` / `ack_count`）。

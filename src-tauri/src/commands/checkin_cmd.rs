@@ -24,7 +24,8 @@ use crate::sync::outbox;
 pub struct CheckinMarkArgs {
     student_id: String,
     date: String,
-    period: String,
+    #[serde(rename = "period")]
+    _period: String,
     state: String,
     note: Option<String>,
 }
@@ -36,7 +37,9 @@ pub async fn checkin_list(
     date: String,
     period: Option<String>,
 ) -> AppResult<Vec<CheckinRecord>> {
-    checkin_repo::list(&state.pool, &date, period.as_deref(), None).await
+    // 新版界面统一按全天记录；仓储层会对旧的 am/pm 记录按学生去重。
+    let _ = period;
+    checkin_repo::list(&state.pool, &date, None, None).await
 }
 
 /// 反向标记单条考勤（默认全体在读生为出勤，点击循环切换状态）。
@@ -48,7 +51,7 @@ pub async fn checkin_mark(
     app_state: State<'_, Arc<AppState>>,
     student_id: String,
     date: String,
-    period: String,
+    _period: String,
     state: String,
     note: Option<String>,
 ) -> AppResult<CheckinRecord> {
@@ -57,7 +60,7 @@ pub async fn checkin_mark(
         None,
         &student_id,
         &date,
-        &period,
+        "all",
         None,
         &state,
         Some(&app_state.device_id),
@@ -77,7 +80,7 @@ pub async fn checkin_mark(
     .await?;
     let _ = app_state.app.emit(
         Events::CHECKIN_UPDATED,
-        serde_json::json!({ "date": date, "period": period }),
+        serde_json::json!({ "date": date, "period": "all" }),
     );
     Ok(saved)
 }
@@ -95,7 +98,7 @@ pub async fn checkin_batch_mark(
             None,
             &it.student_id,
             &it.date,
-            &it.period,
+            "all",
             None,
             &it.state,
             Some(&state.device_id),
@@ -118,7 +121,7 @@ pub async fn checkin_batch_mark(
     }
     let _ = state.app.emit(
         Events::CHECKIN_UPDATED,
-        serde_json::json!({ "count": out.len() }),
+        serde_json::json!({ "count": out.len(), "period": "all" }),
     );
     Ok(out)
 }
@@ -139,21 +142,29 @@ pub async fn checkin_school_summary(
     date: String,
 ) -> AppResult<SchoolSummary> {
     let row = sqlx::query_as::<_, SchoolSummary>(
-        "SELECT
+        "WITH latest AS (
+            SELECT c.* FROM checkin_records c
+            WHERE c.deleted_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM checkin_records newer
+                WHERE newer.student_id = c.student_id AND newer.checkin_date = c.checkin_date
+                  AND newer.deleted_at IS NULL
+                  AND (newer.updated_at > c.updated_at OR (newer.updated_at = c.updated_at AND newer.id > c.id))
+              )
+         )
+         SELECT
             ? AS date,
             (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL AND status <> 'transferred') AS total_students,
             (SELECT COUNT(DISTINCT class_name) FROM students WHERE deleted_at IS NULL AND status <> 'transferred' AND class_name IS NOT NULL) AS total_classes,
-            (SELECT COUNT(*) FROM checkin_records c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.state='present')
-                + (SELECT COUNT(*) FROM students s2 WHERE s2.deleted_at IS NULL AND s2.status<>'transferred' AND NOT EXISTS (SELECT 1 FROM checkin_records cr WHERE cr.student_id=s2.id AND cr.checkin_date = ? AND cr.deleted_at IS NULL)) AS present_cnt,
-            (SELECT COUNT(*) FROM checkin_records c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.state='leave') AS leave_cnt,
-            (SELECT COUNT(*) FROM checkin_records c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.state='absent') AS absent_cnt,
-            (SELECT COUNT(*) FROM checkin_records c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.state='late') AS late_cnt,
-            (SELECT COUNT(DISTINCT s3.class_name) FROM checkin_records cr2 JOIN students s3 ON s3.id=cr2.student_id WHERE cr2.checkin_date = ? AND cr2.deleted_at IS NULL AND s3.deleted_at IS NULL) AS submitted_classes,
-            (SELECT COUNT(DISTINCT c.student_id) FROM checkin_records c WHERE c.checkin_date = ? AND c.deleted_at IS NULL) AS marked_students,
+            (SELECT COUNT(*) FROM students s WHERE s.deleted_at IS NULL AND s.status<>'transferred' AND (NOT EXISTS (SELECT 1 FROM latest c WHERE c.student_id=s.id AND c.checkin_date=? ) OR EXISTS (SELECT 1 FROM latest c WHERE c.student_id=s.id AND c.checkin_date=? AND c.state IN ('present','late')))) AS present_cnt,
+            (SELECT COUNT(*) FROM latest c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND s.deleted_at IS NULL AND s.status<>'transferred' AND c.state='leave') AS leave_cnt,
+            (SELECT COUNT(*) FROM latest c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND s.deleted_at IS NULL AND s.status<>'transferred' AND c.state='absent') AS absent_cnt,
+            (SELECT COUNT(*) FROM latest c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND s.deleted_at IS NULL AND s.status<>'transferred' AND c.state='late') AS late_cnt,
+            (SELECT COUNT(DISTINCT s3.class_name) FROM latest cr2 JOIN students s3 ON s3.id=cr2.student_id WHERE cr2.checkin_date = ? AND s3.deleted_at IS NULL AND s3.status<>'transferred') AS submitted_classes,
+            (SELECT COUNT(DISTINCT c.student_id) FROM latest c JOIN students s4 ON s4.id=c.student_id WHERE c.checkin_date = ? AND s4.deleted_at IS NULL AND s4.status<>'transferred') AS marked_students,
             0 AS conflict_count,
             CASE WHEN (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL AND status<>'transferred')=0 THEN 0.0 ELSE
-                CAST((SELECT COUNT(*) FROM checkin_records c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.state='present')
-                    + (SELECT COUNT(*) FROM students s2 WHERE s2.deleted_at IS NULL AND s2.status<>'transferred' AND NOT EXISTS (SELECT 1 FROM checkin_records cr WHERE cr.student_id=s2.id AND cr.checkin_date = ? AND cr.deleted_at IS NULL)) AS REAL)
+                CAST((SELECT COUNT(*) FROM students s WHERE s.deleted_at IS NULL AND s.status<>'transferred' AND (NOT EXISTS (SELECT 1 FROM latest c WHERE c.student_id=s.id AND c.checkin_date=? ) OR EXISTS (SELECT 1 FROM latest c WHERE c.student_id=s.id AND c.checkin_date=? AND c.state IN ('present','late')))) AS REAL)
                 / (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL AND status<>'transferred') * 100 END AS attendance_rate",
     )
     .bind(&date)
@@ -178,18 +189,28 @@ pub async fn checkin_class_attendance(
     date: String,
 ) -> AppResult<Vec<ClassAttendanceRow>> {
     let rows = sqlx::query_as::<_, ClassAttendanceRow>(
-        "SELECT
+        "WITH latest AS (
+            SELECT c.* FROM checkin_records c
+            WHERE c.deleted_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM checkin_records newer
+                WHERE newer.student_id = c.student_id AND newer.checkin_date = c.checkin_date
+                  AND newer.deleted_at IS NULL
+                  AND (newer.updated_at > c.updated_at OR (newer.updated_at = c.updated_at AND newer.id > c.id))
+              )
+         )
+         SELECT
             s.grade AS grade,
             s.class_name AS class_name,
             COUNT(*) AS total_cnt,
-            COALESCE(SUM(CASE WHEN c.state='present' THEN 1 ELSE 0 END),0) + (COUNT(*) - COUNT(c.id)) AS present_cnt,
+            COALESCE(SUM(CASE WHEN c.id IS NULL OR c.state IN ('present','late') THEN 1 ELSE 0 END),0) AS present_cnt,
             COALESCE(SUM(CASE WHEN c.state='leave' THEN 1 ELSE 0 END),0) AS leave_cnt,
             COALESCE(SUM(CASE WHEN c.state='absent' THEN 1 ELSE 0 END),0) AS absent_cnt,
             COALESCE(SUM(CASE WHEN c.state='late' THEN 1 ELSE 0 END),0) AS late_cnt,
-            CASE WHEN COUNT(c.id)=0 THEN 0.0 ELSE CAST((COALESCE(SUM(CASE WHEN c.state='present' THEN 1 ELSE 0 END),0) + (COUNT(*) - COUNT(c.id))) AS REAL)/COUNT(*) * 100 END AS attendance_rate,
+            CASE WHEN COUNT(*)=0 THEN 0.0 ELSE CAST(COALESCE(SUM(CASE WHEN c.id IS NULL OR c.state IN ('present','late') THEN 1 ELSE 0 END),0) AS REAL)/COUNT(*) * 100 END AS attendance_rate,
             CASE WHEN COUNT(c.id) > 0 THEN 1 ELSE 0 END AS submitted
          FROM students s
-         LEFT JOIN checkin_records c ON c.student_id=s.id AND c.checkin_date = ? AND c.deleted_at IS NULL
+         LEFT JOIN latest c ON c.student_id=s.id AND c.checkin_date = ?
          WHERE s.deleted_at IS NULL AND s.status<>'transferred'
          GROUP BY s.class_name, s.grade
          ORDER BY s.grade, s.class_name",
@@ -208,11 +229,21 @@ pub async fn checkin_exception_students(
     class_name: Option<String>,
 ) -> AppResult<Vec<ExceptionStudentRow>> {
     let rows = sqlx::query_as::<_, ExceptionStudentRow>(
-        "SELECT c.student_id AS student_id, s.student_no AS student_no, s.name AS name,
+        "WITH latest AS (
+            SELECT c.* FROM checkin_records c
+            WHERE c.deleted_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM checkin_records newer
+                WHERE newer.student_id = c.student_id AND newer.checkin_date = c.checkin_date
+                  AND newer.deleted_at IS NULL
+                  AND (newer.updated_at > c.updated_at OR (newer.updated_at = c.updated_at AND newer.id > c.id))
+              )
+         )
+         SELECT c.student_id AS student_id, s.student_no AS student_no, s.name AS name,
                 s.grade AS grade, s.class_name AS class_name, c.state AS state,
                 c.checkin_date AS date, c.period AS period
-         FROM checkin_records c JOIN students s ON s.id=c.student_id
-         WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL
+         FROM latest c JOIN students s ON s.id=c.student_id
+         WHERE c.checkin_date = ? AND s.deleted_at IS NULL AND s.status<>'transferred'
            AND c.state IN ('absent','leave','late')
            AND (? IS NULL OR s.class_name = ?)
          ORDER BY s.class_name, s.student_no",

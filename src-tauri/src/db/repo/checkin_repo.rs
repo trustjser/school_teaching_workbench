@@ -29,10 +29,10 @@ pub async fn upsert(
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', 1)
          ON CONFLICT(student_id, checkin_date, period) WHERE deleted_at IS NULL DO UPDATE SET
              state = excluded.state,
-             period_label = COALESCE(excluded.period_label, checkin_records.period_label),
+             period_label = excluded.period_label,
              marked_by = excluded.marked_by,
              marked_at = excluded.marked_at,
-             note = COALESCE(excluded.note, checkin_records.note),
+             note = excluded.note,
              source = excluded.source,
              updated_at = excluded.updated_at,
              deleted_at = NULL,
@@ -101,14 +101,24 @@ pub async fn list(
     class_name: Option<&str>,
 ) -> AppResult<Vec<CheckinRecord>> {
     let mut sql = String::from(
-        "SELECT c.id, c.student_id, c.checkin_date, c.period, c.period_label, c.state, c.marked_by,
+        "WITH latest AS (
+            SELECT c.* FROM checkin_records c
+            WHERE c.deleted_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM checkin_records newer
+                WHERE newer.student_id = c.student_id AND newer.checkin_date = c.checkin_date
+                  AND newer.deleted_at IS NULL
+                  AND (newer.updated_at > c.updated_at OR (newer.updated_at = c.updated_at AND newer.id > c.id))
+              )
+         )
+         SELECT c.id, c.student_id, c.checkin_date, c.period, c.period_label, c.state, c.marked_by,
                 c.marked_at, c.note, c.source, c.created_at, c.updated_at, c.deleted_at,
                 c.sync_state, c.dirty
-         FROM checkin_records c
+         FROM latest c
          JOIN students s ON s.id = c.student_id
-         WHERE c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.checkin_date = ?",
+         WHERE s.deleted_at IS NULL AND s.status <> 'transferred' AND c.checkin_date = ?",
     );
-    if period.is_some() {
+    if period.is_some() && period != Some("all") {
         sql.push_str(" AND c.period = ?");
     }
     if class_name.is_some() {
@@ -117,7 +127,7 @@ pub async fn list(
     sql.push_str(" ORDER BY COALESCE(s.seat_no, 999999), s.student_no");
 
     let mut query = sqlx::query_as::<_, CheckinRecord>(sql.as_str()).bind(checkin_date);
-    if let Some(period) = period {
+    if let Some(period) = period.filter(|p| *p != "all") {
         query = query.bind(period);
     }
     if let Some(class_name) = class_name {
@@ -166,17 +176,27 @@ pub async fn daily_summary(
             i64,
         ),
     >(
-        "SELECT s.grade, s.class_name, c.checkin_date, c.period,
+        "WITH latest AS (
+            SELECT c.* FROM checkin_records c
+            WHERE c.deleted_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM checkin_records newer
+                WHERE newer.student_id = c.student_id AND newer.checkin_date = c.checkin_date
+                  AND newer.deleted_at IS NULL
+                  AND (newer.updated_at > c.updated_at OR (newer.updated_at = c.updated_at AND newer.id > c.id))
+              )
+         )
+         SELECT s.grade, s.class_name, c.checkin_date, 'all',
                 SUM(CASE WHEN c.state = 'present' THEN 1 ELSE 0 END),
                 SUM(CASE WHEN c.state = 'leave'   THEN 1 ELSE 0 END),
                 SUM(CASE WHEN c.state = 'absent'  THEN 1 ELSE 0 END),
                 SUM(CASE WHEN c.state = 'late'    THEN 1 ELSE 0 END),
                 COUNT(*)
-         FROM checkin_records c
+         FROM latest c
          JOIN students s ON s.id = c.student_id
-         WHERE c.deleted_at IS NULL AND s.deleted_at IS NULL
+         WHERE c.deleted_at IS NULL AND s.deleted_at IS NULL AND s.status <> 'transferred'
            AND c.checkin_date = ? AND (? IS NULL OR s.class_name = ?)
-         GROUP BY s.grade, s.class_name, c.checkin_date, c.period",
+         GROUP BY s.grade, s.class_name, c.checkin_date",
     )
     .bind(checkin_date)
     .bind(class_name)

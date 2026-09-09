@@ -4,6 +4,7 @@ import { classList, classroomAssign, classroomList, classroomUpsert, settingsGet
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { ModeBadge } from '@/components/layout/ModeBadge';
 import { ThemeSwitcher } from '@/components/motion/ThemeSwitcher';
 import { UI_SCALE_OPTIONS } from '@/constants/ui';
@@ -155,8 +156,8 @@ export function Settings(): JSX.Element {
             <Button variant="secondary" size="md" onClick={() => void loadDirectory().catch(() => undefined)}>刷新目录</Button>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Select label="班级" options={classes.map((item) => ({ value: item.id, label: `${item.gradeName} · ${item.className}` }))} value={classId} onChange={(e) => setClassId(e.target.value)} placeholder="— 请选择班级 —" />
-            <Select label="教室" options={rooms.map((item) => ({ value: item.id, label: item.roomName }))} value={roomId} onChange={(e) => setRoomId(e.target.value)} placeholder="— 请选择教室 —" />
+            <SearchableSelect label="班级" options={classes.map((item) => ({ value: item.id, label: `${item.gradeName} · ${item.className}` }))} value={classId} onChange={setClassId} placeholder="— 请选择班级 —" />
+            <SearchableSelect label="教室" options={rooms.map((item) => ({ value: item.id, label: item.roomName }))} value={roomId} onChange={setRoomId} placeholder="— 请选择教室 —" />
           </div>
           <Button className="mt-4" onClick={() => void saveBinding()} loading={savingBinding} disabled={!classId || !roomId || savingBinding}>保存绑定</Button>
           {bindingError && <p className="mt-2 text-sm text-red-600">{bindingError}</p>}

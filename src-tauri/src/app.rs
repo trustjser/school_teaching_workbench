@@ -179,6 +179,7 @@ pub fn run() {
             crate::commands::broadcast_cmd::broadcast_create,
             crate::commands::broadcast_cmd::broadcast_send,
             crate::commands::broadcast_cmd::broadcast_list,
+            crate::commands::broadcast_cmd::broadcast_page,
             crate::commands::broadcast_cmd::broadcast_receipts,
             crate::commands::broadcast_cmd::broadcast_accept,
             // ---- 考勤 ----
@@ -226,11 +227,13 @@ pub fn run() {
             crate::commands::package_cmd::package_list,
             // ---- 任务 ----
             crate::commands::task_cmd::task_list,
+            crate::commands::task_cmd::task_page,
             crate::commands::task_cmd::task_upsert,
             crate::commands::task_cmd::task_node_upsert,
             crate::commands::task_cmd::task_node_delete,
             crate::commands::task_cmd::task_node_list,
             crate::commands::task_cmd::task_record_upsert,
+            crate::commands::task_cmd::task_records_batch_upsert,
             crate::commands::task_cmd::task_matrix_query,
             crate::commands::task_cmd::task_progress_list,
             crate::commands::task_cmd::task_class_matrix_query,

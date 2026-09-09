@@ -15,7 +15,7 @@ import { Toggle } from '@/components/ui/Toggle';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SkeletonRows } from '@/components/ui/Skeleton';
 import { StatusNodeEditor, type EditableNode } from '@/components/task/StatusNodeEditor';
-import { TASK_TYPE_OPTIONS, PRIORITY_OPTIONS, DEFAULT_NODE_TEMPLATES } from '@/constants/status';
+import { TASK_TYPE_OPTIONS, BROADCAST_STATUS_OPTIONS, PRIORITY_OPTIONS, DEFAULT_NODE_TEMPLATES } from '@/constants/status';
 import { TASK_NODE_MIN, TASK_NODE_MAX } from '@/constants/app';
 import type { BroadcastPriority, BroadcastTargetType, ColorToken } from '@/types/enums';
 import type { BroadcastTask } from '@/types/broadcast';
@@ -32,7 +32,8 @@ import { formatDateTime } from '@/lib/format';
 export function BroadcastCenter(): JSX.Element {
   const outbox = useBroadcastStore((s) => s.outbox);
   const receipts = useBroadcastStore((s) => s.receipts);
-  const loadOutbox = useBroadcastStore((s) => s.loadOutbox);
+  const loadOutboxPage = useBroadcastStore((s) => s.loadOutboxPage);
+  const outboxPage = useBroadcastStore((s) => s.outboxPage);
   const create = useBroadcastStore((s) => s.create);
   const send = useBroadcastStore((s) => s.send);
   const loadReceipts = useBroadcastStore((s) => s.loadReceipts);
@@ -42,13 +43,17 @@ export function BroadcastCenter(): JSX.Element {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [booting, setBooting] = useState(true);
+  const [keyword, setKeyword] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
 
   useEffect(() => {
-    void loadOutbox();
+    void loadOutboxPage(page, pageSize, keyword, statusFilter);
     void loadDevices();
     const t = setTimeout(() => setBooting(false), 450);
     return () => clearTimeout(t);
-  }, [loadOutbox, loadDevices]);
+  }, [loadOutboxPage, loadDevices, page, pageSize, keyword, statusFilter]);
 
   const handleCreate = async (p: CreatePayload): Promise<void> => {
     // Rust 侧只认 device_id 数组，选择器在这里展开。
@@ -84,7 +89,7 @@ export function BroadcastCenter(): JSX.Element {
       dueAt: p.dueAt,
     });
     await send(created.id, targetDeviceIds);
-    await loadOutbox();
+    await loadOutboxPage(page, pageSize, keyword, statusFilter);
   };
 
   const columns: TableColumn<BroadcastTask>[] = [
@@ -101,7 +106,7 @@ export function BroadcastCenter(): JSX.Element {
     {
       key: 'status',
       header: '状态',
-      render: (t) => <Badge tone={t.status === 'sent' ? 'success' : 'neutral'}>{t.status}</Badge>,
+      render: (t) => <Badge tone={t.status === 'sent' ? 'success' : 'neutral'}>{BROADCAST_STATUS_OPTIONS.find((o) => o.value === t.status)?.label ?? t.status}</Badge>,
     },
     {
       key: 'sentAt',
@@ -151,12 +156,26 @@ export function BroadcastCenter(): JSX.Element {
       </div>
 
       <Card>
+        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(240px,1fr)_minmax(180px,220px)_auto]">
+          <Input label="搜索任务" value={keyword} onChange={(event) => { setKeyword(event.target.value); setPage(1); }} placeholder="按标题搜索" />
+          <Select label="状态" options={BROADCAST_STATUS_OPTIONS} value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }} placeholder="全部状态" />
+          <Button variant="secondary" className="self-end" onClick={() => void loadOutboxPage(page, pageSize, keyword, statusFilter)}>搜索</Button>
+        </div>
         {booting && outbox.length === 0 ? (
           <SkeletonRows rows={5} />
         ) : outbox.length === 0 ? (
           <EmptyState title="尚未下发任务" description="点击「新建并下发」向班级 / 年级 / 全校推送任务。" />
         ) : (
           <Table columns={columns} data={outbox} rowKey={(t) => t.id} />
+        )}
+        {outboxPage && outboxPage.total > pageSize && (
+          <div className="mt-4 flex items-center justify-between gap-3 text-sm text-ink-muted">
+            <span>共 {outboxPage.total} 个任务，第 {outboxPage.page} / {Math.ceil(outboxPage.total / pageSize)} 页</span>
+            <div className="flex gap-2">
+              <Button size="md" variant="secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>上一页</Button>
+              <Button size="md" variant="secondary" disabled={page >= Math.ceil(outboxPage.total / pageSize)} onClick={() => setPage((value) => value + 1)}>下一页</Button>
+            </div>
+          </div>
         )}
       </Card>
 

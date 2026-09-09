@@ -27,6 +27,7 @@ import type {
   FlushReport,
   ImportReport,
   KeyInfo,
+  Page,
   SchoolSummary,
   TaskCompletionRow,
   TaskProgressRow,
@@ -334,6 +335,20 @@ export async function taskList(status?: string | null): Promise<CustomTask[]> {
   return invokeCmd<CustomTask[]>('task_list', { status: status ?? null });
 }
 
+export async function taskPage(
+  page: number,
+  pageSize: number,
+  keyword?: string | null,
+  status?: string | null,
+): Promise<Page<CustomTask>> {
+  return invokeCmd<Page<CustomTask>>('task_page', {
+    page,
+    pageSize,
+    keyword: keyword?.trim() || null,
+    status: status?.trim() || null,
+  });
+}
+
 export async function taskUpsert(task: Partial<CustomTask> & { title: string }): Promise<CustomTask> {
   return invokeCmd<CustomTask>('task_upsert', { task });
 }
@@ -360,6 +375,10 @@ export async function taskRecordUpsert(
   record: Partial<TaskRecord> & { taskId: string; studentId: string; nodeKey: string },
 ): Promise<TaskRecord> {
   return invokeCmd<TaskRecord>('task_record_upsert', { record });
+}
+
+export async function taskRecordsBatchUpsert(records: TaskRecord[]): Promise<TaskRecord[]> {
+  return invokeCmd<TaskRecord[]>('task_records_batch_upsert', { records });
 }
 
 export async function taskMatrixQuery(taskId: string): Promise<TaskMatrix> {
@@ -392,6 +411,22 @@ export async function taskCompletionStats(sinceTs?: number | null): Promise<Task
 
 export async function broadcastList(direction: 'out' | 'in'): Promise<BroadcastTask[]> {
   return invokeCmd<BroadcastTask[]>('broadcast_list', { direction });
+}
+
+export async function broadcastPage(
+  direction: 'out' | 'in',
+  page: number,
+  pageSize: number,
+  keyword?: string | null,
+  status?: string | null,
+): Promise<Page<BroadcastTask>> {
+  return invokeCmd<Page<BroadcastTask>>('broadcast_page', {
+    direction,
+    page,
+    pageSize,
+    keyword: keyword?.trim() || null,
+    status: status?.trim() || null,
+  });
 }
 
 export async function broadcastCreate(

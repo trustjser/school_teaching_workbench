@@ -11,7 +11,7 @@ use tauri::State;
 
 use crate::config::constants::Events;
 use crate::db::models::{
-    BroadcastPush, BroadcastReceipt, BroadcastTask, CustomTask, ReceiptPush, SendReport,
+    BroadcastPush, BroadcastReceipt, BroadcastTask, CustomTask, Page, ReceiptPush, SendReport,
     TaskStatusNode,
 };
 use crate::db::repo::{broadcast_repo, device_repo, student_repo, task_repo};
@@ -122,6 +122,26 @@ pub async fn broadcast_list(
     direction: Option<String>,
 ) -> AppResult<Vec<BroadcastTask>> {
     broadcast_repo::list(&state.pool, direction.as_deref(), None).await
+}
+
+#[tauri::command]
+pub async fn broadcast_page(
+    state: State<'_, Arc<AppState>>,
+    direction: Option<String>,
+    page: i64,
+    page_size: i64,
+    keyword: Option<String>,
+    status: Option<String>,
+) -> AppResult<Page<BroadcastTask>> {
+    broadcast_repo::page(
+        &state.pool,
+        direction.as_deref(),
+        page,
+        page_size,
+        keyword.as_deref(),
+        status.as_deref(),
+    )
+    .await
 }
 
 /// 某广播任务的回执列表。

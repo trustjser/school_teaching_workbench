@@ -1,10 +1,12 @@
 import { create } from 'zustand';
 import type { BroadcastReceipt, BroadcastTask, SendReport } from '@/types/broadcast';
 import type { CustomTask } from '@/types/models';
+import type { Page } from '@/types/api';
 import {
   broadcastAccept,
   broadcastCreate,
   broadcastList,
+  broadcastPage,
   broadcastReceipts,
   broadcastSend,
 } from '@/lib/db';
@@ -22,8 +24,10 @@ interface BroadcastState {
   receipts: Record<string, BroadcastReceipt[]>;
   /** 未读计数（收件箱红点） */
   unreadCount: number;
+  outboxPage: Page<BroadcastTask> | null;
 
   loadOutbox: () => Promise<void>;
+  loadOutboxPage: (page: number, pageSize: number, keyword?: string | null, status?: string | null) => Promise<void>;
   loadInbox: () => Promise<void>;
   loadReceipts: (broadcastTaskId: string) => Promise<void>;
   select: (id: string | null) => void;
@@ -45,6 +49,7 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
   selectedId: null,
   receipts: {},
   unreadCount: 0,
+  outboxPage: null,
 
   loadOutbox: async () => {
     const app = useAppStore.getState();
@@ -52,6 +57,19 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
     try {
       const list = await broadcastList('out');
       set({ outbox: list });
+    } catch (err) {
+      app.toastError(err, '加载下发任务失败');
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  loadOutboxPage: async (page, pageSize, keyword, status) => {
+    const app = useAppStore.getState();
+    set({ loading: true });
+    try {
+      const result = await broadcastPage('out', page, pageSize, keyword, status);
+      set({ outboxPage: result, outbox: result.items });
     } catch (err) {
       app.toastError(err, '加载下发任务失败');
     } finally {

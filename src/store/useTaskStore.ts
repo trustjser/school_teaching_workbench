@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import type { CustomTask, TaskRecord, TaskStatusNode } from '@/types/models';
-import type { TaskCompletionRow, TaskProgressRow } from '@/types/api';
+import type { Page, TaskCompletionRow, TaskProgressRow } from '@/types/api';
 import {
   taskCompletionStats,
   taskDelete,
   taskList,
+  taskPage,
   taskMatrixQuery,
   taskClassMatrixQuery,
   taskNodeDelete,
@@ -12,6 +13,7 @@ import {
   taskNodeUpsert,
   taskProgressList,
   taskRecordUpsert,
+  taskRecordsBatchUpsert,
   taskUpsert,
 } from '@/lib/db';
 import { useAppStore } from './useAppStore';
@@ -36,8 +38,10 @@ interface TaskState {
   saving: Record<string, boolean>;
   completionStats: TaskCompletionRow[];
   progress: TaskProgressRow[];
+  taskPage: Page<CustomTask> | null;
 
   loadTasks: () => Promise<void>;
+  loadTaskPage: (page: number, pageSize: number, keyword?: string | null, status?: string | null) => Promise<void>;
   loadNodes: (taskId: string) => Promise<TaskStatusNode[]>;
   loadMatrix: (taskId: string) => Promise<void>;
   setCurrentTask: (taskId: string | null) => void;
@@ -57,6 +61,7 @@ interface TaskState {
   /** 设置备注 */
   setCellNote: (taskId: string, studentId: string, note: string | null) => Promise<void>;
   saveRecordPatch: (taskId: string, studentId: string, nodeKey: string, score?: number | null, note?: string | null) => Promise<void>;
+  batchSetNode: (taskId: string, studentIds: string[], nodeKey: string) => Promise<void>;
 
   /** 取有效节点 key */
   effectiveNodeKey: (taskId: string, studentId: string) => string;
@@ -77,6 +82,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   saving: {},
   completionStats: [],
   progress: [],
+  taskPage: null,
 
   loadTasks: async () => {
     const app = useAppStore.getState();
@@ -89,6 +95,20 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       }
     } catch (err) {
       app.toastError(err, '加载任务失败');
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  loadTaskPage: async (page, pageSize, keyword, status) => {
+    const app = useAppStore.getState();
+    set({ loading: true });
+    try {
+      const result = await taskPage(page, pageSize, keyword, status);
+      set({ taskPage: result, tasks: result.items });
+      if (!get().currentTaskId && result.items.length > 0) set({ currentTaskId: result.items[0].id });
+    } catch (err) {
+      app.toastError(err, '加载任务列表失败');
     } finally {
       set({ loading: false });
     }
@@ -463,6 +483,51 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         return { records: { ...s.records, [taskId]: taskRecords }, saving };
       });
       app.toastError(err, '保存任务记录失败');
+      throw err;
+    }
+  },
+
+  batchSetNode: async (taskId, studentIds, nodeKey) => {
+    const app = useAppStore.getState();
+    const node = (get().nodes[taskId] ?? []).find((item) => item.nodeKey === nodeKey);
+    if (!node || studentIds.length === 0) return;
+    const now = Date.now();
+    const previous = get().records[taskId] ?? {};
+    const records = studentIds.map((studentId) => {
+      const prev = previous[studentId];
+      return {
+        id: prev?.id?.startsWith('tmp-') ? '' : (prev?.id ?? ''),
+        taskId,
+        studentId,
+        nodeId: node.id,
+        nodeKey,
+        score: prev?.score ?? null,
+        note: prev?.note ?? null,
+        completedAt: node.isFinal ? (prev?.completedAt ?? now) : null,
+        evaluatedBy: prev?.evaluatedBy ?? app.settings.deviceName ?? null,
+        createdAt: prev?.createdAt ?? now,
+        updatedAt: now,
+        deletedAt: null,
+        syncState: 'pending' as const,
+        dirty: true,
+      } satisfies TaskRecord;
+    });
+    set((s) => {
+      const next = { ...(s.records[taskId] ?? {}) };
+      records.forEach((record) => { next[record.studentId] = record; });
+      return { records: { ...s.records, [taskId]: next } };
+    });
+    try {
+      const saved = await taskRecordsBatchUpsert(records);
+      set((s) => {
+        const next = { ...(s.records[taskId] ?? {}) };
+        saved.forEach((record) => { next[record.studentId] = record; });
+        return { records: { ...s.records, [taskId]: next } };
+      });
+      app.pushToast({ kind: 'success', title: `已将 ${saved.length} 人标记为「${node.label}」` });
+    } catch (err) {
+      set((s) => ({ records: { ...s.records, [taskId]: previous } }));
+      app.toastError(err, '批量更新任务状态失败，已恢复原状态');
       throw err;
     }
   },

@@ -5,7 +5,7 @@ import { classList, classroomAssign, classroomList, classroomUpsert, settingsCom
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { Textarea } from '@/components/ui/Textarea';
 import type { AppMode } from '@/types/enums';
 import type { Class, Classroom } from '@/types/models';
@@ -185,24 +185,24 @@ export function SetupWizard(): JSX.Element {
             </div>
 
             {dirClasses.length > 0 ? (
-              <Select
+              <SearchableSelect
                 label="选择本机所属班级"
                 options={dirClasses.map((c) => ({
                   value: c.id,
                   label: c.gradeName ? `${c.gradeName} / ${c.className}` : c.className,
                 }))}
                 value={selectedClassId ?? ''}
-                onChange={(e) => setSelectedClassId(e.target.value || null)}
+                onChange={(value) => setSelectedClassId(value || null)}
                 placeholder="— 请选择班级 —"
               />
             ) : null}
 
             {dirClasses.length > 0 && (
-              <Select
+              <SearchableSelect
                 label="选择本机所在教室"
                 options={dirRooms.map((room) => ({ value: room.id, label: room.roomName }))}
                 value={selectedRoomId ?? ''}
-                onChange={(e) => setSelectedRoomId(e.target.value || null)}
+                onChange={(value) => setSelectedRoomId(value || null)}
                 placeholder="— 请选择教室 —"
               />
             )}

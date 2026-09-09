@@ -301,11 +301,21 @@ async fn exception_students(
 ) -> AppResult<Vec<ExceptionStudentRow>> {
     let class = class_name.map(|c| c.to_string());
     let rows = sqlx::query_as::<_, ExceptionStudentRow>(
-        "SELECT c.student_id AS student_id, s.student_no AS student_no, s.name AS name,
+        "WITH latest AS (
+            SELECT c.* FROM checkin_records c
+            WHERE c.deleted_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM checkin_records newer
+                WHERE newer.student_id = c.student_id AND newer.checkin_date = c.checkin_date
+                  AND newer.deleted_at IS NULL
+                  AND (newer.updated_at > c.updated_at OR (newer.updated_at = c.updated_at AND newer.id > c.id))
+              )
+         )
+         SELECT c.student_id AS student_id, s.student_no AS student_no, s.name AS name,
                 s.grade AS grade, s.class_name AS class_name, c.state AS state,
                 c.checkin_date AS date, c.period AS period
-         FROM checkin_records c JOIN students s ON s.id=c.student_id
-         WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL
+         FROM latest c JOIN students s ON s.id=c.student_id
+         WHERE c.checkin_date = ? AND s.deleted_at IS NULL AND s.status <> 'transferred'
            AND c.state IN ('absent','leave','late')
            AND (? IS NULL OR s.class_name = ?)
          ORDER BY s.class_name, s.student_no",
@@ -320,22 +330,33 @@ async fn exception_students(
 
 async fn task_completion(pool: &DbPool, since: Option<i64>) -> AppResult<Vec<TaskCompletionRow>> {
     let rows = sqlx::query_as::<_, TaskCompletionRow>(
-        "SELECT
+        "WITH roster AS (
+            SELECT t.id AS task_id, s.id AS student_id
+            FROM custom_tasks t
+            JOIN students s ON s.deleted_at IS NULL AND s.status <> 'transferred'
+              AND (
+                t.scope = 'school'
+                OR (t.scope = 'grade' AND t.grade IS NOT NULL AND s.grade = t.grade)
+                OR (t.scope = 'class' AND t.class_name IS NOT NULL AND s.class_name = t.class_name)
+                OR (t.scope = 'class' AND t.class_name IS NULL AND s.class_name = (SELECT d0.txt_class_name FROM devices d0 WHERE d0.device_id = t.owner_device_id AND d0.deleted_at IS NULL LIMIT 1))
+              )
+            WHERE t.deleted_at IS NULL
+         )
+         SELECT
             t.id AS task_id,
             t.title AS title,
             t.class_name AS class_name,
             t.grade AS grade,
-            (SELECT COUNT(*) FROM task_records tr WHERE tr.task_id=t.id AND tr.deleted_at IS NULL) AS total,
-            (SELECT COUNT(*) FROM task_records tr JOIN task_status_nodes n ON n.id=tr.node_id
-                WHERE tr.task_id=t.id AND tr.deleted_at IS NULL AND n.is_final=1) AS final_count,
-            CASE WHEN (SELECT COUNT(*) FROM task_records tr WHERE tr.task_id=t.id AND tr.deleted_at IS NULL)=0 THEN 0.0 ELSE
-                CAST((SELECT COUNT(*) FROM task_records tr JOIN task_status_nodes n ON n.id=tr.node_id
-                    WHERE tr.task_id=t.id AND tr.deleted_at IS NULL AND n.is_final=1) AS REAL)
-                / (SELECT COUNT(*) FROM task_records tr WHERE tr.task_id=t.id AND tr.deleted_at IS NULL) END AS completion_rate,
-            (SELECT AVG(tr.score) FROM task_records tr
-                WHERE tr.task_id=t.id AND tr.deleted_at IS NULL AND tr.score IS NOT NULL) AS avg_score
+            COUNT(r.student_id) AS total,
+            COALESCE(SUM(CASE WHEN n.is_final = 1 THEN 1 ELSE 0 END), 0) AS final_count,
+            CASE WHEN COUNT(r.student_id) = 0 THEN 0.0 ELSE CAST(COALESCE(SUM(CASE WHEN n.is_final = 1 THEN 1 ELSE 0 END), 0) AS REAL) / COUNT(r.student_id) END AS completion_rate,
+            AVG(tr.score) AS avg_score
          FROM custom_tasks t
+         LEFT JOIN roster r ON r.task_id = t.id
+         LEFT JOIN task_records tr ON tr.task_id = r.task_id AND tr.student_id = r.student_id AND tr.deleted_at IS NULL
+         LEFT JOIN task_status_nodes n ON n.id = tr.node_id AND n.deleted_at IS NULL
          WHERE t.deleted_at IS NULL AND (? IS NULL OR t.updated_at >= ?)
+         GROUP BY t.id, t.title, t.class_name, t.grade, t.created_at
          ORDER BY t.created_at DESC",
     )
     .bind(since)
@@ -347,21 +368,29 @@ async fn task_completion(pool: &DbPool, since: Option<i64>) -> AppResult<Vec<Tas
 
 async fn school_summary(pool: &DbPool, date: &str) -> AppResult<SchoolSummary> {
     let row = sqlx::query_as::<_, SchoolSummary>(
-        "SELECT
+        "WITH latest AS (
+            SELECT c.* FROM checkin_records c
+            WHERE c.deleted_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM checkin_records newer
+                WHERE newer.student_id = c.student_id AND newer.checkin_date = c.checkin_date
+                  AND newer.deleted_at IS NULL
+                  AND (newer.updated_at > c.updated_at OR (newer.updated_at = c.updated_at AND newer.id > c.id))
+              )
+         )
+         SELECT
             ? AS date,
             (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL AND status <> 'transferred') AS total_students,
             (SELECT COUNT(DISTINCT class_name) FROM students WHERE deleted_at IS NULL AND status <> 'transferred' AND class_name IS NOT NULL) AS total_classes,
-            (SELECT COUNT(*) FROM checkin_records c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.state='present')
-                + (SELECT COUNT(*) FROM students s2 WHERE s2.deleted_at IS NULL AND s2.status<>'transferred' AND NOT EXISTS (SELECT 1 FROM checkin_records cr WHERE cr.student_id=s2.id AND cr.checkin_date = ? AND cr.deleted_at IS NULL)) AS present_cnt,
-            (SELECT COUNT(*) FROM checkin_records c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.state='leave') AS leave_cnt,
-            (SELECT COUNT(*) FROM checkin_records c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.state='absent') AS absent_cnt,
-            (SELECT COUNT(*) FROM checkin_records c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.state='late') AS late_cnt,
-            (SELECT COUNT(DISTINCT s3.class_name) FROM checkin_records cr2 JOIN students s3 ON s3.id=cr2.student_id WHERE cr2.checkin_date = ? AND cr2.deleted_at IS NULL AND s3.deleted_at IS NULL) AS submitted_classes,
-            (SELECT COUNT(DISTINCT c.student_id) FROM checkin_records c WHERE c.checkin_date = ? AND c.deleted_at IS NULL) AS marked_students,
+            (SELECT COUNT(*) FROM students s WHERE s.deleted_at IS NULL AND s.status<>'transferred' AND (NOT EXISTS (SELECT 1 FROM latest c WHERE c.student_id=s.id AND c.checkin_date=? ) OR EXISTS (SELECT 1 FROM latest c WHERE c.student_id=s.id AND c.checkin_date=? AND c.state IN ('present','late')))) AS present_cnt,
+            (SELECT COUNT(*) FROM latest c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND s.deleted_at IS NULL AND s.status<>'transferred' AND c.state='leave') AS leave_cnt,
+            (SELECT COUNT(*) FROM latest c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND s.deleted_at IS NULL AND s.status<>'transferred' AND c.state='absent') AS absent_cnt,
+            (SELECT COUNT(*) FROM latest c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND s.deleted_at IS NULL AND s.status<>'transferred' AND c.state='late') AS late_cnt,
+            (SELECT COUNT(DISTINCT s3.class_name) FROM latest cr2 JOIN students s3 ON s3.id=cr2.student_id WHERE cr2.checkin_date = ? AND s3.deleted_at IS NULL AND s3.status<>'transferred') AS submitted_classes,
+            (SELECT COUNT(DISTINCT c.student_id) FROM latest c JOIN students s4 ON s4.id=c.student_id WHERE c.checkin_date = ? AND s4.deleted_at IS NULL AND s4.status<>'transferred') AS marked_students,
             0 AS conflict_count,
             CASE WHEN (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL AND status<>'transferred')=0 THEN 0.0 ELSE
-                CAST((SELECT COUNT(*) FROM checkin_records c JOIN students s ON s.id=c.student_id WHERE c.checkin_date = ? AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND c.state='present')
-                    + (SELECT COUNT(*) FROM students s2 WHERE s2.deleted_at IS NULL AND s2.status<>'transferred' AND NOT EXISTS (SELECT 1 FROM checkin_records cr WHERE cr.student_id=s2.id AND cr.checkin_date = ? AND cr.deleted_at IS NULL)) AS REAL)
+                CAST((SELECT COUNT(*) FROM students s WHERE s.deleted_at IS NULL AND s.status<>'transferred' AND (NOT EXISTS (SELECT 1 FROM latest c WHERE c.student_id=s.id AND c.checkin_date=? ) OR EXISTS (SELECT 1 FROM latest c WHERE c.student_id=s.id AND c.checkin_date=? AND c.state IN ('present','late')))) AS REAL)
                 / (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL AND status<>'transferred') * 100 END AS attendance_rate",
     )
     .bind(date)

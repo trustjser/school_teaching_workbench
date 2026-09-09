@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
-import { Select } from '@/components/ui/Select';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { Textarea } from '@/components/ui/Textarea';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -301,11 +301,11 @@ export function GradeClassManage(): JSX.Element {
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-surface-border bg-surface-muted p-3">
         <span className="text-sm font-semibold text-ink">学年</span>
         <div className="min-w-[12rem] flex-1">
-          <Select
+          <SearchableSelect
             label=""
             options={schoolYears.map((y) => ({ value: y.id, label: y.schoolYearName }))}
             value={selectedSchoolYearId ?? ''}
-            onChange={(e) => selectSchoolYear(e.target.value || null)}
+            onChange={(value) => selectSchoolYear(value || null)}
             placeholder="— 全部学年 —"
           />
         </div>
@@ -362,7 +362,7 @@ export function GradeClassManage(): JSX.Element {
               return <div key={room.id} className="rounded-lg border border-surface-border p-3">
                 <div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2"><Monitor className="h-4 w-4 text-brand-600" /><span className="font-semibold text-ink">{room.roomName}</span></div><div className="flex gap-1"><Button variant="ghost" icon={<Pencil className="h-4 w-4" />} onClick={() => setClassroomDraft({ id: room.id, roomName: room.roomName, remark: room.remark ?? '' })}>编辑</Button><Button variant="ghost" icon={<Trash2 className="h-4 w-4" />} onClick={() => setPendingDelete({ kind: 'classroom', id: room.id, name: room.roomName })}>删除</Button></div></div>
                 <div className="mt-2">
-                  <Select
+                  <SearchableSelect
                     label="绑定设备"
                     options={[
                       { value: '', label: '未绑定设备' },
@@ -371,7 +371,7 @@ export function GradeClassManage(): JSX.Element {
                         .map((d) => ({ value: d.deviceId, label: d.deviceName })),
                     ]}
                     value={room.deviceId ?? ''}
-                    onChange={(e) => void bindDevice(room, e.target.value)}
+                    onChange={(value) => void bindDevice(room, value)}
                   />
                 </div>
                 <p className="mt-1 text-sm text-ink-muted">当前：{device?.deviceName ?? room.deviceId ?? '未绑定'}</p>
@@ -627,11 +627,11 @@ export function GradeClassManage(): JSX.Element {
                 inputMode="numeric"
               />
             </div>
-            <Select
+            <SearchableSelect
               label="所属学年"
               options={schoolYears.map((y) => ({ value: y.id, label: y.schoolYearName }))}
               value={classDraft.schoolYearId ?? ''}
-              onChange={(e) => setClassDraft({ ...classDraft, schoolYearId: e.target.value || null })}
+              onChange={(value) => setClassDraft({ ...classDraft, schoolYearId: value || null })}
               placeholder="— 未指定学年 —"
             />
             <Input

@@ -1,16 +1,15 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStudentStore } from '@/store/useStudentStore';
 import { useCheckinStore } from '@/store/useCheckinStore';
 import {
   CHECKIN_STATUS_META,
   CHECKIN_STATES_ALL,
-  PERIOD_OPTIONS,
 } from '@/constants/status';
 import { toDateKey } from '@/lib/format';
 import type { CheckinState } from '@/types/enums';
-import { Select } from '@/components/ui/Select';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { CheckinRecordEditor } from './CheckinRecordEditor';
 
 export interface AttendanceGridProps {
   /** 紧凑模式：用于首页嵌入式展示 */
@@ -20,7 +19,7 @@ export interface AttendanceGridProps {
 /**
  * 反向考勤网格（班级端核心交互）。
  *   - 本地无记录即视为出勤（present）；
- *   - 点击卡片循环：present → leave → absent → present（late 为显式第四态，由长按/详情设置）；
+ *   - 点击卡片循环：present → leave → absent → present；详情编辑可选择迟到并填写备注；
  *   - 数据源：useStudentStore.roster + useCheckinStore.records，标记走乐观更新 + 落库。
  */
 export function AttendanceGrid({ compact = false }: AttendanceGridProps): JSX.Element {
@@ -28,21 +27,22 @@ export function AttendanceGrid({ compact = false }: AttendanceGridProps): JSX.El
   const records = useCheckinStore((s) => s.records);
   const loading = useCheckinStore((s) => s.loading);
   const date = useCheckinStore((s) => s.date);
-  const period = useCheckinStore((s) => s.period);
   const setDate = useCheckinStore((s) => s.setDate);
-  const setPeriod = useCheckinStore((s) => s.setPeriod);
   const load = useCheckinStore((s) => s.load);
   const cycle = useCheckinStore((s) => s.cycle);
   const batchSetState = useCheckinStore((s) => s.batchSetState);
+  const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
+  const saving = useCheckinStore((s) => (editingStudentId ? Boolean(s.saving[editingStudentId]) : false));
 
   const roster = useMemo(
     () => students.filter((s) => s.status !== 'transferred'),
     [students],
   );
+  const editingStudent = roster.find((student) => student.id === editingStudentId) ?? null;
 
   useEffect(() => {
-    void load(roster, date, period);
-  }, [load, roster, date, period]);
+    void load(roster, date, 'all');
+  }, [load, roster, date]);
 
   const rows = useMemo(
     () =>
@@ -76,12 +76,6 @@ export function AttendanceGrid({ compact = false }: AttendanceGridProps): JSX.El
           label="日期"
           value={date}
           onChange={(e) => setDate(e.target.value || toDateKey(Date.now()))}
-        />
-        <Select
-          label="时段"
-          options={PERIOD_OPTIONS}
-          value={period}
-          onChange={(e) => setPeriod(e.target.value as typeof period)}
         />
         <Button variant="secondary" onClick={() => void batchSetState(roster, 'present')}>
           一键全勤
@@ -118,25 +112,46 @@ export function AttendanceGrid({ compact = false }: AttendanceGridProps): JSX.El
           {rows.map(({ student, effectiveState }) => {
             const meta = CHECKIN_STATUS_META[effectiveState];
             return (
-              <button
-                key={student.id}
-                type="button"
-                onClick={() => void cycle(student)}
-                className="flex min-h-touch flex-col items-center justify-center gap-1 rounded-lg border-2 bg-surface-raised p-3 text-center transition-colors hover:brightness-95"
-                style={{ borderColor: meta.color }}
-                title="点击切换：出勤 → 请假 → 缺勤 → 出勤"
-              >
-                <span className="text-2xl leading-none" style={{ color: meta.color }}>
-                  {meta.emoji}
-                </span>
-                <span className="truncate text-base font-semibold text-ink">{student.name}</span>
-                <span className="text-sm" style={{ color: meta.color }}>
-                  {meta.label}
-                </span>
-              </button>
+              <div key={student.id} className="relative">
+                <button
+                  type="button"
+                  onClick={() => void cycle(student)}
+                  className="flex min-h-touch w-full flex-col items-center justify-center gap-1 rounded-lg border-2 bg-surface-raised p-3 pb-10 text-center transition-colors hover:brightness-95"
+                  style={{ borderColor: meta.color }}
+                  title="点击切换：出勤 → 请假 → 缺勤 → 出勤"
+                >
+                  <span className="text-2xl leading-none" style={{ color: meta.color }}>
+                    {meta.emoji}
+                  </span>
+                  <span className="truncate text-base font-semibold text-ink">{student.name}</span>
+                  <span className="text-sm" style={{ color: meta.color }}>
+                    {meta.label}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="absolute inset-x-2 bottom-2 rounded-md px-2 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50"
+                  onClick={() => setEditingStudentId(student.id)}
+                >
+                  编辑备注/迟到
+                </button>
+              </div>
             );
           })}
         </div>
+      )}
+      {editingStudent && (
+        <CheckinRecordEditor
+          open={editingStudentId !== null}
+          student={editingStudent}
+          record={records[editingStudent.id] ?? null}
+          saving={saving}
+          onClose={() => setEditingStudentId(null)}
+          onSave={async (state, note) => {
+            await useCheckinStore.getState().setState(editingStudent, state, note);
+            setEditingStudentId(null);
+          }}
+        />
       )}
     </div>
   );
