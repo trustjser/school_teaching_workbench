@@ -7,8 +7,8 @@ use crate::error::{AppError, AppResult};
 
 /// 从 xlsx 文件解析学生名册（首行为表头，支持中英文列名）。
 pub fn parse_xlsx(path: &str) -> AppResult<Vec<StudentImportRow>> {
-    let mut wb = open_workbook_auto(path)
-        .map_err(|e| AppError::import(format!("打开 xlsx 失败: {}", e)))?;
+    let mut wb =
+        open_workbook_auto(path).map_err(|e| AppError::import(format!("打开 xlsx 失败: {}", e)))?;
     let range = wb
         .worksheet_range_at(0)
         .ok_or_else(|| AppError::import("xlsx 中未找到工作表"))?
@@ -24,7 +24,10 @@ pub fn parse_xlsx(path: &str) -> AppResult<Vec<StudentImportRow>> {
             header = Some(row.iter().map(cell_text).collect());
             continue;
         }
-        let rec = map_record(header.as_deref(), row.iter().map(cell_text).collect::<Vec<_>>())?;
+        let rec = map_record(
+            header.as_deref(),
+            row.iter().map(cell_text).collect::<Vec<_>>(),
+        )?;
         rows.push(rec);
     }
     Ok(rows)

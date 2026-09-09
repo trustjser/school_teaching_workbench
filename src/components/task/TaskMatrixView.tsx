@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStudentStore } from '@/store/useStudentStore';
 import { useTaskStore } from '@/store/useTaskStore';
 import { Tabs } from '@/components/ui/Tabs';
@@ -7,15 +7,21 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Select } from '@/components/ui/Select';
 import { COLOR_TOKEN_HEX } from '@/constants/status';
 import { resolveIcon } from '@/components/ui/IconButton';
+import { TaskRecordEditor } from './TaskRecordEditor';
+
+export interface TaskMatrixViewProps {
+  className?: string;
+  hideTaskSelect?: boolean;
+}
 
 /**
  * 任务矩阵视图（学生 × 状态节点，2~4 节点）。
  * 提供「网格视图 / 表格视图」双视图：
- *   - 网格：每个学生一张卡片，点击循环到下一节点；
- *   - 表格：首列为学生，每个节点一列，点击单元格直接设置节点。
+ *   - 网格：每个学生一张卡片，点击打开记录编辑器；
+ *   - 表格：首列学生点击打开编辑器，每个节点单元格可快速设置状态。
  * 数据来自 useTaskStore（nodes / records / viewMode）。
  */
-export function TaskMatrixView(): JSX.Element {
+export function TaskMatrixView({ className, hideTaskSelect = false }: TaskMatrixViewProps): JSX.Element {
   const tasks = useTaskStore((s) => s.tasks);
   const currentTaskId = useTaskStore((s) => s.currentTaskId);
   const viewMode = useTaskStore((s) => s.viewMode);
@@ -23,17 +29,24 @@ export function TaskMatrixView(): JSX.Element {
   const records = useTaskStore((s) => (currentTaskId ? s.records[currentTaskId] ?? {} : {}));
   const loadTasks = useTaskStore((s) => s.loadTasks);
   const loadMatrix = useTaskStore((s) => s.loadMatrix);
+  const loadClassMatrix = useTaskStore((s) => s.loadClassMatrix);
   const setCurrentTask = useTaskStore((s) => s.setCurrentTask);
   const setViewMode = useTaskStore((s) => s.setViewMode);
-  const cycleCell = useTaskStore((s) => s.cycleCell);
   const setCellNode = useTaskStore((s) => s.setCellNode);
+  const saveRecordPatch = useTaskStore((s) => s.saveRecordPatch);
   const effectiveNodeKey = useTaskStore((s) => s.effectiveNodeKey);
   const nodeDistribution = useTaskStore((s) => s.nodeDistribution);
 
   const students = useStudentStore((s) => s.students);
   const roster = useMemo(
-    () => students.filter((s) => s.status !== 'transferred'),
-    [students],
+    () => students.filter((s) => s.status !== 'transferred' && (!className || s.className === className)),
+    [className, students],
+  );
+  const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
+  const task = tasks.find((item) => item.id === currentTaskId) ?? null;
+  const editingStudent = roster.find((student) => student.id === editingStudentId) ?? null;
+  const editingSaving = useTaskStore((s) =>
+    task && editingStudent ? Boolean(s.saving[`${task.id}:${editingStudent.id}`]) : false,
   );
 
   useEffect(() => {
@@ -42,9 +55,10 @@ export function TaskMatrixView(): JSX.Element {
 
   useEffect(() => {
     if (currentTaskId && nodes.length === 0) {
-      void loadMatrix(currentTaskId);
+      if (className) void loadClassMatrix(currentTaskId, className);
+      else void loadMatrix(currentTaskId);
     }
-  }, [currentTaskId, nodes.length, loadMatrix]);
+  }, [className, currentTaskId, loadClassMatrix, loadMatrix, nodes.length]);
 
   if (tasks.length === 0) {
     return (
@@ -61,13 +75,15 @@ export function TaskMatrixView(): JSX.Element {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <Select
-          label="选择任务"
-          placeholder="请选择任务"
-          options={taskOptions}
-          value={currentTaskId ?? ''}
-          onChange={(e) => setCurrentTask(e.target.value || null)}
-        />
+        {!hideTaskSelect && (
+          <Select
+            label="选择任务"
+            placeholder="请选择任务"
+            options={taskOptions}
+            value={currentTaskId ?? ''}
+            onChange={(e) => setCurrentTask(e.target.value || null)}
+          />
+        )}
         <Tabs
           items={[
             { value: 'grid', label: '网格视图' },
@@ -101,11 +117,11 @@ export function TaskMatrixView(): JSX.Element {
               <button
                 key={student.id}
                 type="button"
-                disabled={!currentTaskId}
-                onClick={() => currentTaskId && void cycleCell(currentTaskId, student.id)}
+                disabled={!currentTaskId || nodes.length === 0}
+                onClick={() => currentTaskId && setEditingStudentId(student.id)}
                 className="flex min-h-touch flex-col items-center justify-center gap-1 rounded-lg border-2 bg-surface-raised p-3 text-center transition-colors hover:brightness-95 disabled:opacity-60"
                 style={{ borderColor: color }}
-                title="点击切换到下一状态节点"
+                title="点击编辑状态、评分和备注"
               >
                 {Icon && <Icon className="h-6 w-6" style={{ color }} />}
                 <span className="truncate text-base font-semibold text-ink">{student.name}</span>
@@ -138,7 +154,16 @@ export function TaskMatrixView(): JSX.Element {
                 const key = effectiveNodeKey(currentTaskId ?? '', student.id);
                 return (
                   <tr key={student.id} className="border-t border-surface-border">
-                    <td className="px-4 py-2 font-semibold text-ink">{student.name}</td>
+                    <td className="px-4 py-2 font-semibold text-ink">
+                      <button
+                        type="button"
+                        disabled={!currentTaskId || nodes.length === 0}
+                        className="min-h-touch text-left hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={() => setEditingStudentId(student.id)}
+                      >
+                        {student.name}
+                      </button>
+                    </td>
                     {nodes.map((n) => {
                       const active = n.nodeKey === key;
                       return (
@@ -165,6 +190,22 @@ export function TaskMatrixView(): JSX.Element {
             </tbody>
           </table>
         </div>
+      )}
+
+      {task && editingStudent && (
+        <TaskRecordEditor
+          open={editingStudentId !== null}
+          task={task}
+          student={editingStudent}
+          record={records[editingStudent.id] ?? null}
+          nodes={nodes}
+          saving={editingSaving}
+          onClose={() => setEditingStudentId(null)}
+          onSave={async (patch) => {
+            await saveRecordPatch(task.id, editingStudent.id, patch.nodeKey, patch.score, patch.note);
+            setEditingStudentId(null);
+          }}
+        />
       )}
     </div>
   );

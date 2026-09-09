@@ -31,12 +31,19 @@ pub async fn verify(
     next: Next,
 ) -> Result<Response, (StatusCode, Json<ErrorBody>)> {
     let (parts, body) = req.into_parts();
-    let raw = to_bytes(body, usize::MAX)
-        .await
-        .map_err(|e| app_err(StatusCode::BAD_REQUEST, AppError::validation(format!("读取请求体失败: {}", e))))?;
+    let raw = to_bytes(body, usize::MAX).await.map_err(|e| {
+        app_err(
+            StatusCode::BAD_REQUEST,
+            AppError::validation(format!("读取请求体失败: {}", e)),
+        )
+    })?;
 
-    let env: Envelope = serde_json::from_slice(&raw)
-        .map_err(|e| app_err(StatusCode::BAD_REQUEST, AppError::validation(format!("信封解析失败: {}", e))))?;
+    let env: Envelope = serde_json::from_slice(&raw).map_err(|e| {
+        app_err(
+            StatusCode::BAD_REQUEST,
+            AppError::validation(format!("信封解析失败: {}", e)),
+        )
+    })?;
 
     let method = parts.method.as_str().to_uppercase();
     let path = parts.uri.path().to_string();
@@ -48,10 +55,12 @@ pub async fn verify(
 
     let secret = state.secret();
     if secret.is_empty() {
-        return Err(app_err(StatusCode::UNAUTHORIZED, AppError::validation("本机尚未配置共享密钥")));
+        return Err(app_err(
+            StatusCode::UNAUTHORIZED,
+            AppError::validation("本机尚未配置共享密钥"),
+        ));
     }
-    let inner = open(&secret, &method, &path, &env)
-        .map_err(|e| app_err(status_for(&e), e))?;
+    let inner = open(&secret, &method, &path, &env).map_err(|e| app_err(status_for(&e), e))?;
 
     let mut reconstructed = Request::from_parts(parts, axum::body::Body::empty());
     reconstructed.extensions_mut().insert(VerifiedRequest {

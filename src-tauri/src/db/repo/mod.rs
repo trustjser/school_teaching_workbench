@@ -6,9 +6,9 @@ pub mod class_repo;
 pub mod classroom_repo;
 pub mod device_repo;
 pub mod grade_repo;
-pub mod school_year_repo;
 pub mod package_repo;
 pub mod queue_repo;
+pub mod school_year_repo;
 pub mod settings_repo;
 pub mod student_repo;
 pub mod sync_repo;
@@ -70,7 +70,10 @@ pub fn merged_sync_state(outcome: MergeOutcome) -> &'static str {
 
 /// 取出 JSON 对象中的字符串字段（缺失或非法返回 `None`）。
 pub fn json_str(value: &serde_json::Value, key: &str) -> Option<String> {
-    value.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+    value
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 /// 取出 JSON 对象中的 i64 字段。

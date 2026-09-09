@@ -3,7 +3,9 @@
 
 use rust_xlsxwriter::{Format, Workbook, Worksheet};
 
-use crate::db::models::{ClassAttendanceRow, ExceptionStudentRow, SchoolSummary, Student, TaskCompletionRow};
+use crate::db::models::{
+    ClassAttendanceRow, ExceptionStudentRow, SchoolSummary, Student, TaskCompletionRow,
+};
 use crate::db::repo::student_repo;
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
@@ -105,7 +107,17 @@ pub async fn export_stats_xlsx(
 // =============================================================================
 
 fn write_student_sheet(ws: &mut Worksheet, fmt: &Format, rows: &[Student]) -> AppResult<()> {
-    let headers = ["学号", "姓名", "性别", "年级", "班级", "座位号", "状态", "电话", "备注"];
+    let headers = [
+        "学号",
+        "姓名",
+        "性别",
+        "年级",
+        "班级",
+        "座位号",
+        "状态",
+        "电话",
+        "备注",
+    ];
     for (c, h) in headers.iter().copied().enumerate() {
         ws.write_string_with_format(0, c as u16, h, fmt)
             .map_err(xlsx_err)?;
@@ -130,8 +142,22 @@ fn write_student_sheet(ws: &mut Worksheet, fmt: &Format, rows: &[Student]) -> Ap
     Ok(())
 }
 
-fn write_class_sheet(ws: &mut Worksheet, fmt: &Format, rows: &[ClassAttendanceRow]) -> AppResult<()> {
-    let headers = ["年级", "班级", "在读总数", "出勤", "请假", "缺勤", "迟到", "出勤率", "已提交"];
+fn write_class_sheet(
+    ws: &mut Worksheet,
+    fmt: &Format,
+    rows: &[ClassAttendanceRow],
+) -> AppResult<()> {
+    let headers = [
+        "年级",
+        "班级",
+        "在读总数",
+        "出勤",
+        "请假",
+        "缺勤",
+        "迟到",
+        "出勤率",
+        "已提交",
+    ];
     for (c, h) in headers.iter().copied().enumerate() {
         ws.write_string_with_format(0, c as u16, h, fmt)
             .map_err(xlsx_err)?;
@@ -141,19 +167,29 @@ fn write_class_sheet(ws: &mut Worksheet, fmt: &Format, rows: &[ClassAttendanceRo
         ws.write_string(r, 0, cr.grade.as_deref().unwrap_or(""))
             .map_err(xlsx_err)?;
         ws.write_string(r, 1, &cr.class_name).map_err(xlsx_err)?;
-        ws.write_number(r, 2, cr.total_cnt as f64).map_err(xlsx_err)?;
-        ws.write_number(r, 3, cr.present_cnt as f64).map_err(xlsx_err)?;
-        ws.write_number(r, 4, cr.leave_cnt as f64).map_err(xlsx_err)?;
-        ws.write_number(r, 5, cr.absent_cnt as f64).map_err(xlsx_err)?;
-        ws.write_number(r, 6, cr.late_cnt as f64).map_err(xlsx_err)?;
-        ws.write_number(r, 7, cr.attendance_rate).map_err(xlsx_err)?;
+        ws.write_number(r, 2, cr.total_cnt as f64)
+            .map_err(xlsx_err)?;
+        ws.write_number(r, 3, cr.present_cnt as f64)
+            .map_err(xlsx_err)?;
+        ws.write_number(r, 4, cr.leave_cnt as f64)
+            .map_err(xlsx_err)?;
+        ws.write_number(r, 5, cr.absent_cnt as f64)
+            .map_err(xlsx_err)?;
+        ws.write_number(r, 6, cr.late_cnt as f64)
+            .map_err(xlsx_err)?;
+        ws.write_number(r, 7, cr.attendance_rate)
+            .map_err(xlsx_err)?;
         ws.write_string(r, 8, if cr.submitted { "是" } else { "否" })
             .map_err(xlsx_err)?;
     }
     Ok(())
 }
 
-fn write_exception_sheet(ws: &mut Worksheet, fmt: &Format, rows: &[ExceptionStudentRow]) -> AppResult<()> {
+fn write_exception_sheet(
+    ws: &mut Worksheet,
+    fmt: &Format,
+    rows: &[ExceptionStudentRow],
+) -> AppResult<()> {
     let headers = ["学号", "姓名", "年级", "班级", "状态", "日期", "时段"];
     for (c, h) in headers.iter().copied().enumerate() {
         ws.write_string_with_format(0, c as u16, h, fmt)
@@ -185,24 +221,40 @@ fn write_task_sheet(ws: &mut Worksheet, fmt: &Format, rows: &[TaskCompletionRow]
         ws.write_string(r, 0, &tr.task_id).map_err(xlsx_err)?;
         ws.write_string(r, 1, &tr.title).map_err(xlsx_err)?;
         ws.write_number(r, 2, tr.total as f64).map_err(xlsx_err)?;
-        ws.write_number(r, 3, tr.final_count as f64).map_err(xlsx_err)?;
-        ws.write_number(r, 4, tr.completion_rate).map_err(xlsx_err)?;
+        ws.write_number(r, 3, tr.final_count as f64)
+            .map_err(xlsx_err)?;
+        ws.write_number(r, 4, tr.completion_rate)
+            .map_err(xlsx_err)?;
     }
     Ok(())
 }
 
 fn write_school_sheet(ws: &mut Worksheet, fmt: &Format, s: &SchoolSummary) -> AppResult<()> {
-    let headers = ["在读总数", "班级数", "出勤", "请假", "缺勤", "迟到", "已提交班级", "出勤率"];
+    let headers = [
+        "在读总数",
+        "班级数",
+        "出勤",
+        "请假",
+        "缺勤",
+        "迟到",
+        "已提交班级",
+        "出勤率",
+    ];
     for (c, h) in headers.iter().copied().enumerate() {
         ws.write_string_with_format(0, c as u16, h, fmt)
             .map_err(xlsx_err)?;
     }
     let r = 1u32;
-    ws.write_number(r, 0, s.total_students as f64).map_err(xlsx_err)?;
-    ws.write_number(r, 1, s.total_classes as f64).map_err(xlsx_err)?;
-    ws.write_number(r, 2, s.present_cnt as f64).map_err(xlsx_err)?;
-    ws.write_number(r, 3, s.leave_cnt as f64).map_err(xlsx_err)?;
-    ws.write_number(r, 4, s.absent_cnt as f64).map_err(xlsx_err)?;
+    ws.write_number(r, 0, s.total_students as f64)
+        .map_err(xlsx_err)?;
+    ws.write_number(r, 1, s.total_classes as f64)
+        .map_err(xlsx_err)?;
+    ws.write_number(r, 2, s.present_cnt as f64)
+        .map_err(xlsx_err)?;
+    ws.write_number(r, 3, s.leave_cnt as f64)
+        .map_err(xlsx_err)?;
+    ws.write_number(r, 4, s.absent_cnt as f64)
+        .map_err(xlsx_err)?;
     ws.write_number(r, 5, s.late_cnt as f64).map_err(xlsx_err)?;
     ws.write_number(r, 6, s.submitted_classes as f64)
         .map_err(xlsx_err)?;
@@ -242,7 +294,11 @@ async fn class_attendance(pool: &DbPool, date: &str) -> AppResult<Vec<ClassAtten
     Ok(rows)
 }
 
-async fn exception_students(pool: &DbPool, date: &str, class_name: Option<&str>) -> AppResult<Vec<ExceptionStudentRow>> {
+async fn exception_students(
+    pool: &DbPool,
+    date: &str,
+    class_name: Option<&str>,
+) -> AppResult<Vec<ExceptionStudentRow>> {
     let class = class_name.map(|c| c.to_string());
     let rows = sqlx::query_as::<_, ExceptionStudentRow>(
         "SELECT c.student_id AS student_id, s.student_no AS student_no, s.name AS name,

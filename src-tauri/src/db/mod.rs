@@ -7,10 +7,8 @@ pub mod repo;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use sqlx::sqlite::{
-    SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqlitePoolOptions,
-};
-use sqlx::{SqlitePool, Row};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqlitePoolOptions};
+use sqlx::{Row, SqlitePool};
 use tauri::{AppHandle, Manager};
 
 use crate::config::constants::{DB_BUSY_TIMEOUT_MS, DB_FILE_NAME, DB_MAX_CONNECTIONS};
@@ -128,9 +126,15 @@ fn parse_add_column(sql: &str) -> Option<AddColumn<'_>> {
         return None;
     }
     // 表名：ALTER TABLE 与 ADD COLUMN 之间（截取后去尾分号与空白）。
-    let table = s["ALTER TABLE ".len()..start].trim().trim_end_matches(';').trim();
+    let table = s["ALTER TABLE ".len()..start]
+        .trim()
+        .trim_end_matches(';')
+        .trim();
     // 列定义：ADD COLUMN 之后。
-    let after = s[start + marker.len()..].trim().trim_end_matches(';').trim();
+    let after = s[start + marker.len()..]
+        .trim()
+        .trim_end_matches(';')
+        .trim();
     // 去掉可选的 IF NOT EXISTS。
     let after = after
         .strip_prefix("IF NOT EXISTS ")
@@ -379,7 +383,12 @@ async fn exec_best_effort(conn: &mut Conn, sql: &str) {
 /// 两者都是**连接级**设置，故整套修复必须固定在同一条连接上。
 async fn enter_schema_surgery(conn: &mut Conn) -> AppResult<()> {
     exec_on(conn, "PRAGMA foreign_keys = OFF", "关闭外键约束").await?;
-    exec_on(conn, "PRAGMA legacy_alter_table = ON", "开启 legacy_alter_table").await?;
+    exec_on(
+        conn,
+        "PRAGMA legacy_alter_table = ON",
+        "开启 legacy_alter_table",
+    )
+    .await?;
     Ok(())
 }
 
@@ -427,7 +436,9 @@ async fn ensure_pending_queue_table(conn: &mut Conn) -> AppResult<()> {
         )
         .await?;
     } else {
-        tracing::warn!("pending_queue 缺失且无可恢复的残留表，按规范 DDL 新建空队列表（分支 3：重建）");
+        tracing::warn!(
+            "pending_queue 缺失且无可恢复的残留表，按规范 DDL 新建空队列表（分支 3：重建）"
+        );
         exec_on(conn, PENDING_QUEUE_DDL, "新建 pending_queue").await?;
     }
 
@@ -466,7 +477,12 @@ async fn repair_sync_log_reference(conn: &mut Conn) -> AppResult<()> {
 
 /// 重建 `sync_log`：改名 → 释放索引名 → 规范建表 → 按显式列名回拷 → 删旧表。
 async fn rebuild_sync_log(conn: &mut Conn) -> AppResult<()> {
-    exec_on(conn, "DROP TABLE IF EXISTS sync_log_broken", "清理 sync_log_broken").await?;
+    exec_on(
+        conn,
+        "DROP TABLE IF EXISTS sync_log_broken",
+        "清理 sync_log_broken",
+    )
+    .await?;
     exec_on(
         conn,
         "ALTER TABLE sync_log RENAME TO sync_log_broken",
@@ -474,7 +490,11 @@ async fn rebuild_sync_log(conn: &mut Conn) -> AppResult<()> {
     )
     .await?;
     // 索引跟着被改名的表走，名字仍被占用，必须先释放再重建。
-    for index in ["ix_sync_log_created", "ix_sync_log_peer", "ix_sync_log_result"] {
+    for index in [
+        "ix_sync_log_created",
+        "ix_sync_log_peer",
+        "ix_sync_log_result",
+    ] {
         exec_best_effort(conn, &format!("DROP INDEX IF EXISTS {}", index)).await;
     }
     exec_on(conn, SYNC_LOG_DDL, "重建 sync_log").await?;
@@ -493,7 +513,10 @@ async fn rebuild_sync_log(conn: &mut Conn) -> AppResult<()> {
         }
         Err(err) => {
             // 日志是审计资产，宁可保留残表供人工排查，也不静默丢弃。
-            tracing::warn!("回拷 sync_log 历史日志失败，已保留 sync_log_broken 供人工排查: {}", err);
+            tracing::warn!(
+                "回拷 sync_log 历史日志失败，已保留 sync_log_broken 供人工排查: {}",
+                err
+            );
         }
     }
     Ok(())
@@ -516,7 +539,9 @@ async fn salvage_stale_queue_tables(conn: &mut Conn) -> AppResult<()> {
         );
         match sqlx::query(&copy).execute(&mut *conn).await {
             Ok(done) => tracing::warn!("已从 {} 回收队列 {} 行", stale, done.rows_affected()),
-            Err(err) => tracing::warn!("回收 {} 队列数据失败（瞬态队列，忽略继续）: {}", stale, err),
+            Err(err) => {
+                tracing::warn!("回收 {} 队列数据失败（瞬态队列，忽略继续）: {}", stale, err)
+            }
         }
         exec_best_effort(conn, &format!("DROP TABLE IF EXISTS {}", stale)).await;
     }
@@ -553,7 +578,12 @@ async fn upgrade_pending_queue_check(conn: &mut Conn) -> AppResult<()> {
 
 /// 用规范 DDL 重建 `pending_queue` 并回拷历史队列（调用方须已开启 `legacy_alter_table`）。
 async fn rebuild_pending_queue(conn: &mut Conn) -> AppResult<()> {
-    exec_on(conn, "DROP TABLE IF EXISTS pending_queue_old", "清理 pending_queue_old").await?;
+    exec_on(
+        conn,
+        "DROP TABLE IF EXISTS pending_queue_old",
+        "清理 pending_queue_old",
+    )
+    .await?;
     exec_on(
         conn,
         "ALTER TABLE pending_queue RENAME TO pending_queue_old",
@@ -572,8 +602,14 @@ async fn rebuild_pending_queue(conn: &mut Conn) -> AppResult<()> {
         cols = PENDING_QUEUE_COLUMNS
     );
     match sqlx::query(&copy).execute(&mut *conn).await {
-        Ok(done) => tracing::info!("pending_queue 已升级，回拷历史队列 {} 行", done.rows_affected()),
-        Err(err) => tracing::warn!("回拷 pending_queue 历史队列失败（瞬态队列，允许丢弃）: {}", err),
+        Ok(done) => tracing::info!(
+            "pending_queue 已升级，回拷历史队列 {} 行",
+            done.rows_affected()
+        ),
+        Err(err) => tracing::warn!(
+            "回拷 pending_queue 历史队列失败（瞬态队列，允许丢弃）: {}",
+            err
+        ),
     }
     exec_best_effort(conn, "DROP TABLE IF EXISTS pending_queue_old").await;
     Ok(())
@@ -645,14 +681,18 @@ mod tests {
             "school_years 表应已创建"
         );
         assert!(
-            column_exists(&pool, "classes", "school_year_id").await.unwrap(),
+            column_exists(&pool, "classes", "school_year_id")
+                .await
+                .unwrap(),
             "classes.school_year_id 应已添加"
         );
 
         // 第二次迁移：必须幂等、不报错（旧版 SQLite 不支持 ADD COLUMN IF NOT EXISTS）。
         run_migrations(&pool).await.expect("二次迁移幂等");
         assert!(column_exists(&pool, "school_years", "id").await.unwrap());
-        assert!(column_exists(&pool, "classes", "school_year_id").await.unwrap());
+        assert!(column_exists(&pool, "classes", "school_year_id")
+            .await
+            .unwrap());
 
         // 清理
         sqlx::query("DROP TABLE IF EXISTS school_years")
@@ -672,8 +712,14 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("建临时目录");
         let pool = create_pool(&dir.join("test.db")).await.expect("建池");
         run_migrations(&pool).await.expect("首次迁移");
-        assert!(column_exists(&pool, "classrooms", "room_name").await.unwrap());
-        assert!(column_exists(&pool, "classroom_assignments", "school_year_id").await.unwrap());
+        assert!(column_exists(&pool, "classrooms", "room_name")
+            .await
+            .unwrap());
+        assert!(
+            column_exists(&pool, "classroom_assignments", "school_year_id")
+                .await
+                .unwrap()
+        );
         run_migrations(&pool).await.expect("二次迁移幂等");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -718,7 +764,11 @@ CREATE TABLE pending_queue (
     }
 
     /// 向 `pending_queue` 插入一行（只填 NOT NULL 且无默认值的列）。
-    async fn insert_queue_row(pool: &DbPool, id: &str, entity_type: &str) -> Result<(), sqlx::Error> {
+    async fn insert_queue_row(
+        pool: &DbPool,
+        id: &str,
+        entity_type: &str,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO pending_queue
                  (id, op_type, entity_type, entity_id, payload, created_at, updated_at)
@@ -797,10 +847,11 @@ CREATE TABLE pending_queue (
         );
         drop(conn);
 
-        let kept: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pending_queue WHERE id = 'q-legacy'")
-            .fetch_one(&pool)
-            .await
-            .expect("统计历史队列数据");
+        let kept: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM pending_queue WHERE id = 'q-legacy'")
+                .fetch_one(&pool)
+                .await
+                .expect("统计历史队列数据");
         assert_eq!(kept, 1, "历史队列数据必须回拷保留");
 
         // 新约束生效：school_year 实体可以入队（这正是用户报错的场景）。
@@ -855,7 +906,8 @@ CREATE TABLE pending_queue (
             .unwrap()
             .expect("sync_log 建表 SQL");
         assert!(
-            !sync_log_sql.contains("pending_queue_old") && !sync_log_sql.contains("pending_queue_new"),
+            !sync_log_sql.contains("pending_queue_old")
+                && !sync_log_sql.contains("pending_queue_new"),
             "sync_log 外键必须重新指向 pending_queue，实际: {}",
             sync_log_sql
         );
@@ -953,7 +1005,8 @@ CREATE TABLE pending_queue (
             .unwrap()
             .expect("sync_log 建表 SQL");
         assert!(
-            !sync_log_sql.contains("pending_queue_old") && !sync_log_sql.contains("pending_queue_new"),
+            !sync_log_sql.contains("pending_queue_old")
+                && !sync_log_sql.contains("pending_queue_new"),
             "sync_log 外键必须复位到 pending_queue，实际: {}",
             sync_log_sql
         );
@@ -973,7 +1026,11 @@ CREATE TABLE pending_queue (
                 .await
                 .expect("读取索引列表");
         for stale in ["ux_queue_dedup_new", "ix_queue_due_new"] {
-            assert!(!indexes.iter().any(|name| name == stale), "{} 应已清除", stale);
+            assert!(
+                !indexes.iter().any(|name| name == stale),
+                "{} 应已清除",
+                stale
+            );
         }
         for expected in ["ux_queue_dedup", "ix_queue_due", "ix_queue_entity"] {
             assert!(
@@ -1100,15 +1157,17 @@ CREATE TABLE pending_queue (
         crate::db::repo::student_repo::merge_remote(&pool, &remote)
             .await
             .expect("远端学生应可合并");
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM students WHERE id='remote-student-1'")
-            .fetch_one(&pool)
-            .await
-            .expect("读取学生");
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM students WHERE id='remote-student-1'")
+                .fetch_one(&pool)
+                .await
+                .expect("读取学生");
         assert_eq!(count, 1);
-        let batch: Option<String> = sqlx::query_scalar("SELECT import_batch_id FROM students WHERE id='remote-student-1'")
-            .fetch_one(&pool)
-            .await
-            .expect("读取导入批次");
+        let batch: Option<String> =
+            sqlx::query_scalar("SELECT import_batch_id FROM students WHERE id='remote-student-1'")
+                .fetch_one(&pool)
+                .await
+                .expect("读取导入批次");
         assert!(batch.is_none(), "目标端不存在的来源批次应被清空");
         pool.close().await;
         std::fs::remove_dir_all(&dir).ok();
@@ -1137,10 +1196,12 @@ CREATE TABLE pending_queue (
         crate::db::repo::classroom_repo::soft_delete(&pool, "room-1")
             .await
             .expect("删除教室");
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM classrooms WHERE id='room-1' AND deleted_at IS NULL")
-            .fetch_one(&pool)
-            .await
-            .expect("读取教室");
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM classrooms WHERE id='room-1' AND deleted_at IS NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("读取教室");
         assert_eq!(count, 0);
         pool.close().await;
         std::fs::remove_dir_all(&dir).ok();
@@ -1150,17 +1211,51 @@ CREATE TABLE pending_queue (
     async fn task_record_empty_sync_state_defaults_to_pending() {
         let (dir, pool) = temp_pool("task_record_sync_state").await;
         run_migrations(&pool).await.expect("迁移");
-        crate::db::repo::task_repo::upsert(&pool, CustomTask {
-            id: "task-1".into(), title: "任务".into(), task_type: "custom".into(), scope: "class".into(), view_mode: "grid".into(), status: "active".into(), source: "local".into(), ..Default::default()
-        }).await.expect("新增任务");
-        crate::db::repo::student_repo::upsert(&pool, Student {
-            id: "student-1".into(), student_no: "001".into(), name: "学生".into(), gender: "unknown".into(), status: "active".into(), ..Default::default()
-        }).await.expect("新增学生");
-        crate::db::repo::task_repo::record_upsert(&pool, TaskRecord {
-            task_id: "task-1".into(), student_id: "student-1".into(), node_key: "todo".into(), ..Default::default()
-        }).await.expect("空同步状态应自动归一化");
-        let state: String = sqlx::query_scalar("SELECT sync_state FROM task_records WHERE task_id='task-1' AND student_id='student-1'")
-            .fetch_one(&pool).await.expect("读取同步状态");
+        crate::db::repo::task_repo::upsert(
+            &pool,
+            CustomTask {
+                id: "task-1".into(),
+                title: "任务".into(),
+                task_type: "custom".into(),
+                scope: "class".into(),
+                view_mode: "grid".into(),
+                status: "active".into(),
+                source: "local".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("新增任务");
+        crate::db::repo::student_repo::upsert(
+            &pool,
+            Student {
+                id: "student-1".into(),
+                student_no: "001".into(),
+                name: "学生".into(),
+                gender: "unknown".into(),
+                status: "active".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("新增学生");
+        crate::db::repo::task_repo::record_upsert(
+            &pool,
+            TaskRecord {
+                task_id: "task-1".into(),
+                student_id: "student-1".into(),
+                node_key: "todo".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("空同步状态应自动归一化");
+        let state: String = sqlx::query_scalar(
+            "SELECT sync_state FROM task_records WHERE task_id='task-1' AND student_id='student-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("读取同步状态");
         assert_eq!(state, "pending");
         pool.close().await;
         std::fs::remove_dir_all(&dir).ok();
@@ -1430,9 +1525,15 @@ DROP TABLE pending_queue_old;
         .await
         .unwrap();
         let joined = idx_sql.join("\n");
-        assert!(joined.contains("ux_queue_dedup"), "P1: ux_queue_dedup 必须存在");
+        assert!(
+            joined.contains("ux_queue_dedup"),
+            "P1: ux_queue_dedup 必须存在"
+        );
         assert!(joined.contains("ix_queue_due"), "P1: ix_queue_due 必须存在");
-        assert!(joined.contains("ix_queue_entity"), "P1: ix_queue_entity 必须存在");
+        assert!(
+            joined.contains("ix_queue_entity"),
+            "P1: ix_queue_entity 必须存在"
+        );
         let dedup_sql = idx_sql
             .iter()
             .find(|s| s.contains("ux_queue_dedup"))
@@ -1474,9 +1575,7 @@ DROP TABLE pending_queue_old;
         drop(conn);
 
         // 7) 带合法 queue_id 的 INSERT 成功
-        insert_queue_row(&pool, "q-valid", "student")
-            .await
-            .unwrap();
+        insert_queue_row(&pool, "q-valid", "student").await.unwrap();
         insert_sync_log_row(&pool, "log-valid", "q-valid")
             .await
             .expect("P1: 合法 sync_log 写入应成功（外键不得悬空）");
@@ -1685,11 +1784,7 @@ pub async fn init_db(app: &AppHandle) -> AppResult<(DbPool, PathBuf)> {
     let path = db_file_path(app)?;
     let pool = create_pool(&path).await?;
     let count = run_migrations(&pool).await?;
-    tracing::info!(
-        "数据库已就绪: {} (迁移语句 {} 条)",
-        path.display(),
-        count
-    );
+    tracing::info!("数据库已就绪: {} (迁移语句 {} 条)", path.display(), count);
     let check = integrity_check(&pool).await?;
     if !check.eq_ignore_ascii_case("ok") {
         tracing::warn!("数据库完整性检查告警: {}", check);

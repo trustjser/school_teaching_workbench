@@ -1,14 +1,16 @@
 import { create } from 'zustand';
 import type { CustomTask, TaskRecord, TaskStatusNode } from '@/types/models';
-import type { TaskCompletionRow } from '@/types/api';
+import type { TaskCompletionRow, TaskProgressRow } from '@/types/api';
 import {
   taskCompletionStats,
   taskDelete,
   taskList,
   taskMatrixQuery,
+  taskClassMatrixQuery,
   taskNodeDelete,
   taskNodeList,
   taskNodeUpsert,
+  taskProgressList,
   taskRecordUpsert,
   taskUpsert,
 } from '@/lib/db';
@@ -33,6 +35,7 @@ interface TaskState {
   viewMode: 'grid' | 'table';
   saving: Record<string, boolean>;
   completionStats: TaskCompletionRow[];
+  progress: TaskProgressRow[];
 
   loadTasks: () => Promise<void>;
   loadNodes: (taskId: string) => Promise<TaskStatusNode[]>;
@@ -53,12 +56,15 @@ interface TaskState {
   setCellScore: (taskId: string, studentId: string, score: number | null) => Promise<void>;
   /** 设置备注 */
   setCellNote: (taskId: string, studentId: string, note: string | null) => Promise<void>;
+  saveRecordPatch: (taskId: string, studentId: string, nodeKey: string, score?: number | null, note?: string | null) => Promise<void>;
 
   /** 取有效节点 key */
   effectiveNodeKey: (taskId: string, studentId: string) => string;
   /** 各节点人数分布 */
   nodeDistribution: (taskId: string, students: { id: string }[]) => Record<string, number>;
   loadCompletionStats: () => Promise<void>;
+  loadProgress: (taskId: string, grade?: string | null, className?: string | null) => Promise<TaskProgressRow[]>;
+  loadClassMatrix: (taskId: string, className: string) => Promise<void>;
 }
 
 export const useTaskStore = create<TaskState>((set, get) => ({
@@ -70,6 +76,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   viewMode: 'grid',
   saving: {},
   completionStats: [],
+  progress: [],
 
   loadTasks: async () => {
     const app = useAppStore.getState();
@@ -404,6 +411,62 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     }
   },
 
+  saveRecordPatch: async (taskId, studentId, nodeKey, score, note) => {
+    const app = useAppStore.getState();
+    const nodes = get().nodes[taskId] ?? [];
+    const node = nodes.find((n) => n.nodeKey === nodeKey);
+    if (!node) return;
+    const prev = get().records[taskId]?.[studentId] ?? null;
+    const now = Date.now();
+    const optimistic: TaskRecord = {
+      id: prev?.id ?? `tmp-${taskId}-${studentId}`,
+      taskId,
+      studentId,
+      nodeId: node.id,
+      nodeKey,
+      score: score === undefined ? (prev?.score ?? null) : score,
+      note: note === undefined ? (prev?.note ?? null) : note,
+      completedAt: node.isFinal ? (prev?.completedAt ?? now) : null,
+      evaluatedBy: prev?.evaluatedBy ?? app.settings.deviceName ?? null,
+      createdAt: prev?.createdAt ?? now,
+      updatedAt: now,
+      deletedAt: null,
+      syncState: 'pending',
+      dirty: true,
+    };
+    set((s) => ({
+      records: { ...s.records, [taskId]: { ...(s.records[taskId] ?? {}), [studentId]: optimistic } },
+      saving: { ...s.saving, [`${taskId}:${studentId}`]: true },
+    }));
+    try {
+      const saved = await taskRecordUpsert({
+        id: prev?.id && !prev.id.startsWith('tmp-') ? prev.id : undefined,
+        taskId,
+        studentId,
+        nodeId: node.id,
+        nodeKey,
+        score: optimistic.score,
+        note: optimistic.note,
+        completedAt: optimistic.completedAt,
+      });
+      set((s) => ({
+        records: { ...s.records, [taskId]: { ...(s.records[taskId] ?? {}), [studentId]: saved } },
+        saving: { ...s.saving, [`${taskId}:${studentId}`]: false },
+      }));
+    } catch (err) {
+      set((s) => {
+        const taskRecords = { ...(s.records[taskId] ?? {}) };
+        if (prev) taskRecords[studentId] = prev;
+        else delete taskRecords[studentId];
+        const saving = { ...s.saving };
+        delete saving[`${taskId}:${studentId}`];
+        return { records: { ...s.records, [taskId]: taskRecords }, saving };
+      });
+      app.toastError(err, '保存任务记录失败');
+      throw err;
+    }
+  },
+
   effectiveNodeKey: (taskId, studentId) => {
     const rec = get().records[taskId]?.[studentId];
     if (rec) return rec.nodeKey;
@@ -438,6 +501,43 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     } catch {
       // 教务处端统计可选能力，失败时静默
       set({ completionStats: [] });
+    }
+  },
+
+  loadProgress: async (taskId, grade, className) => {
+    const app = useAppStore.getState();
+    try {
+      const rows = await taskProgressList(taskId, grade, className);
+      set({ progress: rows });
+      return rows;
+    } catch (err) {
+      app.toastError(err, '加载任务进度失败');
+      set({ progress: [] });
+      return [];
+    }
+  },
+
+  loadClassMatrix: async (taskId, className) => {
+    const app = useAppStore.getState();
+    set({ loading: true });
+    try {
+      const matrix = await taskClassMatrixQuery(taskId, className);
+      const recordMap: Record<string, TaskRecord> = {};
+      matrix.records.forEach((r) => {
+        recordMap[r.studentId] = r;
+      });
+      const orderedNodes = [...matrix.nodes].sort((a, b) => a.nodeOrder - b.nodeOrder);
+      set((s) => ({
+        nodes: { ...s.nodes, [taskId]: orderedNodes },
+        records: { ...s.records, [taskId]: recordMap },
+        tasks: s.tasks.some((t) => t.id === taskId)
+          ? s.tasks.map((t) => (t.id === taskId ? matrix.task : t))
+          : [...s.tasks, matrix.task],
+      }));
+    } catch (err) {
+      app.toastError(err, '加载班级任务明细失败');
+    } finally {
+      set({ loading: false });
     }
   },
 }));

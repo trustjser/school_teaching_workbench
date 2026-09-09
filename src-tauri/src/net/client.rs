@@ -73,7 +73,10 @@ pub async fn deliver(
 }
 
 /// 发送 `/api/v1/ping` 并解析响应。
-pub async fn ping(base_url: &str, env: &envelope::Envelope) -> AppResult<crate::db::models::PingResponse> {
+pub async fn ping(
+    base_url: &str,
+    env: &envelope::Envelope,
+) -> AppResult<crate::db::models::PingResponse> {
     let url = format!("{}/api/v1/ping", base_url.trim_end_matches('/'));
     let client = p2p_client()?;
     let resp = client
@@ -91,7 +94,13 @@ pub async fn ping(base_url: &str, env: &envelope::Envelope) -> AppResult<crate::
 
 /// 构建一条 ping 信封（供心跳使用）。
 pub fn seal_ping(state: &AppState, to: &str) -> AppResult<envelope::Envelope> {
-    seal(state, to, "POST", "/api/v1/ping", &Value::Object(Default::default()))
+    seal(
+        state,
+        to,
+        "POST",
+        "/api/v1/ping",
+        &Value::Object(Default::default()),
+    )
 }
 
 #[cfg(test)]

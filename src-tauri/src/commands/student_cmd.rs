@@ -37,9 +37,21 @@ pub async fn student_list(
 
 /// 新增或修改学生，并写入待发队列。
 #[tauri::command]
-pub async fn student_upsert(state: State<'_, Arc<AppState>>, student: Student) -> AppResult<Student> {
+pub async fn student_upsert(
+    state: State<'_, Arc<AppState>>,
+    student: Student,
+) -> AppResult<Student> {
     let saved = student_repo::upsert(&state.pool, student).await?;
-    outbox::enqueue_entity(&state.pool, "student", &saved.id, "upsert", &saved, None, None).await?;
+    outbox::enqueue_entity(
+        &state.pool,
+        "student",
+        &saved.id,
+        "upsert",
+        &saved,
+        None,
+        None,
+    )
+    .await?;
     Ok(saved)
 }
 
@@ -50,21 +62,49 @@ pub async fn student_batch_import(
     rows: Vec<StudentImportRow>,
     batch_name: String,
 ) -> AppResult<ImportReport> {
-    let default_grade = settings_repo::get_string(&state.pool, "grade", "").await.ok().filter(|s| !s.is_empty());
-    let default_class = settings_repo::get_string(&state.pool, "class_name", "").await.ok().filter(|s| !s.is_empty());
-    let default_class_id = settings_repo::get_string(&state.pool, "class_id", "").await.ok().filter(|s| !s.is_empty());
+    let default_grade = settings_repo::get_string(&state.pool, "grade", "")
+        .await
+        .ok()
+        .filter(|s| !s.is_empty());
+    let default_class = settings_repo::get_string(&state.pool, "class_name", "")
+        .await
+        .ok()
+        .filter(|s| !s.is_empty());
+    let default_class_id = settings_repo::get_string(&state.pool, "class_id", "")
+        .await
+        .ok()
+        .filter(|s| !s.is_empty());
     let report = student_repo::batch_import(
-        &state.pool, rows, &batch_name, "manual", default_grade.as_deref(), default_class.as_deref(),
-        default_class_id.as_deref(), None,
-    ).await?;
+        &state.pool,
+        rows,
+        &batch_name,
+        "manual",
+        default_grade.as_deref(),
+        default_class.as_deref(),
+        default_class_id.as_deref(),
+        None,
+    )
+    .await?;
     // 仅成功导入时入队同步。
     if report.success_rows > 0 {
         let imported = student_repo::list_by_import_batch(&state.pool, &report.batch_id).await?;
         for student in imported {
-            outbox::enqueue_entity(&state.pool, "student", &student.id, "upsert", &student, None, None).await?;
+            outbox::enqueue_entity(
+                &state.pool,
+                "student",
+                &student.id,
+                "upsert",
+                &student,
+                None,
+                None,
+            )
+            .await?;
         }
     }
-    let _ = state.app.emit(Events::DATA_IMPORTED, serde_json::json!({ "batchId": report.batch_id, "type": "student" }));
+    let _ = state.app.emit(
+        Events::DATA_IMPORTED,
+        serde_json::json!({ "batchId": report.batch_id, "type": "student" }),
+    );
     Ok(report)
 }
 
@@ -76,7 +116,16 @@ pub async fn student_update_status(
     status: String,
 ) -> AppResult<Student> {
     let saved = student_repo::update_status(&state.pool, &id, &status).await?;
-    outbox::enqueue_entity(&state.pool, "student", &saved.id, "upsert", &saved, None, None).await?;
+    outbox::enqueue_entity(
+        &state.pool,
+        "student",
+        &saved.id,
+        "upsert",
+        &saved,
+        None,
+        None,
+    )
+    .await?;
     Ok(saved)
 }
 

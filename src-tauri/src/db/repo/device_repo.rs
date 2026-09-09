@@ -23,11 +23,12 @@ pub async fn upsert(
     is_self: bool,
 ) -> AppResult<Device> {
     let now = now_ms();
-    let existing: Option<(String,)> =
-        sqlx::query_as::<_, (String,)>("SELECT id FROM devices WHERE device_id = ? AND deleted_at IS NULL")
-            .bind(device_id)
-            .fetch_optional(pool)
-            .await?;
+    let existing: Option<(String,)> = sqlx::query_as::<_, (String,)>(
+        "SELECT id FROM devices WHERE device_id = ? AND deleted_at IS NULL",
+    )
+    .bind(device_id)
+    .fetch_optional(pool)
+    .await?;
 
     let id = match existing {
         Some((id,)) => id,
@@ -145,7 +146,11 @@ pub async fn heartbeat_ok(pool: &SqlitePool, device_id: &str, latency_ms: i64) -
 }
 
 /// 心跳失败：累加失败计数，超过阈值标记离线。
-pub async fn heartbeat_fail(pool: &SqlitePool, device_id: &str, miss_limit: i32) -> AppResult<bool> {
+pub async fn heartbeat_fail(
+    pool: &SqlitePool,
+    device_id: &str,
+    miss_limit: i32,
+) -> AppResult<bool> {
     let now = now_ms();
     sqlx::query(
         "UPDATE devices SET miss_count = miss_count + 1, updated_at = ?

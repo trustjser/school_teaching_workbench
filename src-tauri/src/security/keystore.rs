@@ -4,9 +4,9 @@ use base64::Engine;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
-use crate::db::DbPool;
 use crate::db::models::KeyInfo;
 use crate::db::repo::settings_repo;
+use crate::db::DbPool;
 use crate::error::AppResult;
 
 /// 生成新根密钥（Base64 字符串）与 kid（SHA-256 前 8 字节十六进制）。

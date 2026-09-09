@@ -22,12 +22,25 @@ pub async fn school_year_list(state: State<'_, Arc<AppState>>) -> AppResult<Vec<
 
 /// 新增或修改学年，并写入待发队列（可下发给班级端）。
 #[tauri::command]
-pub async fn school_year_upsert(state: State<'_, Arc<AppState>>, school_year: SchoolYear) -> AppResult<SchoolYear> {
+pub async fn school_year_upsert(
+    state: State<'_, Arc<AppState>>,
+    school_year: SchoolYear,
+) -> AppResult<SchoolYear> {
     let saved = school_year_repo::upsert(&state.pool, school_year).await?;
-    outbox::enqueue_entity(&state.pool, "school_year", &saved.id, "upsert", &saved, None, None).await?;
-    let _ = state
-        .app
-        .emit(Events::SCHOOL_YEAR_CHANGED, serde_json::json!({ "id": saved.id }));
+    outbox::enqueue_entity(
+        &state.pool,
+        "school_year",
+        &saved.id,
+        "upsert",
+        &saved,
+        None,
+        None,
+    )
+    .await?;
+    let _ = state.app.emit(
+        Events::SCHOOL_YEAR_CHANGED,
+        serde_json::json!({ "id": saved.id }),
+    );
     Ok(saved)
 }
 

@@ -40,14 +40,21 @@ async fn bootstrap(app: tauri::AppHandle) -> Result<AppState, AppError> {
         .app_data_dir()
         .map_err(|err| AppError::permission(format!("无法定位应用数据目录: {}", err)))?;
     if let Err(e) = fs::create_dir_all(&data_dir) {
-        eprintln!("[bootstrap] WARN: 创建数据目录失败 {}: {}", data_dir.display(), e);
+        eprintln!(
+            "[bootstrap] WARN: 创建数据目录失败 {}: {}",
+            data_dir.display(),
+            e
+        );
     }
     let log_path = data_dir.join("bootstrap.log");
     step!("app_data_dir = {}", data_dir.display());
 
     // 2) 初始化数据库（致命）
     let (pool, _db_path) = match init_db(&app).await {
-        Ok(v) => { step!("init_db OK"); v }
+        Ok(v) => {
+            step!("init_db OK");
+            v
+        }
         Err(e) => {
             step!("FATAL init_db: {}", e);
             let _ = fs::write(&log_path, log.join(""));
@@ -63,8 +70,14 @@ async fn bootstrap(app: tauri::AppHandle) -> Result<AppState, AppError> {
 
     // 4) 设备 ID（降级）
     let device_id = match settings_repo::get_string(&pool, "device_id", "").await {
-        Ok(v) => { step!("device_id len={}", v.len()); v }
-        Err(e) => { step!("WARN 读 device_id 失败: {} (用空串)", e); String::new() }
+        Ok(v) => {
+            step!("device_id len={}", v.len());
+            v
+        }
+        Err(e) => {
+            step!("WARN 读 device_id 失败: {} (用空串)", e);
+            String::new()
+        }
     };
 
     // 5) 运行模式（降级）
@@ -81,7 +94,10 @@ async fn bootstrap(app: tauri::AppHandle) -> Result<AppState, AppError> {
     // 待用户在设置页录入教务处提供的密钥后再刷新内存状态。
     let (secret, kid) = if matches!(mode, AppMode::Master) {
         match keystore::ensure(&pool).await {
-            Ok((s, k)) => { step!("keystore OK (secret_len={}, kid={})", s.len(), k); (s, k) }
+            Ok((s, k)) => {
+                step!("keystore OK (secret_len={}, kid={})", s.len(), k);
+                (s, k)
+            }
             Err(e) => {
                 step!("WARN keystore::ensure 失败: {} (用空 secret/kid)", e);
                 (String::new(), String::new())
@@ -89,7 +105,10 @@ async fn bootstrap(app: tauri::AppHandle) -> Result<AppState, AppError> {
         }
     } else {
         match keystore::read(&pool).await {
-            Ok((s, k)) => { step!("client keystore OK (secret_len={}, kid={})", s.len(), k); (s, k) }
+            Ok((s, k)) => {
+                step!("client keystore OK (secret_len={}, kid={})", s.len(), k);
+                (s, k)
+            }
             Err(e) => {
                 step!("client 尚未配置共享密钥: {}", e);
                 (String::new(), String::new())
@@ -130,7 +149,9 @@ pub fn run() {
                     app.manage(arc.clone());
                     // P2P 服务必须先启动，mDNS 才能拿到回填端口。
                     // 用 block_on 驱动：from_std 需 reactor，且 set_port 必须在本调用返回前完成。
-                    if let Err(e) = tauri::async_runtime::block_on(crate::net::server::start(arc.clone())) {
+                    if let Err(e) =
+                        tauri::async_runtime::block_on(crate::net::server::start(arc.clone()))
+                    {
                         tracing::error!("P2P 服务启动失败: {}", e);
                     }
                     if let Err(e) = crate::net::discovery::start(arc.clone()) {
@@ -211,6 +232,8 @@ pub fn run() {
             crate::commands::task_cmd::task_node_list,
             crate::commands::task_cmd::task_record_upsert,
             crate::commands::task_cmd::task_matrix_query,
+            crate::commands::task_cmd::task_progress_list,
+            crate::commands::task_cmd::task_class_matrix_query,
             crate::commands::task_cmd::task_delete,
             crate::commands::task_cmd::task_completion_stats,
         ])

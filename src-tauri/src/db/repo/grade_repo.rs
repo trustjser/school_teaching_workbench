@@ -106,10 +106,11 @@ pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
 
 /// 合并远端年级（last-write-wins）。
 pub async fn merge_remote(pool: &SqlitePool, remote: &Grade) -> AppResult<MergeOutcome> {
-    let local: Option<(i64,)> = sqlx::query_as::<_, (i64,)>("SELECT updated_at FROM grades WHERE id = ?")
-        .bind(&remote.id)
-        .fetch_optional(pool)
-        .await?;
+    let local: Option<(i64,)> =
+        sqlx::query_as::<_, (i64,)>("SELECT updated_at FROM grades WHERE id = ?")
+            .bind(&remote.id)
+            .fetch_optional(pool)
+            .await?;
     let outcome = match local {
         None => MergeOutcome::Inserted,
         Some((local_updated,)) => decide_merge(local_updated, remote.updated_at),

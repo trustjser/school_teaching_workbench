@@ -96,7 +96,9 @@ export function useBootstrap(): void {
           if (app.settings.appMode === 'master') {
             // 教务端收到班级端的任务定义、节点或记录后，
             // 统计页可能正处于打开状态，需要立即重新查询。
-            void useTaskStore.getState().loadCompletionStats();
+            const taskStore = useTaskStore.getState();
+            void taskStore.loadCompletionStats();
+            if (taskStore.currentTaskId) void taskStore.loadProgress(taskStore.currentTaskId);
           }
           // 任务矩阵页自行订阅刷新；此处仅保证事件不会被丢弃。
           void taskId;

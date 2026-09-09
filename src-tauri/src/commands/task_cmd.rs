@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use tauri::State;
 
-use crate::db::models::{CustomTask, TaskCompletionRow, TaskMatrix, TaskRecord, TaskStatusNode};
+use crate::db::models::{
+    CustomTask, TaskCompletionRow, TaskMatrix, TaskProgressRow, TaskRecord, TaskStatusNode,
+};
 use crate::db::repo::task_repo;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -15,23 +17,50 @@ use crate::sync::outbox;
 
 /// 任务列表（可按状态过滤）。
 #[tauri::command]
-pub async fn task_list(state: State<'_, Arc<AppState>>, status: Option<String>) -> AppResult<Vec<CustomTask>> {
+pub async fn task_list(
+    state: State<'_, Arc<AppState>>,
+    status: Option<String>,
+) -> AppResult<Vec<CustomTask>> {
     task_repo::list(&state.pool, status.as_deref(), None).await
 }
 
 /// 新增或修改任务，并写入待发队列。
 #[tauri::command]
-pub async fn task_upsert(state: State<'_, Arc<AppState>>, task: CustomTask) -> AppResult<CustomTask> {
+pub async fn task_upsert(
+    state: State<'_, Arc<AppState>>,
+    task: CustomTask,
+) -> AppResult<CustomTask> {
     let saved = task_repo::upsert(&state.pool, task).await?;
-    outbox::enqueue_entity(&state.pool, "custom_task", &saved.id, "upsert", &saved, None, None).await?;
+    outbox::enqueue_entity(
+        &state.pool,
+        "custom_task",
+        &saved.id,
+        "upsert",
+        &saved,
+        None,
+        None,
+    )
+    .await?;
     Ok(saved)
 }
 
 /// 新增或修改状态节点（2–4 节点约束在服务内）。
 #[tauri::command]
-pub async fn task_node_upsert(state: State<'_, Arc<AppState>>, node: TaskStatusNode) -> AppResult<TaskStatusNode> {
+pub async fn task_node_upsert(
+    state: State<'_, Arc<AppState>>,
+    node: TaskStatusNode,
+) -> AppResult<TaskStatusNode> {
     let saved = task_repo::node_upsert(&state.pool, node).await?;
-    outbox::enqueue_entity(&state.pool, "task_node", &saved.id, "upsert", &saved, None, None).await?;
+    outbox::enqueue_entity(
+        &state.pool,
+        "task_node",
+        &saved.id,
+        "upsert",
+        &saved,
+        None,
+        None,
+    )
+    .await?;
     Ok(saved)
 }
 
@@ -43,13 +72,19 @@ pub async fn task_node_delete(state: State<'_, Arc<AppState>>, id: String) -> Ap
 
 /// 任务的状态节点列表（独立读取，供节点编辑器）。
 #[tauri::command]
-pub async fn task_node_list(state: State<'_, Arc<AppState>>, task_id: String) -> AppResult<Vec<TaskStatusNode>> {
+pub async fn task_node_list(
+    state: State<'_, Arc<AppState>>,
+    task_id: String,
+) -> AppResult<Vec<TaskStatusNode>> {
     task_repo::node_list(&state.pool, &task_id).await
 }
 
 /// 新增或修改矩阵单元格记录（含评分/备注校验）。
 #[tauri::command]
-pub async fn task_record_upsert(state: State<'_, Arc<AppState>>, record: TaskRecord) -> AppResult<TaskRecord> {
+pub async fn task_record_upsert(
+    state: State<'_, Arc<AppState>>,
+    record: TaskRecord,
+) -> AppResult<TaskRecord> {
     let saved = task_repo::record_upsert(&state.pool, record).await?;
     // 兼容旧版本已接收的广播任务：旧逻辑只在班级端生成本地任务，
     // 没有把任务定义和状态节点回传教务端。更新记录时补发任务快照，
@@ -57,17 +92,57 @@ pub async fn task_record_upsert(state: State<'_, Arc<AppState>>, record: TaskRec
     if let Some(task) = task_repo::get(&state.pool, &saved.task_id).await? {
         if task.source == "broadcast" {
             let nodes = task_repo::node_list(&state.pool, &saved.task_id).await?;
-            crate::commands::broadcast_cmd::enqueue_task_snapshot(&state.pool, &task, &nodes).await?;
+            crate::commands::broadcast_cmd::enqueue_task_snapshot(&state.pool, &task, &nodes)
+                .await?;
         }
     }
-    outbox::enqueue_entity(&state.pool, "task_record", &saved.id, "upsert", &saved, None, None).await?;
+    outbox::enqueue_entity(
+        &state.pool,
+        "task_record",
+        &saved.id,
+        "upsert",
+        &saved,
+        None,
+        None,
+    )
+    .await?;
     Ok(saved)
 }
 
 /// 一次性返回任务矩阵（任务 + 节点 + 学生 + 已有记录）。
 #[tauri::command]
-pub async fn task_matrix_query(state: State<'_, Arc<AppState>>, task_id: String) -> AppResult<TaskMatrix> {
+pub async fn task_matrix_query(
+    state: State<'_, Arc<AppState>>,
+    task_id: String,
+) -> AppResult<TaskMatrix> {
     task_repo::matrix(&state.pool, &task_id).await
+}
+
+/// 查询任务按班级聚合的处理进度（教务端任务看板）。
+#[tauri::command]
+pub async fn task_progress_list(
+    state: State<'_, Arc<AppState>>,
+    task_id: String,
+    grade: Option<String>,
+    class_name: Option<String>,
+) -> AppResult<Vec<TaskProgressRow>> {
+    task_repo::progress_list(
+        &state.pool,
+        &task_id,
+        grade.as_deref(),
+        class_name.as_deref(),
+    )
+    .await
+}
+
+/// 查询指定任务、指定班级的学生明细矩阵。
+#[tauri::command]
+pub async fn task_class_matrix_query(
+    state: State<'_, Arc<AppState>>,
+    task_id: String,
+    class_name: String,
+) -> AppResult<TaskMatrix> {
+    task_repo::matrix_for_class(&state.pool, &task_id, Some(&class_name)).await
 }
 
 /// 软删任务（级联软删节点与记录）。
@@ -78,7 +153,10 @@ pub async fn task_delete(state: State<'_, Arc<AppState>>, id: String) -> AppResu
 
 /// 任务完成率统计（教务处端统计与导出）。
 #[tauri::command]
-pub async fn task_completion_stats(state: State<'_, Arc<AppState>>, since_ts: Option<i64>) -> AppResult<Vec<TaskCompletionRow>> {
+pub async fn task_completion_stats(
+    state: State<'_, Arc<AppState>>,
+    since_ts: Option<i64>,
+) -> AppResult<Vec<TaskCompletionRow>> {
     let since = since_ts;
     let rows = sqlx::query_as::<_, TaskCompletionRow>(
         "SELECT

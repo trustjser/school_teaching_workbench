@@ -16,7 +16,10 @@ use crate::db::models::{
     PingResponse, PullResponse, ReceiptPush, SchoolYear, Student, TaskRecord, TaskStatusNode,
     WhoamiResponse,
 };
-use crate::db::repo::{broadcast_repo, checkin_repo, class_repo, classroom_repo, grade_repo, now_ms, school_year_repo, settings_repo, student_repo, task_repo, new_id, MergeOutcome};
+use crate::db::repo::{
+    broadcast_repo, checkin_repo, class_repo, classroom_repo, grade_repo, new_id, now_ms,
+    school_year_repo, settings_repo, student_repo, task_repo, MergeOutcome,
+};
 use crate::error::{AppError, AppResult, ErrorBody};
 use crate::net::middleware::VerifiedRequest;
 use crate::state::AppState;
@@ -57,7 +60,9 @@ pub async fn ping(
     Json(PingResponse {
         device_id: vr.from,
         role: state.mode().as_str().to_string(),
-        device_name: opt_setting(&state, "device_name").await.unwrap_or_else(|| "未知设备".to_string()),
+        device_name: opt_setting(&state, "device_name")
+            .await
+            .unwrap_or_else(|| "未知设备".to_string()),
         grade: opt_setting(&state, "grade").await,
         class_name: opt_setting(&state, "class_name").await,
         ts: now,
@@ -69,7 +74,9 @@ pub async fn ping(
 pub async fn whoami(State(state): State<Arc<AppState>>) -> Json<WhoamiResponse> {
     Json(WhoamiResponse {
         device_id: state.device_id.clone(),
-        device_name: opt_setting(&state, "device_name").await.unwrap_or_else(|| "未知设备".to_string()),
+        device_name: opt_setting(&state, "device_name")
+            .await
+            .unwrap_or_else(|| "未知设备".to_string()),
         role: state.mode().as_str().to_string(),
         api_version: "1".to_string(),
         kid: state.kid(),
@@ -84,19 +91,37 @@ pub async fn ingest(
 ) -> Result<Json<IngestResponse>, ApiErr> {
     let req: IngestRequest = serde_json::from_value(vr.inner)
         .map_err(|e| api_err(AppError::validation(format!("ingest 请求体非法: {}", e))))?;
-    let (accepted, rejected, conflicts) = apply_items(&state, &req.items, Some(&req.device_id)).await.map_err(api_err)?;
+    let (accepted, rejected, conflicts) = apply_items(&state, &req.items, Some(&req.device_id))
+        .await
+        .map_err(api_err)?;
 
     // 不能用 200 掩盖部分合并失败，否则发送端会把条目标记为 done，
     // 形成“教务端显示已同步、班级端没有数据”的静默丢失。
     if rejected > 0 {
-        return Err(api_err(AppError::db(format!("{} 条同步记录未能合并", rejected))));
+        return Err(api_err(AppError::db(format!(
+            "{} 条同步记录未能合并",
+            rejected
+        ))));
     }
 
     if accepted > 0 {
-        state.app.emit(Events::CHECKIN_UPDATED, serde_json::json!({"from": req.device_id})).ok();
-        let task_ids: HashSet<String> = req.items.iter().filter_map(task_id_from_ingest_item).collect();
+        state
+            .app
+            .emit(
+                Events::CHECKIN_UPDATED,
+                serde_json::json!({"from": req.device_id}),
+            )
+            .ok();
+        let task_ids: HashSet<String> = req
+            .items
+            .iter()
+            .filter_map(task_id_from_ingest_item)
+            .collect();
         for task_id in task_ids {
-            state.app.emit(Events::TASK_UPDATED, serde_json::json!({"taskId": task_id})).ok();
+            state
+                .app
+                .emit(Events::TASK_UPDATED, serde_json::json!({"taskId": task_id}))
+                .ok();
         }
     }
     Ok(Json(IngestResponse {
@@ -123,18 +148,24 @@ pub async fn broadcast(
     if task.status.is_empty() {
         task.status = "sent".to_string();
     }
-    let task = broadcast_repo::upsert(&state.pool, task).await.map_err(api_err)?;
+    let task = broadcast_repo::upsert(&state.pool, task)
+        .await
+        .map_err(api_err)?;
 
     for node in push.nodes {
-        let mut n: TaskStatusNode =
-            serde_json::from_value(node).map_err(|e| api_err(AppError::validation(format!("节点解析失败: {}", e))))?;
+        let mut n: TaskStatusNode = serde_json::from_value(node)
+            .map_err(|e| api_err(AppError::validation(format!("节点解析失败: {}", e))))?;
         n.task_id = task.id.clone();
-        task_repo::merge_remote_node(&state.pool, &n).await.map_err(api_err)?;
+        task_repo::merge_remote_node(&state.pool, &n)
+            .await
+            .map_err(api_err)?;
     }
 
     // 班级端收到广播后立即生成待办；helper 按广播 ID 幂等，重复投递不会产生重复任务。
     if matches!(state.mode(), crate::db::models::AppMode::Client) {
-        if let Err(err) = crate::commands::broadcast_cmd::accept_broadcast_task(&state, &task.id).await {
+        if let Err(err) =
+            crate::commands::broadcast_cmd::accept_broadcast_task(&state, &task.id).await
+        {
             tracing::error!(broadcast_task_id = %task.id, "广播自动生成待办失败: {}", err);
             return Err(api_err(err));
         }
@@ -142,7 +173,10 @@ pub async fn broadcast(
 
     state
         .app
-        .emit(Events::BROADCAST_RECEIVED, serde_json::json!({"broadcastTaskId": task.id}))
+        .emit(
+            Events::BROADCAST_RECEIVED,
+            serde_json::json!({"broadcastTaskId": task.id}),
+        )
         .ok();
 
     Ok(Json(AckResponse {
@@ -178,7 +212,10 @@ pub async fn receipt(
 
     state
         .app
-        .emit(Events::BROADCAST_RECEIPT, serde_json::json!({"broadcastTaskId": push.broadcast_task_id}))
+        .emit(
+            Events::BROADCAST_RECEIPT,
+            serde_json::json!({"broadcastTaskId": push.broadcast_task_id}),
+        )
         .ok();
 
     Ok(Json(AckResponse {
@@ -190,14 +227,20 @@ pub async fn receipt(
 
 /// 班级端拉取尚未接收的广播任务。
 pub async fn pull(State(state): State<Arc<AppState>>) -> Result<Json<PullResponse>, ApiErr> {
-    let tasks = broadcast_repo::list(&state.pool, Some("in"), None).await.map_err(api_err)?;
+    let tasks = broadcast_repo::list(&state.pool, Some("in"), None)
+        .await
+        .map_err(api_err)?;
     let mut out = Vec::new();
     for t in tasks {
-        let receipts = broadcast_repo::receipts(&state.pool, &t.id).await.map_err(api_err)?;
+        let receipts = broadcast_repo::receipts(&state.pool, &t.id)
+            .await
+            .map_err(api_err)?;
         if receipts.iter().any(|r| r.device_id == state.device_id) {
             continue;
         }
-        let nodes = task_repo::node_list(&state.pool, &t.id).await.map_err(api_err)?;
+        let nodes = task_repo::node_list(&state.pool, &t.id)
+            .await
+            .map_err(api_err)?;
         let nodes_json: Vec<serde_json::Value> = nodes
             .into_iter()
             .map(|n| serde_json::to_value(n).unwrap_or(serde_json::Value::Null))
@@ -220,9 +263,14 @@ pub async fn package(
 ) -> Result<Json<IngestResponse>, ApiErr> {
     let req: IngestRequest = serde_json::from_value(vr.inner)
         .map_err(|e| api_err(AppError::validation(format!("package 请求体非法: {}", e))))?;
-    let (accepted, rejected, conflicts) = apply_items(&state, &req.items, None).await.map_err(api_err)?;
+    let (accepted, rejected, conflicts) = apply_items(&state, &req.items, None)
+        .await
+        .map_err(api_err)?;
     if rejected > 0 {
-        return Err(api_err(AppError::db(format!("{} 条同步记录未能合并", rejected))));
+        return Err(api_err(AppError::db(format!(
+            "{} 条同步记录未能合并",
+            rejected
+        ))));
     }
     Ok(Json(IngestResponse {
         accepted,
@@ -238,7 +286,11 @@ pub async fn apply_ingest(state: &AppState, items: &[IngestItem]) -> AppResult<(
 }
 
 /// 把一批增量条目落地（last-write-wins 合并）。返回 (接受数, 拒绝数, 冲突数)。
-async fn apply_items(state: &AppState, items: &[IngestItem], reply_device_id: Option<&str>) -> AppResult<(i64, i64, i64)> {
+async fn apply_items(
+    state: &AppState,
+    items: &[IngestItem],
+    reply_device_id: Option<&str>,
+) -> AppResult<(i64, i64, i64)> {
     let pool = &state.pool;
     let mut accepted = 0i64;
     let mut rejected = 0i64;
@@ -256,7 +308,12 @@ async fn apply_items(state: &AppState, items: &[IngestItem], reply_device_id: Op
                 resend_students_for_assignment(state, item, reply_device_id).await?;
             }
             Err(e) => {
-                tracing::warn!("增量合并失败(entity={}, op={}): {}", item.entity_type, item.op_type, e);
+                tracing::warn!(
+                    "增量合并失败(entity={}, op={}): {}",
+                    item.entity_type,
+                    item.op_type,
+                    e
+                );
                 rejected += 1;
             }
         }
@@ -267,7 +324,11 @@ async fn apply_items(state: &AppState, items: &[IngestItem], reply_device_id: Op
 /// 从同步条目提取任务 ID，用于通知教务端刷新完成统计。
 fn task_id_from_ingest_item(item: &IngestItem) -> Option<String> {
     match item.entity_type.as_str() {
-        "custom_task" => item.entity.get("id").and_then(|v| v.as_str()).map(str::to_string),
+        "custom_task" => item
+            .entity
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
         "task_node" | "task_record" => item
             .entity
             .get("task_id")
@@ -367,7 +428,10 @@ async fn apply_one(pool: &crate::db::DbPool, item: &IngestItem) -> AppResult<Mer
             let v: ClassroomAssignment = serde_json::from_value(item.entity.clone())?;
             classroom_repo::merge_remote_assignment(pool, &v).await
         }
-        _ => Err(AppError::validation(format!("未知实体类型: {}", item.entity_type))),
+        _ => Err(AppError::validation(format!(
+            "未知实体类型: {}",
+            item.entity_type
+        ))),
     }
 }
 

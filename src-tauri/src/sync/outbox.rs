@@ -95,7 +95,10 @@ pub async fn retry_item(pool: &SqlitePool, id: &str) -> AppResult<()> {
 
 /// 构造目标地址元组（device_id, base_url）。
 pub fn device_base_url(device_id: &str, ip: &str, port: i32) -> (String, Option<String>) {
-    (device_id.to_string(), Some(format!("http://{}:{}", ip, port)))
+    (
+        device_id.to_string(),
+        Some(format!("http://{}:{}", ip, port)),
+    )
 }
 
 /// 便捷错误。

@@ -57,10 +57,9 @@ impl ErrorCode {
         match self {
             ErrorCode::Db => 500,
             ErrorCode::Net => 502,
-            ErrorCode::Sign
-            | ErrorCode::Crypto
-            | ErrorCode::TsWindow
-            | ErrorCode::NonceReplay => 401,
+            ErrorCode::Sign | ErrorCode::Crypto | ErrorCode::TsWindow | ErrorCode::NonceReplay => {
+                401
+            }
             ErrorCode::Validation => 400,
             ErrorCode::NotFound => 404,
             ErrorCode::Mode => 409,
@@ -164,7 +163,8 @@ impl AppError {
 
     /// 数据库错误统一入口：保留原因、对外隐藏细节。
     pub fn db(reason: impl fmt::Display) -> AppError {
-        AppError::new(ErrorCode::Db, ErrorCode::Db.default_message()).with_detail(reason.to_string())
+        AppError::new(ErrorCode::Db, ErrorCode::Db.default_message())
+            .with_detail(reason.to_string())
     }
 
     /// 网络错误统一入口。
@@ -180,7 +180,10 @@ impl AppError {
 
     /// 记录不存在。
     pub fn not_found(what: impl Into<String>) -> AppError {
-        AppError::new(ErrorCode::NotFound, format!("{}不存在或已删除", what.into()))
+        AppError::new(
+            ErrorCode::NotFound,
+            format!("{}不存在或已删除", what.into()),
+        )
     }
 
     /// 快捷构造：签名错误。
@@ -232,7 +235,13 @@ impl AppError {
 impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.detail {
-            Some(d) => write!(f, "[{}] {} | detail: {}", self.code.as_str(), self.message, d),
+            Some(d) => write!(
+                f,
+                "[{}] {} | detail: {}",
+                self.code.as_str(),
+                self.message,
+                d
+            ),
             None => write!(f, "[{}] {}", self.code.as_str(), self.message),
         }
     }
@@ -248,7 +257,8 @@ impl From<sqlx::Error> for AppError {
 
 impl From<serde_json::Error> for AppError {
     fn from(err: serde_json::Error) -> AppError {
-        AppError::new(ErrorCode::Validation, "JSON 序列化/反序列化失败").with_detail(err.to_string())
+        AppError::new(ErrorCode::Validation, "JSON 序列化/反序列化失败")
+            .with_detail(err.to_string())
     }
 }
 

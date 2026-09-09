@@ -22,7 +22,12 @@ pub const TAG_LEN: usize = 16;
 pub const KEY_LEN: usize = 32;
 
 /// 由根密钥派生会话密钥（32 字节）。
-pub fn derive_session_key(root_key: &[u8], from: &str, to: &str, kid: &str) -> AppResult<[u8; KEY_LEN]> {
+pub fn derive_session_key(
+    root_key: &[u8],
+    from: &str,
+    to: &str,
+    kid: &str,
+) -> AppResult<[u8; KEY_LEN]> {
     if root_key.len() < 16 {
         return Err(AppError::crypto().with_detail("根密钥长度不足"));
     }

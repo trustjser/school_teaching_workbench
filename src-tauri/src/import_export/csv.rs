@@ -19,8 +19,8 @@ pub fn parse_csv(path: &str) -> AppResult<Vec<StudentImportRow>> {
 
     let mut rows: Vec<StudentImportRow> = Vec::new();
     for record in rdr.records() {
-        let record: StringRecord = record
-            .map_err(|e| AppError::import(format!("读取数据行失败: {}", e)))?;
+        let record: StringRecord =
+            record.map_err(|e| AppError::import(format!("读取数据行失败: {}", e)))?;
         let values: Vec<String> = record.iter().map(|v| v.trim().to_string()).collect();
         let row = map_record(&headers, &values)?;
         rows.push(row);
@@ -35,7 +35,10 @@ fn map_record(headers: &[String], values: &[String]) -> AppResult<StudentImportR
             .iter()
             .position(|h| keys.iter().any(|kk| h == kk))
             .and_then(|i| {
-                let v = values.get(i).map(|s| s.trim().to_string()).unwrap_or_default();
+                let v = values
+                    .get(i)
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_default();
                 if v.is_empty() {
                     None
                 } else {

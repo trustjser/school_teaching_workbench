@@ -5,8 +5,8 @@
 //! TXT：`did`(设备ID) / `role` / `name` / `grade` / `class` / `api`(版本) / `kid` / `port`
 
 use std::collections::HashMap;
-use tauri::Emitter;
 use std::sync::Arc;
+use tauri::Emitter;
 
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use tauri::async_runtime::spawn;
@@ -28,7 +28,8 @@ const TXT_PORT: &str = "port";
 
 /// 启动 mDNS：创建守护、注册本机、开始浏览，并把守护句柄存入 `state`，最后派发事件循环。
 pub fn start(state: Arc<AppState>) -> AppResult<()> {
-    let daemon = ServiceDaemon::new().map_err(|e| crate::error::AppError::net(format!("mDNS 守护启动失败: {}", e)))?;
+    let daemon = ServiceDaemon::new()
+        .map_err(|e| crate::error::AppError::net(format!("mDNS 守护启动失败: {}", e)))?;
 
     // 注册本机服务（端口须已由 server 回填）。
     let info = build_self_info(&state)?;
@@ -70,9 +71,11 @@ fn build_self_info(state: &AppState) -> AppResult<ServiceInfo> {
     let port = state.port();
 
     let get_setting = |key: &str| -> String {
-        tauri::async_runtime::block_on(
-            crate::db::repo::settings_repo::get_string(&state.pool, key, "")
-        )
+        tauri::async_runtime::block_on(crate::db::repo::settings_repo::get_string(
+            &state.pool,
+            key,
+            "",
+        ))
         .unwrap_or_default()
     };
     let mut props: HashMap<String, String> = HashMap::new();
@@ -95,8 +98,15 @@ fn build_self_info(state: &AppState) -> AppResult<ServiceInfo> {
         props.insert(TXT_CLASS.to_string(), cls);
     }
 
-    ServiceInfo::new(MDNS_SERVICE_TYPE, &instance, &host, local_ip.to_string(), port, props)
-        .map_err(|e| crate::error::AppError::net(format!("构造 mDNS 服务信息失败: {}", e)))
+    ServiceInfo::new(
+        MDNS_SERVICE_TYPE,
+        &instance,
+        &host,
+        local_ip.to_string(),
+        port,
+        props,
+    )
+    .map_err(|e| crate::error::AppError::net(format!("构造 mDNS 服务信息失败: {}", e)))
 }
 
 /// 处理一条 mDNS 事件。
@@ -124,8 +134,15 @@ async fn on_resolved(state: &Arc<AppState>, info: &ServiceInfo) {
         .next()
         .map(|ip| ip.to_string());
     let port = Some(info.get_port() as i32);
-    let role = info.get_property_val_str(TXT_ROLE).unwrap_or("unknown").to_string();
-    let advertised_name = info.get_property_val_str(TXT_NAME).unwrap_or("").trim().to_string();
+    let role = info
+        .get_property_val_str(TXT_ROLE)
+        .unwrap_or("unknown")
+        .to_string();
+    let advertised_name = info
+        .get_property_val_str(TXT_NAME)
+        .unwrap_or("")
+        .trim()
+        .to_string();
     let grade = info.get_property_val_str(TXT_GRADE).map(|s| s.to_string());
     let class = info.get_property_val_str(TXT_CLASS).map(|s| s.to_string());
     let api_ver = info.get_property_val_str(TXT_API).map(|s| s.to_string());
@@ -134,7 +151,10 @@ async fn on_resolved(state: &Arc<AppState>, info: &ServiceInfo) {
 
     // 首次发现 vs 已有记录。旧版本客户端可能把占位文本发布到 mDNS，
     // 不能让它覆盖已经保存的设备名；首次发现则给出稳定的可识别名称。
-    let existing = device_repo::get_by_device_id(&state.pool, &peer_id).await.ok().flatten();
+    let existing = device_repo::get_by_device_id(&state.pool, &peer_id)
+        .await
+        .ok()
+        .flatten();
     let was_known = existing.is_some();
     let name = if is_placeholder_name(&advertised_name) {
         existing
@@ -166,10 +186,19 @@ async fn on_resolved(state: &Arc<AppState>, info: &ServiceInfo) {
     match result {
         Ok(_) => {
             if was_known {
-                let _ = state.app.emit(Events::DEVICE_CHANGED, serde_json::json!({ "deviceId": peer_id }));
+                let _ = state.app.emit(
+                    Events::DEVICE_CHANGED,
+                    serde_json::json!({ "deviceId": peer_id }),
+                );
             } else {
-                let _ = state.app.emit(Events::DEVICE_FOUND, serde_json::json!({ "deviceId": peer_id }));
-                let _ = state.app.emit(Events::DEVICE_CHANGED, serde_json::json!({ "deviceId": peer_id }));
+                let _ = state.app.emit(
+                    Events::DEVICE_FOUND,
+                    serde_json::json!({ "deviceId": peer_id }),
+                );
+                let _ = state.app.emit(
+                    Events::DEVICE_CHANGED,
+                    serde_json::json!({ "deviceId": peer_id }),
+                );
             }
         }
         Err(e) => tracing::warn!("mDNS 节点入库失败({}): {}", peer_id, e),
@@ -202,12 +231,20 @@ fn peer_from_fullname(fullname: &str) -> String {
 /// 主动刷新一次（供 `device_refresh` 命令触发）：本地已无 mDNS 事件时，
 /// 把超过静默阈值的在线节点标记为 stale。
 pub async fn sweep_stale(state: &Arc<AppState>) {
-    if let Ok(ids) = device_repo::mark_stale(&state.pool, crate::config::constants::OFFLINE_TTL_SEC).await {
+    if let Ok(ids) =
+        device_repo::mark_stale(&state.pool, crate::config::constants::OFFLINE_TTL_SEC).await
+    {
         for id in &ids {
-            let _ = state.app.emit(Events::DEVICE_OFFLINE, serde_json::json!({ "deviceId": id }));
+            let _ = state.app.emit(
+                Events::DEVICE_OFFLINE,
+                serde_json::json!({ "deviceId": id }),
+            );
         }
         if !ids.is_empty() {
-            let _ = state.app.emit(Events::DEVICE_CHANGED, serde_json::json!({ "stale": ids.len() }));
+            let _ = state.app.emit(
+                Events::DEVICE_CHANGED,
+                serde_json::json!({ "stale": ids.len() }),
+            );
         }
     }
 }

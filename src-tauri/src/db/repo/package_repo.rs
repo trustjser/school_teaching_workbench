@@ -88,7 +88,11 @@ pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Option<OfflinePackage
 }
 
 /// 按方向列出最近的离线包记录。
-pub async fn list(pool: &SqlitePool, direction: Option<&str>, limit: i32) -> AppResult<Vec<OfflinePackage>> {
+pub async fn list(
+    pool: &SqlitePool,
+    direction: Option<&str>,
+    limit: i32,
+) -> AppResult<Vec<OfflinePackage>> {
     let mut sql = String::from(
         "SELECT id, file_name, file_path, direction, package_type, scope, entity_counts, checksum,
                 size_bytes, status, since_ts, until_ts, created_at, updated_at, deleted_at

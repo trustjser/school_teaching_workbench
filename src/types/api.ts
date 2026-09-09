@@ -137,6 +137,24 @@ export interface TaskCompletionRow {
   avgScore: number | null;
 }
 
+/** 教务端任务按班级聚合进度 */
+export interface TaskProgressRow {
+  taskId: string;
+  title: string;
+  className: string;
+  grade: string | null;
+  deviceId: string | null;
+  deviceName: string | null;
+  deviceStatus: string | null;
+  total: number;
+  finalCount: number;
+  processingCount: number;
+  pendingCount: number;
+  completionRate: number;
+  avgScore: number | null;
+  lastUpdatedAt: number | null;
+}
+
 /** .sch 导出入参 */
 export interface ExportSchArgs {
   scope: 'class' | 'grade' | 'school';

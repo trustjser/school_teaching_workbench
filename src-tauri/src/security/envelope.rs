@@ -96,7 +96,12 @@ pub fn seal(
 }
 
 /// 解封：校验信封并返回明文 `inner`（调用方需先完成 nonce 去重）。
-pub fn open(root_secret_b64: &str, method: &str, path: &str, env: &Envelope) -> AppResult<serde_json::Value> {
+pub fn open(
+    root_secret_b64: &str,
+    method: &str,
+    path: &str,
+    env: &Envelope,
+) -> AppResult<serde_json::Value> {
     if env.v != ENVELOPE_VERSION {
         return Err(AppError::crypto().with_detail("envelope version mismatch"));
     }
@@ -122,12 +127,21 @@ pub fn open(root_secret_b64: &str, method: &str, path: &str, env: &Envelope) -> 
         return Err(AppError::crypto().with_detail("body hash mismatch"));
     }
 
-    let sign_canon = hmac::canonical_string(method, path, env.ts, &env.nonce, &env.from, &env.body_sha256, &env.kid);
+    let sign_canon = hmac::canonical_string(
+        method,
+        path,
+        env.ts,
+        &env.nonce,
+        &env.from,
+        &env.body_sha256,
+        &env.kid,
+    );
     if !hmac::verify(&secret, &sign_canon, &env.sig)? {
         return Err(AppError::sign());
     }
 
-    serde_json::from_slice(&plaintext).map_err(|err| AppError::crypto().with_detail(format!("inner 解析失败: {}", err)))
+    serde_json::from_slice(&plaintext)
+        .map_err(|err| AppError::crypto().with_detail(format!("inner 解析失败: {}", err)))
 }
 
 #[cfg(test)]
@@ -139,7 +153,16 @@ mod tests {
     fn seal_open_roundtrip_preserves_replay_nonce_and_iv() {
         let secret = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
         let body = serde_json::json!({ "probe": true });
-        let env = seal(&secret, "test-kid", "from", "to", "POST", "/api/v1/ping", &body).unwrap();
+        let env = seal(
+            &secret,
+            "test-kid",
+            "from",
+            "to",
+            "POST",
+            "/api/v1/ping",
+            &body,
+        )
+        .unwrap();
         assert_ne!(env.nonce, env.iv);
         assert_eq!(open(&secret, "POST", "/api/v1/ping", &env).unwrap(), body);
     }

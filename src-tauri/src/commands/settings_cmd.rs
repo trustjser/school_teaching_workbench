@@ -51,7 +51,10 @@ pub async fn settings_set(
         return Err(AppError::validation("配置键不能为空"));
     }
     if key == "shared_secret_b64" {
-        let secret = value.as_deref().map(str::trim).filter(|v| !v.is_empty())
+        let secret = value
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
             .ok_or_else(|| AppError::validation("共享密钥不能为空"))?;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(secret)
@@ -90,8 +93,20 @@ pub async fn settings_complete_setup(
     settings_repo::set_raw(&state.pool, "grade", grade.as_deref(), "string").await?;
     settings_repo::set_raw(&state.pool, "class_name", class_name.as_deref(), "string").await?;
     settings_repo::set_raw(&state.pool, "class_id", class_id.as_deref(), "string").await?;
-    settings_repo::set_raw(&state.pool, "school_year_id", school_year_id.as_deref(), "string").await?;
-    settings_repo::set_raw(&state.pool, "bound_class_id", bound_class_id.as_deref(), "string").await?;
+    settings_repo::set_raw(
+        &state.pool,
+        "school_year_id",
+        school_year_id.as_deref(),
+        "string",
+    )
+    .await?;
+    settings_repo::set_raw(
+        &state.pool,
+        "bound_class_id",
+        bound_class_id.as_deref(),
+        "string",
+    )
+    .await?;
     settings_repo::set_raw(&state.pool, "school_name", school_name.as_deref(), "string").await?;
     settings_repo::set_raw(&state.pool, "completed_setup", Some("true"), "boolean").await?;
     // 同时翻转遗留键 first_run_done，保证任何仍读取该键的旧前端/命令都能正确判定「已完成」，
@@ -99,14 +114,17 @@ pub async fn settings_complete_setup(
     settings_repo::set_raw(&state.pool, "first_run_done", Some("true"), "boolean").await?;
 
     if let Some(secret) = secret {
-      let kid = keystore::fingerprint(secret)?;
-      settings_repo::set_raw(&state.pool, "shared_secret_b64", Some(secret), "secret").await?;
-      settings_repo::set_raw(&state.pool, "key_id", Some(&kid), "string").await?;
-      state.set_key(secret.to_string(), kid);
+        let kid = keystore::fingerprint(secret)?;
+        settings_repo::set_raw(&state.pool, "shared_secret_b64", Some(secret), "secret").await?;
+        settings_repo::set_raw(&state.pool, "key_id", Some(&kid), "string").await?;
+        state.set_key(secret.to_string(), kid);
     }
 
     state.set_mode(mode);
-    let _ = state.app.emit(Events::MODE_CHANGED, serde_json::json!({ "mode": mode.as_str() }));
+    let _ = state.app.emit(
+        Events::MODE_CHANGED,
+        serde_json::json!({ "mode": mode.as_str() }),
+    );
     Ok(())
 }
 
@@ -116,7 +134,9 @@ mod tests {
 
     #[test]
     fn client_setup_can_defer_secret() {
-        assert!(validate_setup_secret(AppMode::Client, None).unwrap().is_none());
+        assert!(validate_setup_secret(AppMode::Client, None)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -127,17 +147,25 @@ mod tests {
 
 /// 运行模式热切换（班级端 ↔ 教务处端）。
 #[tauri::command]
-pub async fn settings_switch_mode(state: State<'_, Arc<AppState>>, mode: String) -> AppResult<AppMode> {
+pub async fn settings_switch_mode(
+    state: State<'_, Arc<AppState>>,
+    mode: String,
+) -> AppResult<AppMode> {
     let mode = AppMode::parse(&mode);
     settings_repo::set_raw(&state.pool, "app_mode", Some(mode.as_str()), "string").await?;
     state.set_mode(mode);
-    let _ = state.app.emit(Events::MODE_CHANGED, serde_json::json!({ "mode": mode.as_str() }));
+    let _ = state.app.emit(
+        Events::MODE_CHANGED,
+        serde_json::json!({ "mode": mode.as_str() }),
+    );
     Ok(mode)
 }
 
 /// 轮换共享密钥，返回新 kid（旧包立刻失效）。
 #[tauri::command]
-pub async fn settings_rotate_key(state: State<'_, Arc<AppState>>) -> AppResult<crate::db::models::KeyInfo> {
+pub async fn settings_rotate_key(
+    state: State<'_, Arc<AppState>>,
+) -> AppResult<crate::db::models::KeyInfo> {
     let info = keystore::rotate(&state.pool).await?;
     state.set_key(info.secret_b64.clone(), info.kid.clone());
     Ok(info)
@@ -148,7 +176,9 @@ pub async fn settings_rotate_key(state: State<'_, Arc<AppState>>) -> AppResult<c
 pub async fn settings_key_info(state: State<'_, Arc<AppState>>) -> AppResult<serde_json::Value> {
     let (secret, kid) = match keystore::read(&state.pool).await {
         Ok(value) => value,
-        Err(_) => return Ok(serde_json::json!({ "kid": "", "fingerprint": "", "configured": false })),
+        Err(_) => {
+            return Ok(serde_json::json!({ "kid": "", "fingerprint": "", "configured": false }))
+        }
     };
     let fingerprint = keystore::fingerprint(&secret)?;
     Ok(serde_json::json!({ "kid": kid, "fingerprint": fingerprint, "configured": true }))

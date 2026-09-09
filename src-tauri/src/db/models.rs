@@ -1247,6 +1247,26 @@ pub struct TaskCompletionRow {
     pub avg_score: Option<f64>,
 }
 
+/// 任务按班级聚合的处理进度（教务端看板）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskProgressRow {
+    pub task_id: String,
+    pub title: String,
+    pub class_name: String,
+    pub grade: Option<String>,
+    pub device_id: Option<String>,
+    pub device_name: Option<String>,
+    pub device_status: Option<String>,
+    pub total: i64,
+    pub final_count: i64,
+    pub processing_count: i64,
+    pub pending_count: i64,
+    pub completion_rate: f64,
+    pub avg_score: Option<f64>,
+    pub last_updated_at: Option<i64>,
+}
+
 #[cfg(test)]
 mod task_completion_row_tests {
     use super::TaskCompletionRow;

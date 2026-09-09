@@ -19,7 +19,17 @@ pub async fn enqueue(
     payload: serde_json::Value,
     priority: i32,
 ) -> AppResult<String> {
-    enqueue_to(pool, entity_type, entity_id, op_type, payload, priority, None, None).await
+    enqueue_to(
+        pool,
+        entity_type,
+        entity_id,
+        op_type,
+        payload,
+        priority,
+        None,
+        None,
+    )
+    .await
 }
 
 /// 入队（指定目标设备与端点）。
@@ -142,7 +152,11 @@ fn default_endpoint(op_type: &str) -> &'static str {
 }
 
 /// 按状态列出队列条目。
-pub async fn list(pool: &SqlitePool, status: Option<&str>, limit: i32) -> AppResult<Vec<PendingQueueItem>> {
+pub async fn list(
+    pool: &SqlitePool,
+    status: Option<&str>,
+    limit: i32,
+) -> AppResult<Vec<PendingQueueItem>> {
     let mut sql = String::from(
         "SELECT id, op_type, entity_type, entity_id, payload, target_device_id, target_endpoint,
                 target_base_url, attempt_count, max_attempts, next_retry_at, last_error, status,

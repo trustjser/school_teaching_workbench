@@ -23,8 +23,19 @@ pub async fn grade_list(state: State<'_, Arc<AppState>>) -> AppResult<Vec<Grade>
 #[tauri::command]
 pub async fn grade_upsert(state: State<'_, Arc<AppState>>, grade: Grade) -> AppResult<Grade> {
     let saved = grade_repo::upsert(&state.pool, grade).await?;
-    outbox::enqueue_entity(&state.pool, "grade", &saved.id, "upsert", &saved, None, None).await?;
-    let _ = state.app.emit(Events::GRADE_CHANGED, serde_json::json!({ "id": saved.id }));
+    outbox::enqueue_entity(
+        &state.pool,
+        "grade",
+        &saved.id,
+        "upsert",
+        &saved,
+        None,
+        None,
+    )
+    .await?;
+    let _ = state
+        .app
+        .emit(Events::GRADE_CHANGED, serde_json::json!({ "id": saved.id }));
     Ok(saved)
 }
 
@@ -37,6 +48,8 @@ pub async fn grade_delete(state: State<'_, Arc<AppState>>, id: String) -> AppRes
         g.deleted_at = Some(crate::db::repo::now_ms());
         outbox::enqueue_entity(&state.pool, "grade", &id, "delete", &g, None, None).await?;
     }
-    let _ = state.app.emit(Events::GRADE_CHANGED, serde_json::json!({ "id": id }));
+    let _ = state
+        .app
+        .emit(Events::GRADE_CHANGED, serde_json::json!({ "id": id }));
     Ok(())
 }

@@ -39,6 +39,7 @@ const MASTER_NAV: NavItem[] = [
   { to: '/master/attendance', label: '考勤大屏', icon: CalendarCheck },
   { to: '/master/directory', label: '年级班级管理', icon: BookMarked },
   { to: '/master/broadcast', label: '任务下发', icon: Radio },
+  { to: '/master/tasks', label: '任务看板', icon: ClipboardList },
   { to: '/master/analytics', label: '统计导出', icon: BarChart3 },
 ];
 

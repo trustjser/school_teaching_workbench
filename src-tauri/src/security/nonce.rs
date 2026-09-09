@@ -33,7 +33,11 @@ impl NonceCache {
             return false;
         }
         if map.len() >= self.capacity {
-            if let Some(oldest) = map.iter().min_by_key(|(_, exp)| **exp).map(|(k, _)| k.clone()) {
+            if let Some(oldest) = map
+                .iter()
+                .min_by_key(|(_, exp)| **exp)
+                .map(|(k, _)| k.clone())
+            {
                 map.remove(&oldest);
             }
         }

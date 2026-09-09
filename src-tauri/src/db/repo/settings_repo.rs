@@ -18,10 +18,7 @@ pub async fn list(pool: &SqlitePool) -> AppResult<Vec<AppSetting>> {
 }
 
 /// 读取原始配置值，返回 `(setting_value, value_type)`。
-pub async fn get_raw(
-    pool: &SqlitePool,
-    key: &str,
-) -> AppResult<Option<(Option<String>, String)>> {
+pub async fn get_raw(pool: &SqlitePool, key: &str) -> AppResult<Option<(Option<String>, String)>> {
     let row = sqlx::query_as::<_, (Option<String>, String)>(
         "SELECT setting_value, value_type FROM app_settings
          WHERE setting_key = ? AND deleted_at IS NULL LIMIT 1",
@@ -95,11 +92,13 @@ pub async fn get_bool(pool: &SqlitePool, key: &str, default: bool) -> AppResult<
 
 /// 软删配置项。
 pub async fn delete(pool: &SqlitePool, key: &str) -> AppResult<()> {
-    sqlx::query("UPDATE app_settings SET deleted_at = ? WHERE setting_key = ? AND deleted_at IS NULL")
-        .bind(now_ms())
-        .bind(key)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE app_settings SET deleted_at = ? WHERE setting_key = ? AND deleted_at IS NULL",
+    )
+    .bind(now_ms())
+    .bind(key)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

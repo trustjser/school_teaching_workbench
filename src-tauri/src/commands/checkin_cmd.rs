@@ -10,7 +10,9 @@ use serde::Deserialize;
 use tauri::State;
 
 use crate::config::constants::Events;
-use crate::db::models::{CheckinRecord, ClassAttendanceRow, DailySummary, ExceptionStudentRow, SchoolSummary};
+use crate::db::models::{
+    CheckinRecord, ClassAttendanceRow, DailySummary, ExceptionStudentRow, SchoolSummary,
+};
 use crate::db::repo::checkin_repo;
 use crate::error::AppResult;
 use crate::state::AppState;
@@ -51,11 +53,32 @@ pub async fn checkin_mark(
     note: Option<String>,
 ) -> AppResult<CheckinRecord> {
     let saved = checkin_repo::upsert(
-        &app_state.pool, None, &student_id, &date, &period, None, &state,
-        Some(&app_state.device_id), note.as_deref(), "local",
-    ).await?;
-    outbox::enqueue_entity(&app_state.pool, "checkin", &saved.id, "upsert", &saved, None, None).await?;
-    let _ = app_state.app.emit(Events::CHECKIN_UPDATED, serde_json::json!({ "date": date, "period": period }));
+        &app_state.pool,
+        None,
+        &student_id,
+        &date,
+        &period,
+        None,
+        &state,
+        Some(&app_state.device_id),
+        note.as_deref(),
+        "local",
+    )
+    .await?;
+    outbox::enqueue_entity(
+        &app_state.pool,
+        "checkin",
+        &saved.id,
+        "upsert",
+        &saved,
+        None,
+        None,
+    )
+    .await?;
+    let _ = app_state.app.emit(
+        Events::CHECKIN_UPDATED,
+        serde_json::json!({ "date": date, "period": period }),
+    );
     Ok(saved)
 }
 
@@ -68,25 +91,53 @@ pub async fn checkin_batch_mark(
     let mut out = Vec::with_capacity(items.len());
     for it in &items {
         let saved = checkin_repo::upsert(
-            &state.pool, None, &it.student_id, &it.date, &it.period, None, &it.state,
-            Some(&state.device_id), it.note.as_deref(), "local",
-        ).await?;
-        outbox::enqueue_entity(&state.pool, "checkin", &saved.id, "upsert", &saved, None, None).await.ok();
+            &state.pool,
+            None,
+            &it.student_id,
+            &it.date,
+            &it.period,
+            None,
+            &it.state,
+            Some(&state.device_id),
+            it.note.as_deref(),
+            "local",
+        )
+        .await?;
+        outbox::enqueue_entity(
+            &state.pool,
+            "checkin",
+            &saved.id,
+            "upsert",
+            &saved,
+            None,
+            None,
+        )
+        .await
+        .ok();
         out.push(saved);
     }
-    let _ = state.app.emit(Events::CHECKIN_UPDATED, serde_json::json!({ "count": out.len() }));
+    let _ = state.app.emit(
+        Events::CHECKIN_UPDATED,
+        serde_json::json!({ "count": out.len() }),
+    );
     Ok(out)
 }
 
 /// 日考勤汇总（按班级聚合，含「默认出勤」）。
 #[tauri::command]
-pub async fn checkin_daily_summary(state: State<'_, Arc<AppState>>, date: String) -> AppResult<Vec<DailySummary>> {
+pub async fn checkin_daily_summary(
+    state: State<'_, Arc<AppState>>,
+    date: String,
+) -> AppResult<Vec<DailySummary>> {
     checkin_repo::daily_summary(&state.pool, &date, None).await
 }
 
 /// 全校考勤汇总（教务处大屏首页）。
 #[tauri::command]
-pub async fn checkin_school_summary(state: State<'_, Arc<AppState>>, date: String) -> AppResult<SchoolSummary> {
+pub async fn checkin_school_summary(
+    state: State<'_, Arc<AppState>>,
+    date: String,
+) -> AppResult<SchoolSummary> {
     let row = sqlx::query_as::<_, SchoolSummary>(
         "SELECT
             ? AS date,
@@ -122,7 +173,10 @@ pub async fn checkin_school_summary(state: State<'_, Arc<AppState>>, date: Strin
 
 /// 班级考勤大屏（按班级聚合）。
 #[tauri::command]
-pub async fn checkin_class_attendance(state: State<'_, Arc<AppState>>, date: String) -> AppResult<Vec<ClassAttendanceRow>> {
+pub async fn checkin_class_attendance(
+    state: State<'_, Arc<AppState>>,
+    date: String,
+) -> AppResult<Vec<ClassAttendanceRow>> {
     let rows = sqlx::query_as::<_, ClassAttendanceRow>(
         "SELECT
             s.grade AS grade,

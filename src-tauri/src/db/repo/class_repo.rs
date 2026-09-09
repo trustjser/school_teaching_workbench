@@ -4,8 +4,8 @@
 //! (school_year_id, grade_id, class_no)，由教务端统一维护，经离线队列同步到
 //! 班级端（entity_type = 'class'）。
 
-use std::collections::HashMap;
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 
 use crate::db::models::Class;
 use crate::db::repo::{decide_merge, merged_sync_state, new_id, now_ms, MergeOutcome};
@@ -185,10 +185,11 @@ pub async fn merge_remote(pool: &SqlitePool, remote: &Class) -> AppResult<MergeO
         .await?;
         return Ok(MergeOutcome::Deleted);
     }
-    let local: Option<(i64,)> = sqlx::query_as::<_, (i64,)>("SELECT updated_at FROM classes WHERE id = ?")
-        .bind(&remote.id)
-        .fetch_optional(pool)
-        .await?;
+    let local: Option<(i64,)> =
+        sqlx::query_as::<_, (i64,)>("SELECT updated_at FROM classes WHERE id = ?")
+            .bind(&remote.id)
+            .fetch_optional(pool)
+            .await?;
     let outcome = match local {
         None => MergeOutcome::Inserted,
         Some((local_updated,)) => decide_merge(local_updated, remote.updated_at),

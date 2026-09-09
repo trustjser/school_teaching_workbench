@@ -29,6 +29,7 @@ import type {
   KeyInfo,
   SchoolSummary,
   TaskCompletionRow,
+  TaskProgressRow,
   TaskMatrix,
 } from '@/types/api';
 import type {
@@ -363,6 +364,22 @@ export async function taskRecordUpsert(
 
 export async function taskMatrixQuery(taskId: string): Promise<TaskMatrix> {
   return invokeCmd<TaskMatrix>('task_matrix_query', { taskId });
+}
+
+export async function taskProgressList(
+  taskId: string,
+  grade?: string | null,
+  className?: string | null,
+): Promise<TaskProgressRow[]> {
+  return invokeCmd<TaskProgressRow[]>('task_progress_list', {
+    taskId,
+    grade: grade ?? null,
+    className: className ?? null,
+  });
+}
+
+export async function taskClassMatrixQuery(taskId: string, className: string): Promise<TaskMatrix> {
+  return invokeCmd<TaskMatrix>('task_class_matrix_query', { taskId, className });
 }
 
 export async function taskCompletionStats(sinceTs?: number | null): Promise<TaskCompletionRow[]> {

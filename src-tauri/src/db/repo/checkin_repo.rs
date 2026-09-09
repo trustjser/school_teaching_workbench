@@ -127,10 +127,7 @@ pub async fn list(
 }
 
 /// 查询某学生某日的全部考勤记录（含历史，用于「已转出但历史可查」）。
-pub async fn list_by_student(
-    pool: &SqlitePool,
-    student_id: &str,
-) -> AppResult<Vec<CheckinRecord>> {
+pub async fn list_by_student(pool: &SqlitePool, student_id: &str) -> AppResult<Vec<CheckinRecord>> {
     let rows = sqlx::query_as::<_, CheckinRecord>(
         "SELECT id, student_id, checkin_date, period, period_label, state, marked_by, marked_at,
                 note, source, created_at, updated_at, deleted_at, sync_state, dirty
@@ -155,7 +152,20 @@ pub async fn daily_summary(
     checkin_date: &str,
     class_name: Option<&str>,
 ) -> AppResult<Vec<DailySummary>> {
-    let rows = sqlx::query_as::<_, (Option<String>, Option<String>, String, String, i64, i64, i64, i64, i64)>(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            Option<String>,
+            Option<String>,
+            String,
+            String,
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+        ),
+    >(
         "SELECT s.grade, s.class_name, c.checkin_date, c.period,
                 SUM(CASE WHEN c.state = 'present' THEN 1 ELSE 0 END),
                 SUM(CASE WHEN c.state = 'leave'   THEN 1 ELSE 0 END),
@@ -232,9 +242,7 @@ pub async fn merge_remote(pool: &SqlitePool, remote: &CheckinRecord) -> AppResul
     };
 
     let now = now_ms();
-    let id = local
-        .map(|(id, _)| id)
-        .unwrap_or_else(|| remote.id.clone());
+    let id = local.map(|(id, _)| id).unwrap_or_else(|| remote.id.clone());
     sqlx::query(
         "INSERT INTO checkin_records (id, student_id, checkin_date, period, period_label, state,
              marked_by, marked_at, note, source, created_at, updated_at, deleted_at, sync_state, dirty)

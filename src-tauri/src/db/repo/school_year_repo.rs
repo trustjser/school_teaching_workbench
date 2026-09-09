@@ -37,7 +37,10 @@ pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Option<SchoolYear>> {
 }
 
 /// 按学年名查找有效学年（用于去重与反查）。
-pub async fn find_by_name(pool: &SqlitePool, school_year_name: &str) -> AppResult<Option<SchoolYear>> {
+pub async fn find_by_name(
+    pool: &SqlitePool,
+    school_year_name: &str,
+) -> AppResult<Option<SchoolYear>> {
     let row = sqlx::query_as::<_, SchoolYear>(
         "SELECT id, school_year_no, school_year_name, start_date, end_date, sort_order, remark,
                 created_at, updated_at, deleted_at, sync_state, dirty
@@ -112,10 +115,11 @@ pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
 
 /// 合并远端学年（last-write-wins）。
 pub async fn merge_remote(pool: &SqlitePool, remote: &SchoolYear) -> AppResult<MergeOutcome> {
-    let local: Option<(i64,)> = sqlx::query_as::<_, (i64,)>("SELECT updated_at FROM school_years WHERE id = ?")
-        .bind(&remote.id)
-        .fetch_optional(pool)
-        .await?;
+    let local: Option<(i64,)> =
+        sqlx::query_as::<_, (i64,)>("SELECT updated_at FROM school_years WHERE id = ?")
+            .bind(&remote.id)
+            .fetch_optional(pool)
+            .await?;
     let outcome = match local {
         None => MergeOutcome::Inserted,
         Some((local_updated,)) => decide_merge(local_updated, remote.updated_at),

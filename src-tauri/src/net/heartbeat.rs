@@ -1,8 +1,8 @@
 //! 心跳：周期性 ping 在线节点，刷新延迟与离线状态，并推送事件。
 
 use std::sync::Arc;
-use tauri::Emitter;
 use std::time::Duration;
+use tauri::Emitter;
 
 use tauri::async_runtime::spawn;
 
@@ -58,7 +58,9 @@ async fn tick(state: &Arc<AppState>) {
             Ok(env) => env,
             Err(e) => {
                 tracing::warn!("心跳：构造信封失败({}): {}", dev.device_id, e);
-                let _ = device_repo::heartbeat_fail(&state.pool, &dev.device_id, HEARTBEAT_MISS_LIMIT).await;
+                let _ =
+                    device_repo::heartbeat_fail(&state.pool, &dev.device_id, HEARTBEAT_MISS_LIMIT)
+                        .await;
                 continue;
             }
         };
@@ -66,16 +68,25 @@ async fn tick(state: &Arc<AppState>) {
             Ok(status) if (200..300).contains(&status) => {
                 let latency = start.elapsed().as_millis() as i64;
                 let _ = device_repo::heartbeat_ok(&state.pool, &dev.device_id, latency).await;
-                let _ = state
-                    .app
-                    .emit(Events::DEVICE_HEARTBEAT, serde_json::json!({ "deviceId": dev.device_id, "latencyMs": latency }));
+                let _ = state.app.emit(
+                    Events::DEVICE_HEARTBEAT,
+                    serde_json::json!({ "deviceId": dev.device_id, "latencyMs": latency }),
+                );
             }
             Ok(_) | Err(_) => {
-                match device_repo::heartbeat_fail(&state.pool, &dev.device_id, HEARTBEAT_MISS_LIMIT).await {
+                match device_repo::heartbeat_fail(&state.pool, &dev.device_id, HEARTBEAT_MISS_LIMIT)
+                    .await
+                {
                     Ok(went_offline) => {
                         if went_offline {
-                            let _ = state.app.emit(Events::DEVICE_OFFLINE, serde_json::json!({ "deviceId": dev.device_id }));
-                            let _ = state.app.emit(Events::DEVICE_CHANGED, serde_json::json!({ "deviceId": dev.device_id }));
+                            let _ = state.app.emit(
+                                Events::DEVICE_OFFLINE,
+                                serde_json::json!({ "deviceId": dev.device_id }),
+                            );
+                            let _ = state.app.emit(
+                                Events::DEVICE_CHANGED,
+                                serde_json::json!({ "deviceId": dev.device_id }),
+                            );
                         }
                     }
                     Err(e) => tracing::warn!("心跳：更新失败状态出错({}): {}", dev.device_id, e),

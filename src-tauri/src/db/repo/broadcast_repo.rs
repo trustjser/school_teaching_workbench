@@ -119,14 +119,13 @@ pub async fn update_status(
     .bind(id)
     .execute(pool)
     .await?;
-    get(pool, id).await?.ok_or_else(|| AppError::not_found("广播任务"))
+    get(pool, id)
+        .await?
+        .ok_or_else(|| AppError::not_found("广播任务"))
 }
 
 /// 合并远端广播任务（班级端接收下发时使用）。
-pub async fn merge_remote(
-    pool: &SqlitePool,
-    remote: &BroadcastTask,
-) -> AppResult<MergeOutcome> {
+pub async fn merge_remote(pool: &SqlitePool, remote: &BroadcastTask) -> AppResult<MergeOutcome> {
     let local: Option<(i64,)> =
         sqlx::query_as::<_, (i64,)>("SELECT updated_at FROM broadcast_tasks WHERE id = ?")
             .bind(&remote.id)

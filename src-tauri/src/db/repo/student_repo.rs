@@ -67,7 +67,9 @@ pub async fn list(pool: &SqlitePool, filter: StudentFilter) -> AppResult<Vec<Stu
     }
     sql.push_str(" ORDER BY COALESCE(seat_no, 999999), student_no");
 
-    let rows = sqlx::query_as::<_, Student>(sql.as_str()).fetch_all(pool).await?;
+    let rows = sqlx::query_as::<_, Student>(sql.as_str())
+        .fetch_all(pool)
+        .await?;
     Ok(rows)
 }
 
@@ -143,7 +145,8 @@ pub async fn upsert(pool: &SqlitePool, mut student: Student) -> AppResult<Studen
     }
     // 兜底：即便上游漏填，绑定时把空串按 NULL 处理，交给 DB 的 DEFAULT 'active'
     // 接管，避免空串既触发不了默认值又违反 NOT NULL（SQLite 旧库 status 列为空时常踩）。
-    let status_bind: Option<&str> = if student.status.trim().is_empty() || student.status == "null" {
+    let status_bind: Option<&str> = if student.status.trim().is_empty() || student.status == "null"
+    {
         None
     } else {
         Some(student.status.as_str())
@@ -193,11 +196,7 @@ pub async fn upsert(pool: &SqlitePool, mut student: Student) -> AppResult<Studen
 }
 
 /// 变更学生状态（转出 / 请假 / 恢复在读），同步刷新 `status_since`。
-pub async fn update_status(
-    pool: &SqlitePool,
-    id: &str,
-    status: &str,
-) -> AppResult<Student> {
+pub async fn update_status(pool: &SqlitePool, id: &str, status: &str) -> AppResult<Student> {
     let now = now_ms();
     let affected = sqlx::query(
         "UPDATE students SET status = ?, status_since = ?, updated_at = ?, dirty = 1,
@@ -273,7 +272,9 @@ pub async fn batch_import(
             continue;
         }
         let gender = match row.gender.as_deref().unwrap_or("unknown") {
-            "male" | "female" | "unknown" => row.gender.clone().unwrap_or_else(|| "unknown".to_string()),
+            "male" | "female" | "unknown" => {
+                row.gender.clone().unwrap_or_else(|| "unknown".to_string())
+            }
             other => normalize_gender(other),
         };
         valid.push(Student {
@@ -281,7 +282,10 @@ pub async fn batch_import(
             student_no: row.student_no.trim().to_string(),
             name: row.name.trim().to_string(),
             gender,
-            grade: row.grade.clone().or_else(|| default_grade.map(|v| v.to_string())),
+            grade: row
+                .grade
+                .clone()
+                .or_else(|| default_grade.map(|v| v.to_string())),
             class_name: row
                 .class_name
                 .clone()
@@ -345,7 +349,11 @@ pub async fn batch_import(
     }
 
     let report_json = serde_json::to_string(&errors).unwrap_or_else(|_| "[]".to_string());
-    let status = if errors.is_empty() { "completed" } else { "completed" };
+    let status = if errors.is_empty() {
+        "completed"
+    } else {
+        "completed"
+    };
     sqlx::query(
         "UPDATE import_batches SET success_rows = ?, failed_rows = ?, status = ?, error_report = ?, updated_at = ?
          WHERE id = ?",
@@ -439,10 +447,7 @@ pub async fn count_active(pool: &SqlitePool, class_name: Option<&str>) -> AppRes
 }
 
 /// 合并远端学生（last-write-wins：`updated_at` 大者胜，相等标记冲突）。
-pub async fn merge_remote(
-    pool: &SqlitePool,
-    remote: &Student,
-) -> AppResult<MergeOutcome> {
+pub async fn merge_remote(pool: &SqlitePool, remote: &Student) -> AppResult<MergeOutcome> {
     if remote.deleted_at.is_some() {
         sqlx::query(
             "UPDATE students SET deleted_at = ?, updated_at = ?, dirty = 0, sync_state = 'synced'
@@ -456,10 +461,11 @@ pub async fn merge_remote(
         return Ok(MergeOutcome::Deleted);
     }
 
-    let local: Option<(i64,)> = sqlx::query_as::<_, (i64,)>("SELECT updated_at FROM students WHERE id = ?")
-        .bind(&remote.id)
-        .fetch_optional(pool)
-        .await?;
+    let local: Option<(i64,)> =
+        sqlx::query_as::<_, (i64,)>("SELECT updated_at FROM students WHERE id = ?")
+            .bind(&remote.id)
+            .fetch_optional(pool)
+            .await?;
 
     let outcome = match local {
         None => MergeOutcome::Inserted,

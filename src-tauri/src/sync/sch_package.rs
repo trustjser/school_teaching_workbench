@@ -17,7 +17,9 @@ use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 
 use crate::config::constants::{SCH_MAGIC, SCH_VERSION};
-use crate::db::models::{BroadcastTask, CheckinRecord, CustomTask, IngestItem, IngestRequest, TaskRecord, TaskStatusNode};
+use crate::db::models::{
+    BroadcastTask, CheckinRecord, CustomTask, IngestItem, IngestRequest, TaskRecord, TaskStatusNode,
+};
 use crate::error::{AppError, AppResult};
 
 /// 采集范围。
@@ -55,14 +57,22 @@ pub async fn collect(pool: &SqlitePool, scope: Scope) -> AppResult<(Vec<IngestIt
             sqlx::query_as("SELECT id, student_no, name, gender, grade, class_name, seat_no, status, status_since, note, phone, import_batch_id, created_at, updated_at, deleted_at, sync_state, dirty FROM students WHERE deleted_at IS NULL")
                 .fetch_all(pool).await?;
         for s in rows {
-            items.push(IngestItem { entity_type: "student".into(), op_type: "upsert".into(), entity: serde_json::to_value(&s)? });
+            items.push(IngestItem {
+                entity_type: "student".into(),
+                op_type: "upsert".into(),
+                entity: serde_json::to_value(&s)?,
+            });
         }
     } else {
         let rows: Vec<crate::db::models::Student> =
             sqlx::query_as("SELECT id, student_no, name, gender, grade, class_name, seat_no, status, status_since, note, phone, import_batch_id, created_at, updated_at, deleted_at, sync_state, dirty FROM students WHERE deleted_at IS NULL AND updated_at >= ?")
                 .bind(since).fetch_all(pool).await?;
         for s in rows {
-            items.push(IngestItem { entity_type: "student".into(), op_type: "upsert".into(), entity: serde_json::to_value(&s)? });
+            items.push(IngestItem {
+                entity_type: "student".into(),
+                op_type: "upsert".into(),
+                entity: serde_json::to_value(&s)?,
+            });
         }
     }
 
@@ -77,7 +87,11 @@ pub async fn collect(pool: &SqlitePool, scope: Scope) -> AppResult<(Vec<IngestIt
         .fetch_all(pool)
         .await?;
         for c in rows {
-            items.push(IngestItem { entity_type: "checkin".into(), op_type: "upsert".into(), entity: serde_json::to_value(&c)? });
+            items.push(IngestItem {
+                entity_type: "checkin".into(),
+                op_type: "upsert".into(),
+                entity: serde_json::to_value(&c)?,
+            });
         }
     }
 
@@ -93,7 +107,11 @@ pub async fn collect(pool: &SqlitePool, scope: Scope) -> AppResult<(Vec<IngestIt
         .fetch_all(pool)
         .await?;
         for t in rows {
-            items.push(IngestItem { entity_type: "custom_task".into(), op_type: "upsert".into(), entity: serde_json::to_value(&t)? });
+            items.push(IngestItem {
+                entity_type: "custom_task".into(),
+                op_type: "upsert".into(),
+                entity: serde_json::to_value(&t)?,
+            });
         }
     }
 
@@ -108,7 +126,11 @@ pub async fn collect(pool: &SqlitePool, scope: Scope) -> AppResult<(Vec<IngestIt
         .fetch_all(pool)
         .await?;
         for n in rows {
-            items.push(IngestItem { entity_type: "task_node".into(), op_type: "upsert".into(), entity: serde_json::to_value(&n)? });
+            items.push(IngestItem {
+                entity_type: "task_node".into(),
+                op_type: "upsert".into(),
+                entity: serde_json::to_value(&n)?,
+            });
         }
     }
 
@@ -123,7 +145,11 @@ pub async fn collect(pool: &SqlitePool, scope: Scope) -> AppResult<(Vec<IngestIt
         .fetch_all(pool)
         .await?;
         for r in rows {
-            items.push(IngestItem { entity_type: "task_record".into(), op_type: "upsert".into(), entity: serde_json::to_value(&r)? });
+            items.push(IngestItem {
+                entity_type: "task_record".into(),
+                op_type: "upsert".into(),
+                entity: serde_json::to_value(&r)?,
+            });
         }
     }
 
@@ -139,14 +165,25 @@ pub async fn collect(pool: &SqlitePool, scope: Scope) -> AppResult<(Vec<IngestIt
         .fetch_all(pool)
         .await?;
         for b in rows {
-            items.push(IngestItem { entity_type: "broadcast_task".into(), op_type: "upsert".into(), entity: serde_json::to_value(&b)? });
+            items.push(IngestItem {
+                entity_type: "broadcast_task".into(),
+                op_type: "upsert".into(),
+                entity: serde_json::to_value(&b)?,
+            });
         }
     }
 
     let mut counts = serde_json::Map::new();
     for it in &items {
-        *counts.entry(it.entity_type.clone()).or_insert(Value::Number(0.into())) =
-            Value::from(counts.get(&it.entity_type).and_then(Value::as_i64).unwrap_or(0) + 1);
+        *counts
+            .entry(it.entity_type.clone())
+            .or_insert(Value::Number(0.into())) = Value::from(
+            counts
+                .get(&it.entity_type)
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                + 1,
+        );
     }
     Ok((items, Value::Object(counts)))
 }
@@ -212,7 +249,10 @@ pub fn read_items(file_path: &str) -> AppResult<Vec<IngestItem>> {
         .map_err(|e| AppError::import(format!("离线包格式错误: {}", e)))?;
 
     if file.magic != SCH_MAGIC {
-        return Err(AppError::import(format!("离线包 magic 不匹配: {}", file.magic)));
+        return Err(AppError::import(format!(
+            "离线包 magic 不匹配: {}",
+            file.magic
+        )));
     }
     let items_json = serde_json::to_string(&file.request.items)
         .map_err(|e| AppError::import(format!("条目校验失败: {}", e)))?;

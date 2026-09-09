@@ -18,6 +18,8 @@ import { DeviceMonitor } from '@/pages/DeviceMonitor';
 import { AttendanceBoard } from '@/pages/AttendanceBoard';
 import { BroadcastCenter } from '@/pages/BroadcastCenter';
 import { Analytics } from '@/pages/Analytics';
+import { TaskDashboard } from '@/pages/TaskDashboard';
+import { TaskDetail } from '@/pages/TaskDetail';
 import { GradeClassManage } from '@/pages/GradeClassManage';
 import { Settings } from '@/pages/Settings';
 
@@ -96,6 +98,8 @@ export const router = createHashRouter([
       { path: 'master/attendance', element: <AttendanceBoard /> },
       { path: 'master/directory', element: <GradeClassManage /> },
       { path: 'master/broadcast', element: <BroadcastCenter /> },
+      { path: 'master/tasks', element: <TaskDashboard /> },
+      { path: 'master/tasks/:taskId', element: <TaskDetail /> },
       { path: 'master/analytics', element: <Analytics /> },
       { path: 'settings', element: <Settings /> },
       { path: '*', element: <RootRedirect /> },

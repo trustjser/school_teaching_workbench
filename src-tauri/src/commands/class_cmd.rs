@@ -27,8 +27,19 @@ pub async fn class_list(
 #[tauri::command]
 pub async fn class_upsert(state: State<'_, Arc<AppState>>, class: Class) -> AppResult<Class> {
     let saved = class_repo::upsert(&state.pool, class).await?;
-    outbox::enqueue_entity(&state.pool, "class", &saved.id, "upsert", &saved, None, None).await?;
-    let _ = state.app.emit(Events::CLASS_CHANGED, serde_json::json!({ "id": saved.id }));
+    outbox::enqueue_entity(
+        &state.pool,
+        "class",
+        &saved.id,
+        "upsert",
+        &saved,
+        None,
+        None,
+    )
+    .await?;
+    let _ = state
+        .app
+        .emit(Events::CLASS_CHANGED, serde_json::json!({ "id": saved.id }));
     Ok(saved)
 }
 
@@ -41,6 +52,8 @@ pub async fn class_delete(state: State<'_, Arc<AppState>>, id: String) -> AppRes
         c.deleted_at = Some(crate::db::repo::now_ms());
         outbox::enqueue_entity(&state.pool, "class", &id, "delete", &c, None, None).await?;
     }
-    let _ = state.app.emit(Events::CLASS_CHANGED, serde_json::json!({ "id": id }));
+    let _ = state
+        .app
+        .emit(Events::CLASS_CHANGED, serde_json::json!({ "id": id }));
     Ok(())
 }

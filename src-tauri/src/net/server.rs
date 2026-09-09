@@ -23,7 +23,10 @@ use crate::state::AppState;
 /// 在 mDNS 自发现读取端口之前完成）。
 pub async fn start(state: Arc<AppState>) -> AppResult<()> {
     let listener = bind_port()?;
-    let port = listener.local_addr().map_err(|e| AppError::net(format!("读取端口失败: {}", e)))?.port();
+    let port = listener
+        .local_addr()
+        .map_err(|e| AppError::net(format!("读取端口失败: {}", e)))?
+        .port();
     state.set_port(port);
 
     let pool = state.pool.clone();
@@ -60,7 +63,8 @@ fn bind_port() -> AppResult<TcpListener> {
         match StdTcpListener::bind(("0.0.0.0", port)) {
             Ok(std) => {
                 std.set_nonblocking(true).ok();
-                return TcpListener::from_std(std).map_err(|e| AppError::net(format!("监听端口 {} 失败: {}", port, e)));
+                return TcpListener::from_std(std)
+                    .map_err(|e| AppError::net(format!("监听端口 {} 失败: {}", port, e)));
             }
             Err(_) if port < API_PORT + API_PORT_PROBE_MAX => port += 1,
             Err(e) => return Err(AppError::net(format!("端口 {} 不可用: {}", port, e))),

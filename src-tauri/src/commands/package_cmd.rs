@@ -30,26 +30,43 @@ pub async fn package_export_sch(
         _ => Scope::All,
     };
     let (items, counts) = sch_package::collect(&state.pool, scope_kind).await?;
-    let result = sch_package::write_file(&state.pool, &path, &state.device_id, items, counts.clone()).await?;
+    let result =
+        sch_package::write_file(&state.pool, &path, &state.device_id, items, counts.clone())
+            .await?;
 
     let file_name = std::path::Path::new(&path)
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| path.clone());
     package_repo::insert(
-        &state.pool, &file_name, Some(&path), "export",
-        scope.as_deref().unwrap_or("full"), Some("full"),
-        Some(&counts.to_string()), Some(&result.checksum), result.size_bytes,
-        since_ts, None,
-    ).await.ok();
+        &state.pool,
+        &file_name,
+        Some(&path),
+        "export",
+        scope.as_deref().unwrap_or("full"),
+        Some("full"),
+        Some(&counts.to_string()),
+        Some(&result.checksum),
+        result.size_bytes,
+        since_ts,
+        None,
+    )
+    .await
+    .ok();
 
-    let _ = state.app.emit(Events::PACKAGE_PROGRESS, serde_json::json!({ "kind": "export", "path": path }));
+    let _ = state.app.emit(
+        Events::PACKAGE_PROGRESS,
+        serde_json::json!({ "kind": "export", "path": path }),
+    );
     Ok(result)
 }
 
 /// 导入离线包（复用增量合并逻辑落地）。
 #[tauri::command]
-pub async fn package_import_sch(state: State<'_, Arc<AppState>>, path: String) -> AppResult<ImportReport> {
+pub async fn package_import_sch(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> AppResult<ImportReport> {
     let items = sch_package::read_items(&path)?;
     let total = items.len() as i64;
     let (accepted, rejected, conflicts) = handlers::apply_ingest(&state, &items).await?;
@@ -62,17 +79,32 @@ pub async fn package_import_sch(state: State<'_, Arc<AppState>>, path: String) -
         conflict_rows: conflicts,
         errors: vec![],
         ok: rejected == 0,
-        message: format!("离线包导入：接受 {} 条，拒绝 {} 条，冲突 {} 条", accepted, rejected, conflicts),
+        message: format!(
+            "离线包导入：接受 {} 条，拒绝 {} 条，冲突 {} 条",
+            accepted, rejected, conflicts
+        ),
     };
 
     package_repo::insert(
-        &state.pool, &path, Some(path.as_str()), "import",
-        if total == 0 { "empty" } else { "full" }, Some("full"),
-        Some(&serde_json::json!({ "accepted": accepted, "rejected": rejected }).to_string()), None, 0,
-        None, None,
-    ).await.ok();
+        &state.pool,
+        &path,
+        Some(path.as_str()),
+        "import",
+        if total == 0 { "empty" } else { "full" },
+        Some("full"),
+        Some(&serde_json::json!({ "accepted": accepted, "rejected": rejected }).to_string()),
+        None,
+        0,
+        None,
+        None,
+    )
+    .await
+    .ok();
 
-    let _ = state.app.emit(Events::DATA_IMPORTED, serde_json::json!({ "type": "sch", "path": path }));
+    let _ = state.app.emit(
+        Events::DATA_IMPORTED,
+        serde_json::json!({ "type": "sch", "path": path }),
+    );
     Ok(report)
 }
 

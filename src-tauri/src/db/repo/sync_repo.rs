@@ -54,7 +54,11 @@ pub async fn insert(
 }
 
 /// 按创建时间倒序查询日志。
-pub async fn list(pool: &SqlitePool, limit: i32, only_failed: bool) -> AppResult<Vec<SyncLogEntry>> {
+pub async fn list(
+    pool: &SqlitePool,
+    limit: i32,
+    only_failed: bool,
+) -> AppResult<Vec<SyncLogEntry>> {
     let sql = if only_failed {
         "SELECT id, direction, peer_device_id, peer_name, endpoint, entity_type, entity_count,
                 result, http_status, error_code, error_message, duration_ms, queue_id, trace_id,
