@@ -109,6 +109,54 @@ fn build_self_info(state: &AppState) -> AppResult<ServiceInfo> {
     .map_err(|e| crate::error::AppError::net(format!("构造 mDNS 服务信息失败: {}", e)))
 }
 
+/// 设置变更后重新发布本机 mDNS 信息。
+///
+/// 初始化向导发生在 mDNS 服务注册之后；如果不重新发布，其他节点会一直缓存
+/// 启动时的“未命名设备”和旧班级信息。
+pub async fn refresh_self_registration(state: &Arc<AppState>) -> AppResult<()> {
+    let local_ip = local_ip_address::local_ip()
+        .map_err(|e| crate::error::AppError::net(format!("获取本机 IP 失败: {}", e)))?;
+    let instance = state.device_id.clone();
+    let host = format!("{}.local.", instance);
+    let port = state.port();
+    let mut props: HashMap<String, String> = HashMap::new();
+    props.insert(TXT_DID.to_string(), state.device_id.clone());
+    props.insert(TXT_ROLE.to_string(), state.mode().as_str().to_string());
+    props.insert(TXT_API.to_string(), MDNS_TXT_VERSION.to_string());
+    props.insert(TXT_KID.to_string(), state.kid());
+    props.insert(TXT_PORT.to_string(), port.to_string());
+    for (key, setting) in [
+        (TXT_NAME, "device_name"),
+        (TXT_GRADE, "grade"),
+        (TXT_CLASS, "class_name"),
+    ] {
+        if let Ok(value) =
+            crate::db::repo::settings_repo::get_string(&state.pool, setting, "").await
+        {
+            if !value.is_empty() {
+                props.insert(key.to_string(), value);
+            }
+        }
+    }
+    let info = ServiceInfo::new(
+        MDNS_SERVICE_TYPE,
+        &instance,
+        &host,
+        local_ip.to_string(),
+        port,
+        props,
+    )
+    .map_err(|e| crate::error::AppError::net(format!("构造 mDNS 服务信息失败: {}", e)))?;
+
+    let daemon = state.daemon.lock().await;
+    if let Some(daemon) = daemon.as_ref() {
+        daemon
+            .register(info)
+            .map_err(|e| crate::error::AppError::net(format!("刷新 mDNS 注册失败: {}", e)))?;
+    }
+    Ok(())
+}
+
 /// 处理一条 mDNS 事件。
 async fn handle_event(state: &Arc<AppState>, evt: ServiceEvent) {
     match evt {

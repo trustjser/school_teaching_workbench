@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::config::constants::HTTP_TIMEOUT_SEC;
@@ -57,6 +58,33 @@ pub async fn send(base_url: &str, endpoint: &str, env: &envelope::Envelope) -> A
         return Err(AppError::net(format!("同步请求失败: {}", detail)));
     }
     Ok(status.as_u16())
+}
+
+/// 把加密信封 POST 到对端并解析 JSON 响应。
+pub async fn request_json<T: DeserializeOwned>(
+    base_url: &str,
+    endpoint: &str,
+    env: &envelope::Envelope,
+) -> AppResult<T> {
+    let url = format!("{}{}", base_url.trim_end_matches('/'), endpoint);
+    let client = p2p_client()?;
+    let resp = client
+        .post(&url)
+        .timeout(Duration::from_secs(HTTP_TIMEOUT_SEC))
+        .json(env)
+        .send()
+        .await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let detail = resp.text().await.unwrap_or_default();
+        return Err(AppError::net(format!(
+            "目录同步失败: {}: {}",
+            status, detail
+        )));
+    }
+    resp.json()
+        .await
+        .map_err(|e| AppError::net(format!("解析目录响应失败: {}", e)))
 }
 
 /// 一次完整投递：密封 + 发送，返回 HTTP 状态码。

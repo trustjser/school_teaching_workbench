@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
-import { classList, classroomAssign, classroomList, classroomUpsert, settingsCompleteSetup, settingsGetAll, toRuntimeSettings } from '@/lib/db';
+import { classList, classroomAssign, classroomList, classroomUpsert, directorySync, settingsCompleteSetup, settingsGetAll, settingsSetSharedSecret, toRuntimeSettings } from '@/lib/db';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -9,6 +9,7 @@ import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { Textarea } from '@/components/ui/Textarea';
 import type { AppMode } from '@/types/enums';
 import type { Class, Classroom } from '@/types/models';
+import { keyFingerprint } from '@/lib/crypto';
 
 /** 共享密钥必须是 base64 编码的 32 字节 */
 function isBase64Secret(s: string): boolean {
@@ -49,6 +50,7 @@ export function SetupWizard(): JSX.Element {
   const [deviceName, setDeviceName] = useState('');
   const [secret, setSecret] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [loadingDirectory, setLoadingDirectory] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // 班级端：从教务端目录选择绑定班级（目录为空时回退手动填写）
@@ -71,9 +73,42 @@ export function SetupWizard(): JSX.Element {
   const boundClass = dirClasses.find((c) => c.id === selectedClassId) ?? null;
   const secretBad = secret.trim() !== '' && !isBase64Secret(secret.trim());
   const secretMissing = secret.trim() === '';
-  const secretRequired = mode === 'master';
+  const secretRequired = true;
   const canSubmit =
-    deviceName.trim().length > 0 && (!secretRequired || !secretMissing) && !secretBad && !submitting;
+    deviceName.trim().length > 0 &&
+    !secretMissing &&
+    !secretBad &&
+    (mode === 'master' || Boolean(selectedClassId && selectedRoomId)) &&
+    !submitting;
+
+  const loadRemoteDirectory = async (): Promise<void> => {
+    const value = secret.trim();
+    if (!value || !isBase64Secret(value)) {
+      setError('请先输入教务端提供的 32 字节 Base64 共享密钥');
+      return;
+    }
+    setLoadingDirectory(true);
+    setError(null);
+    try {
+      const fingerprint = await keyFingerprint(value);
+      await settingsSetSharedSecret(value, fingerprint.slice(0, 8));
+      const report = await directorySync();
+      const [nextClasses, nextRooms] = await Promise.all([classList(), classroomList()]);
+      setDirClasses(nextClasses);
+      setDirRooms(nextRooms);
+      setSelectedClassId((current) => nextClasses.some((item) => item.id === current) ? current : null);
+      setSelectedRoomId((current) => nextRooms.some((item) => item.id === current) ? current : null);
+      if (report.classes === 0) {
+        setError('已连接教务端，但教务端还没有可用班级');
+      } else {
+        pushToast({ kind: 'success', title: '已连接教务端', description: `已加载 ${report.classes} 个班级、${report.classrooms} 间教室` });
+      }
+    } catch (err) {
+      setError((err as Error)?.message ?? '连接教务端失败，请检查两端密钥和在线状态');
+    } finally {
+      setLoadingDirectory(false);
+    }
+  };
 
   const submit = async (): Promise<void> => {
     setSubmitting(true);
@@ -181,7 +216,7 @@ export function SetupWizard(): JSX.Element {
           <div className="mt-4 space-y-3 rounded-lg bg-surface-muted p-4">
             <div className="flex items-center justify-between">
               <p className="text-base font-semibold text-ink">班级与教室（由教务处维护）</p>
-              {dirClasses.length === 0 && <span className="text-sm text-ink-muted">等待教务处目录同步</span>}
+              {dirClasses.length === 0 && <span className="text-sm text-ink-muted">请先在下方连接教务端</span>}
             </div>
 
             {dirClasses.length > 0 ? (
@@ -209,7 +244,7 @@ export function SetupWizard(): JSX.Element {
 
             {dirClasses.length === 0 && (
               <p className="text-sm text-ink-muted">
-                教务端尚未同步年级 / 班级 / 教室目录。可以先完成设备配置，目录同步后再绑定班级和教室；班级端不需要手动维护这些信息。
+                输入教务端提供的共享密钥，再点击“连接并加载目录”。班级和教室都由教务端维护。
               </p>
             )}
           </div>
@@ -219,15 +254,17 @@ export function SetupWizard(): JSX.Element {
         <div className="mt-5">
           <div className="mb-1.5 flex items-center justify-between">
             <p className="text-base font-semibold text-ink">
-              共享密钥{mode === 'master' ? '（必填）' : '（可稍后在设置中录入）'}
+              共享密钥（必填）
             </p>
-            <Button
-              variant="secondary"
-              size="md"
-              onClick={() => setSecret(randomSecret())}
-            >
-              随机生成
-            </Button>
+            {mode === 'master' && (
+              <Button
+                variant="secondary"
+                size="md"
+                onClick={() => setSecret(randomSecret())}
+              >
+                随机生成
+              </Button>
+            )}
           </div>
           <Textarea
             label=""
@@ -236,12 +273,20 @@ export function SetupWizard(): JSX.Element {
             onChange={(e) => setSecret(e.target.value)}
             placeholder="请输入或随机生成一串 base64 密钥；所有设备需使用同一密钥"
           />
-          {mode === 'client' && secretMissing && (
-            <p className="mt-1 text-sm text-ink-muted">班级端可先完成设备初始化；进入应用后打开“设置”录入教务处提供的密钥，再刷新目录完成绑定。</p>
-          )}
           {secretRequired && secretMissing && submitting && <p className="mt-1 text-sm text-red-600">共享密钥不能为空</p>}
           {secretBad && (
             <p className="mt-1 text-sm text-red-600">密钥需为 base64 编码的 32 字节字符串</p>
+          )}
+          {mode === 'client' && (
+            <Button
+              className="mt-3"
+              variant="secondary"
+              onClick={() => void loadRemoteDirectory()}
+              loading={loadingDirectory}
+              disabled={secretMissing || secretBad || loadingDirectory}
+            >
+              连接教务端并加载目录
+            </Button>
           )}
         </div>
 

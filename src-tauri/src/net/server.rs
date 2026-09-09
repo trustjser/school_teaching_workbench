@@ -37,6 +37,7 @@ pub async fn start(state: Arc<AppState>) -> AppResult<()> {
     let app = Router::new()
         .route("/api/v1/ping", post(handlers::ping))
         .route("/api/v1/whoami", get(handlers::whoami))
+        .route("/api/v1/directory", post(handlers::directory))
         .route("/api/v1/ingest", post(handlers::ingest))
         .route("/api/v1/broadcast", post(handlers::broadcast))
         .route("/api/v1/receipt", post(handlers::receipt))

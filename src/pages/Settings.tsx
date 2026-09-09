@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { classList, classroomAssign, classroomList, classroomUpsert, settingsGetAll, settingsKeyInfo, settingsSet, settingsSetSharedSecret } from '@/lib/db';
+import { classList, classroomAssign, classroomList, classroomUpsert, directorySync, settingsGetAll, settingsKeyInfo, settingsSet, settingsSetSharedSecret } from '@/lib/db';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
@@ -37,14 +37,25 @@ export function Settings(): JSX.Element {
       .catch(() => setKeyInfo(null));
   }, []);
 
-  const loadDirectory = useCallback(async (): Promise<void> => {
+  const loadDirectory = useCallback(async (showResult = false): Promise<void> => {
     if (settings.appMode !== 'client') return;
+    setBindingError(null);
+    try {
+      const report = await directorySync();
+      if (showResult) {
+        pushToast({ kind: 'success', title: '目录已刷新', description: `已同步 ${report.classes} 个班级、${report.classrooms} 间教室` });
+      }
+    } catch (err) {
+      if (showResult) setBindingError((err as Error).message || '未能连接教务端');
+    }
     await Promise.all([classList(), classroomList()]).then(([nextClasses, nextRooms]) => {
       setClasses(nextClasses);
       setRooms(nextRooms);
       setClassId(settings.classId ?? '');
+      const boundRoom = nextRooms.find((room) => room.deviceId === settings.deviceId);
+      setRoomId(boundRoom?.id ?? '');
     });
-  }, [settings.appMode, settings.classId]);
+  }, [settings.appMode, settings.classId, pushToast]);
 
   useEffect(() => {
     void loadDirectory().catch(() => undefined);
@@ -59,8 +70,9 @@ export function Settings(): JSX.Element {
       const fingerprint = await keyFingerprint(value);
       await settingsSetSharedSecret(value, fingerprint.slice(0, 8));
       setKeyInfo(await settingsKeyInfo());
+      await loadDirectory(true);
       setSecret('');
-      pushToast({ kind: 'success', title: '共享密钥已保存', description: '请在其他设备使用相同密钥后再同步目录' });
+      pushToast({ kind: 'success', title: '共享密钥已保存', description: '已尝试连接教务端并刷新目录' });
     } catch (err) {
       setSecretError((err as Error).message || '共享密钥格式无效');
     } finally { setSavingSecret(false); }
@@ -153,7 +165,7 @@ export function Settings(): JSX.Element {
         <Card title="工作身份绑定（班级 + 教室）">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-ink-muted">教室是教务端维护的物理位置；此处只选择本机服务的班级和教室，可随时更换。</p>
-            <Button variant="secondary" size="md" onClick={() => void loadDirectory().catch(() => undefined)}>刷新目录</Button>
+            <Button variant="secondary" size="md" onClick={() => void loadDirectory(true).catch(() => undefined)}>刷新目录</Button>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <SearchableSelect label="班级" options={classes.map((item) => ({ value: item.id, label: `${item.gradeName} · ${item.className}` }))} value={classId} onChange={setClassId} placeholder="— 请选择班级 —" />

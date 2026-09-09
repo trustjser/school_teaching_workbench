@@ -16,11 +16,11 @@ use crate::error::{AppError, AppResult};
 use crate::security::keystore;
 use crate::state::AppState;
 
-/// 校验首次设置中的共享密钥。班级端允许暂不填写，教务处端必须填写。
-fn validate_setup_secret(mode: AppMode, secret: Option<&str>) -> AppResult<Option<&str>> {
+/// 校验首次设置中的共享密钥。两端必须先使用同一密钥才能完成初始化。
+fn validate_setup_secret(_mode: AppMode, secret: Option<&str>) -> AppResult<Option<&str>> {
     let secret = secret.map(str::trim).filter(|value| !value.is_empty());
-    if matches!(mode, AppMode::Master) && secret.is_none() {
-        return Err(AppError::validation("教务处端共享密钥不能为空"));
+    if secret.is_none() {
+        return Err(AppError::validation("共享密钥不能为空"));
     }
     if let Some(secret) = secret {
         let bytes = base64::engine::general_purpose::STANDARD
@@ -68,7 +68,11 @@ pub async fn settings_set(
         state.set_key(secret.to_string(), kid);
         return Ok(());
     }
-    settings_repo::set_raw(&state.pool, &key, value.as_deref(), &value_type).await
+    settings_repo::set_raw(&state.pool, &key, value.as_deref(), &value_type).await?;
+    if key == "device_name" {
+        crate::net::discovery::refresh_self_registration(&state).await?;
+    }
+    Ok(())
 }
 
 /// 首次启动完成设置：写入模式/名称/年级/班级（目录 class_id）/学年/绑定班级/学校，
@@ -121,6 +125,7 @@ pub async fn settings_complete_setup(
     }
 
     state.set_mode(mode);
+    crate::net::discovery::refresh_self_registration(&state).await?;
     let _ = state.app.emit(
         Events::MODE_CHANGED,
         serde_json::json!({ "mode": mode.as_str() }),
@@ -133,10 +138,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn client_setup_can_defer_secret() {
-        assert!(validate_setup_secret(AppMode::Client, None)
-            .unwrap()
-            .is_none());
+    fn client_setup_requires_secret() {
+        assert!(validate_setup_secret(AppMode::Client, None).is_err());
     }
 
     #[test]

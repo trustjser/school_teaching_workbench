@@ -23,6 +23,7 @@ use crate::db::repo::{
 use crate::error::{AppError, AppResult, ErrorBody};
 use crate::net::middleware::VerifiedRequest;
 use crate::state::AppState;
+use crate::sync::directory::{self, DirectorySnapshot};
 use crate::sync::outbox;
 
 /// 处理器错误响应类型。
@@ -82,6 +83,19 @@ pub async fn whoami(State(state): State<Arc<AppState>>) -> Json<WhoamiResponse> 
         kid: state.kid(),
         port: state.port(),
     })
+}
+
+/// 返回教务端完整目录，供后来上线或重装的班级端补齐历史数据。
+pub async fn directory(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<DirectorySnapshot>, ApiErr> {
+    if !matches!(state.mode(), crate::db::models::AppMode::Master) {
+        return Err(api_err(AppError::mode("只有教务端可以提供工作目录")));
+    }
+    directory::build_snapshot(&state.pool)
+        .await
+        .map(Json)
+        .map_err(api_err)
 }
 
 /// 接收增量并合并入库。

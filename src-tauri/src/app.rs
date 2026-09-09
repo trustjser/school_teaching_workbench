@@ -205,6 +205,7 @@ pub fn run() {
             crate::commands::grade_cmd::grade_upsert,
             crate::commands::grade_cmd::grade_delete,
             crate::commands::class_cmd::class_list,
+            crate::commands::class_cmd::directory_sync,
             crate::commands::class_cmd::class_upsert,
             crate::commands::class_cmd::class_delete,
             crate::commands::classroom_cmd::classroom_list,

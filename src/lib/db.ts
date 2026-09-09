@@ -80,7 +80,7 @@ export interface CompleteSetupArgs {
   /** 班级端当前绑定的学年班级 id（跨年只切绑定、不重装） */
   boundClassId?: string | null;
   schoolName?: string | null;
-  /** Base64 共享密钥；班级端可为空，稍后从设置页录入 */
+  /** Base64 共享密钥；两端初始化时均必填 */
   secret: string | null;
 }
 
@@ -227,6 +227,18 @@ export async function classList(
     gradeId: gradeId ?? null,
     schoolYearId: schoolYearId ?? null,
   });
+}
+
+export interface DirectorySyncReport {
+  schoolYears: number;
+  grades: number;
+  classes: number;
+  classrooms: number;
+  assignments: number;
+}
+
+export async function directorySync(): Promise<DirectorySyncReport> {
+  return invokeCmd<DirectorySyncReport>('directory_sync');
 }
 
 export async function classUpsert(klass: Partial<Class> & { className: string }): Promise<Class> {
