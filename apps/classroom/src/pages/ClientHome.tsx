@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarCheck, ClipboardList, GraduationCap, Inbox, Users } from 'lucide-react';
 import { useStudentStore } from '@shared/store/useStudentStore';
@@ -10,19 +11,30 @@ import { Badge } from '@shared/components/ui/Badge';
 import { StatCard } from '@shared/components/ui/StatCard';
 import { Stagger } from '@shared/components/motion/Reveal';
 
-/** 班级首页：名册导入入口 + 出勤率概览 + 任务矩阵 + 教务指令收件箱 */
+/** 班级首页：今日工作摘要 + 在读学生 / 出勤率 / 进行中任务 / 教务指令 + 任务矩阵与通知资料入口 */
 export function ClientHome(): JSX.Element {
   const students = useStudentStore((s) => s.students);
   const tasks = useTaskStore((s) => s.tasks);
+  const loadTasks = useTaskStore((s) => s.loadTasks);
   const inbox = useBroadcastStore((s) => s.inbox);
   const unread = useBroadcastStore((s) => s.unreadCount);
   const records = useCheckinStore((s) => s.records);
+
+  // 本页计数依赖任务列表：其它页面的加载不能保证这里是最新的，
+  // 因此进入首页时主动拉一次（否则刚标记为已结束的任务仍会被算进去）。
+  useEffect(() => {
+    void loadTasks();
+  }, [loadTasks]);
 
   const rosterCount = students.filter((s) => s.status !== 'transferred').length;
   const present = Object.values(records).filter(
     (r) => r.state === 'present' || r.state === 'late',
   ).length;
   const rate = rosterCount > 0 ? Math.round((present / rosterCount) * 1000) / 10 : 0;
+
+  // 首页只关心「还要做多少」：已结束的任务不算进行中。
+  const activeTasks = tasks.filter((t) => t.status === 'active');
+  const closedCount = tasks.length - activeTasks.length;
 
   return (
     <div className="space-y-6">
@@ -43,7 +55,13 @@ export function ClientHome(): JSX.Element {
       <Stagger className="grid grid-cols-2 gap-4 board:grid-cols-4" step={70}>
         <StatCard icon={Users} label="在读学生" value={rosterCount} tone="brand" />
         <StatCard icon={CalendarCheck} label="今日出勤率" value={rate} decimals={1} suffix="%" tone="success" accent />
-        <StatCard icon={ClipboardList} label="自定义任务" value={tasks.length} tone="violet" />
+        <StatCard
+          icon={ClipboardList}
+          label="进行中任务"
+          value={activeTasks.length}
+          tone="violet"
+          sub={closedCount > 0 ? `另有 ${closedCount} 个已结束` : undefined}
+        />
         <StatCard icon={Inbox} label="教务指令" value={inbox.length} tone="warning" badge={unread} />
       </Stagger>
 
@@ -51,7 +69,7 @@ export function ClientHome(): JSX.Element {
         <Card
           className="card-interactive"
           title="任务矩阵"
-          description="学生 × 状态节点，2~4 个节点双视图"
+          description="点学生姓名逐人标记状态，网格 / 表格两种视图可切换"
           actions={
             <Link to="/matrix">
               <Button variant="ghost" size="md">
@@ -61,9 +79,9 @@ export function ClientHome(): JSX.Element {
           }
         >
           <p className="text-ink-soft">
-            {tasks.length > 0
-              ? `当前 ${tasks.length} 个任务，可进入「任务中心」逐人标记状态节点。`
-              : '尚未创建自定义任务。'}
+            {activeTasks.length > 0
+              ? `当前有 ${activeTasks.length} 个进行中的任务，可以逐人标记完成情况。`
+              : '暂无进行中的任务。可在「任务中心」新建，或等待教务处下发。'}
           </p>
           <Link to="/tasks">
             <Button variant="secondary" size="md" className="mt-3">
