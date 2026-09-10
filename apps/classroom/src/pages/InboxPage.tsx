@@ -69,7 +69,7 @@ export function InboxPage(): JSX.Element {
                       ))}
                     </div>
                   )}
-                  <div className="mt-3 flex items-center justify-between gap-3"><p className="text-sm text-emerald-700">已自动生成班级待办</p><Button size="md" onClick={() => navigate(`/client/matrix?broadcast=${encodeURIComponent(task.id)}`)}>进入任务看板</Button></div>
+                  <div className="mt-3 flex items-center justify-between gap-3"><p className="text-sm text-emerald-700">已自动生成班级待办</p><Button size="md" onClick={() => navigate(`/matrix?broadcast=${encodeURIComponent(task.id)}`)}>进入任务看板</Button></div>
                 </Card>
               </div>
             );

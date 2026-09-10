@@ -150,7 +150,7 @@ export function MasterHome(): JSX.Element {
         title="各班级考勤"
         description={loading ? '加载中…' : `共 ${classes.length} 个班级`}
         actions={
-          <Link to="/master/attendance">
+          <Link to="/attendance">
             <Button variant="ghost" size="md">
               考勤大屏
             </Button>
@@ -170,9 +170,9 @@ export function MasterHome(): JSX.Element {
       </Card>
 
       <Stagger className="grid gap-4 board:grid-cols-3" step={80}>
-        <QuickLink to="/master/devices" title="节点监控" desc="查看局域网内班级端与教务处端节点状态" />
-        <QuickLink to="/master/broadcast" title="任务下发" desc="向指定班级 / 年级 / 全校下发任务" />
-        <QuickLink to="/master/analytics" title="统计导出" desc="导出任务完成率与考勤汇总（xlsx）" />
+        <QuickLink to="/devices" title="节点监控" desc="查看局域网内班级端与教务处端节点状态" />
+        <QuickLink to="/broadcast" title="任务下发" desc="向指定班级 / 年级 / 全校下发任务" />
+        <QuickLink to="/analytics" title="统计导出" desc="导出任务完成率与考勤汇总（xlsx）" />
       </Stagger>
     </div>
   );

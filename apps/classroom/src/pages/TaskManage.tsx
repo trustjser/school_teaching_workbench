@@ -128,7 +128,7 @@ export function TaskManage(): JSX.Element {
           >
             状态节点
           </Button>
-          <Link to={`/client/matrix?task=${encodeURIComponent(t.id)}`}><Button size="md" variant="secondary">打开看板</Button></Link>
+          <Link to={`/matrix?task=${encodeURIComponent(t.id)}`}><Button size="md" variant="secondary">打开看板</Button></Link>
           {t.source === 'broadcast' ? (
             <span className="px-2 py-2 text-sm font-semibold text-ink-muted">教务下发 · 不可删除</span>
           ) : (
@@ -143,7 +143,7 @@ export function TaskManage(): JSX.Element {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-ink">任务中心</h1>
-          <div className="flex gap-2"><Link to="/client/matrix"><Button variant="secondary" icon={<LayoutGrid className="h-5 w-5" />}>打开任务看板</Button></Link><Button icon={<Plus className="h-5 w-5" />} onClick={() => setCreateOpen(true)}>新建任务</Button></div>
+          <div className="flex gap-2"><Link to="/matrix"><Button variant="secondary" icon={<LayoutGrid className="h-5 w-5" />}>打开任务看板</Button></Link><Button icon={<Plus className="h-5 w-5" />} onClick={() => setCreateOpen(true)}>新建任务</Button></div>
       </div>
 
       <Card>

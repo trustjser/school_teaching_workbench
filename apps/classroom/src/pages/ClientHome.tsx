@@ -56,7 +56,7 @@ export function ClientHome(): JSX.Element {
           title="任务矩阵"
           description="学生 × 状态节点，2~4 个节点双视图"
           actions={
-            <Link to="/client/matrix">
+            <Link to="/matrix">
               <Button variant="ghost" size="md">
                 打开矩阵
               </Button>
@@ -68,7 +68,7 @@ export function ClientHome(): JSX.Element {
               ? `当前 ${tasks.length} 个任务，可进入「任务中心」逐人标记状态节点。`
               : '尚未创建自定义任务。'}
           </p>
-          <Link to="/client/tasks">
+          <Link to="/tasks">
             <Button variant="secondary" size="md" className="mt-3">
               进入任务中心
             </Button>
@@ -86,7 +86,7 @@ export function ClientHome(): JSX.Element {
               ? `收到 ${inbox.length} 条通知或资料，请及时查看并确认。`
               : '暂无新的通知或资料。'}
           </p>
-          <Link to="/client/inbox">
+          <Link to="/inbox">
             <Button variant="secondary" size="md" className="mt-3">
               查看通知资料
             </Button>

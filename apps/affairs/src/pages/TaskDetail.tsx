@@ -19,7 +19,7 @@ export function TaskDetail(): JSX.Element {
   const { taskId = '' } = useParams();
   const [params] = useSearchParams();
   const className = params.get('class') ?? '';
-  const returnTo = params.get('return') || '/master/tasks';
+  const returnTo = params.get('return') || '/tasks';
   const tasks = useTaskStore((s) => s.tasks);
   const progress = useTaskStore((s) => s.progress);
   const loadTasks = useTaskStore((s) => s.loadTasks);

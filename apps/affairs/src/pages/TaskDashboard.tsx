@@ -160,9 +160,9 @@ export function TaskDashboard(): JSX.Element {
             if (selectedTaskId) returnParams.set('task', selectedTaskId);
             if (grade) returnParams.set('grade', grade);
             if (className) returnParams.set('class', className);
-            const returnTo = `/master/tasks${returnParams.toString() ? `?${returnParams.toString()}` : ''}`;
+            const returnTo = `/tasks${returnParams.toString() ? `?${returnParams.toString()}` : ''}`;
             const detailParams = new URLSearchParams({ class: row.className, return: returnTo });
-            navigate(`/master/tasks/${encodeURIComponent(row.taskId)}?${detailParams.toString()}`);
+            navigate(`/tasks/${encodeURIComponent(row.taskId)}?${detailParams.toString()}`);
           }}
           empty={<span className="text-ink-muted">暂无班级任务记录</span>}
         />
