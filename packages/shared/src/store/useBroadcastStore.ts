@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { BroadcastReceipt, BroadcastTask, SendReport } from '@shared/types/broadcast';
 import type { CustomTask } from '@shared/types/models';
 import type { Page } from '@shared/types/api';
+import { appModeForTarget, getAppTarget } from '@shared/app-target';
 import {
   broadcastAccept,
   broadcastCreate,
@@ -84,8 +85,9 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
       const list = await broadcastList('in');
       set({ inbox: list });
       // 接收链路异常或旧版本已入库但未生成待办时，刷新收件箱做一次幂等补偿。
-      // 后端按 broadcast_task_id 去重，因此不会重复创建任务。
-      if (useAppStore.getState().settings.appMode === 'client') {
+      // 后端按 broadcast_task_id 去重，因此不会重复创建任务。班级端入口
+      // 通过 app target 即可判定，无需读取运行期 settings。
+      if (appModeForTarget(getAppTarget()) === 'client') {
         await Promise.allSettled(list.map((task) => broadcastAccept(task.id)));
         await useTaskStore.getState().loadTasks();
       }

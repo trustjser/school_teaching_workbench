@@ -91,19 +91,18 @@
 3. 天然支持"教务处端事后开机"——队列一直重试到对端在线；
 4. 离线队列条目以 `(entity_type, entity_id, op_type, target)` 唯一索引**合并**，断网 1 小时后恢复不会造成 N 次重复推送。
 
-#### 决策 4：模式切换（client / master）如何生效？
+#### 决策 4：教务端与班级端如何区分角色？
 
-采用**三段式**，兼顾灵活性与安全性：
+从 v1.0 起，工作台按 app 拆分：**教务端（affairs）与班级端（classroom）是两个独立 app**，而不是一个综合 app 内运行时切换。
 
-```
-优先级 1: 启动参数   --mode=master              （最高，用于实施/调试）
-优先级 2: 数据库配置 app_settings.app_mode      （首次启动向导写入，用户可改）
-优先级 3: 默认值     client
-```
-
-- 首次启动（`app_settings.first_run_done = false`）强制进入 `SetupPage` 向导：选择模式 → 填身份（年级/班级 或 学校名）→ 生成/输入共享密钥 → 写入 DB。
-- 切换模式**无需重启**：Rust 侧发出 `mode://changed` 事件，React 侧 `useBootstrap` 监听后重建路由与菜单；仅 mDNS 服务注册与 Axum 路由需要重新装配，由 `app.rs` 热切换。
-- 模式决定：① 前端可见路由 ② mDNS TXT 中的 `role` ③ Axum 是否暴露 `/api/v1/broadcast`（仅 master 接受下发）。
+- 构建期：`tauri::generate_context!` 通过 Tauri bundle identifier 决定角色：
+  - `cn.yipaike.lanworkbench.affairs[.dev]` → `master`
+  - `cn.yipaike.lanworkbench.classroom[.dev]` → `client`
+- 启动期：`bootstrap` 解析 `app.config().identifier` 调 `AppTarget::from_identifier`，未知 identifier 直接报 `ERR_VALIDATION` 拒绝启动（不静默降级为班级端）。
+- 角色通过 `AppState.target` 固化为只读字段；`state.mode()` 恒等于 `target.mode()`，数据库里的 `app_mode` 只是镜像，`ensure_defaults` 会强制覆盖。
+- 前端入口（`apps/affairs`、`apps/classroom`）各自导出编译期常量 `APP_TARGET`，挂载时调用 `setAppTarget(...)` 注入；共享模块通过 `getAppTarget()` 只读消费，不允许默认成任一端。
+- `settings_switch_mode` 命令与 `switchMode` store action **均已移除**；运行模式不再可改。
+- 旧版综合 app 的本地数据库**不迁移、不读取、不删除**——每个新 app 在新 identifier 对应的应用数据目录独立初始化。
 
 #### 决策 5：为什么 SQLite 而不是文件 JSON / IndexedDB？
 
@@ -1347,3 +1346,6 @@ Migration { version: 2, description: "xxx",         sql: include_str!("../migrat
 | ADR-006 | 全表软删 + 部分唯一索引，物理删除仅用于队列清理 | 已接受 |
 | ADR-007 | 离线包 `.sch` 采用"时间戳新者胜"合并，冲突标记不静默覆盖 | 已接受 |
 | ADR-008 | 密钥优先存系统钥匙串，回退 SQLite（受文件权限保护） | 待定（见 §9-2） |
+| ADR-009 | 教务端与班级端拆为两个独立 app，角色由 Tauri bundle identifier 决定，运行期不可切换 | 已接受 |
+| ADR-010 | 共享 UI / 状态 / 业务代码集中在 `packages/shared`，两入口只保留 target 固定值与端专属页面 | 已接受 |
+| ADR-011 | 不迁移旧版综合 app 本地数据库；新 app 首次启动在新 identifier 对应数据目录独立初始化 | 已接受 |

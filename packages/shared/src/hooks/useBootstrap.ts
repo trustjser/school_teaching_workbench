@@ -96,8 +96,7 @@ export function useBootstrap(): void {
           void reloadCheckin();
         },
         [TAURI_EVENTS.TASK_UPDATED]: ({ taskId }) => {
-          const app = useAppStore.getState();
-          if (app.settings.appMode === 'master') {
+          if (appModeForTarget(getAppTarget()) === 'master') {
             // 教务端收到班级端的任务定义、节点或记录后，
             // 统计页可能正处于打开状态，需要立即重新查询。
             const taskStore = useTaskStore.getState();

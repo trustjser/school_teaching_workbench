@@ -384,7 +384,7 @@ Rust → 前端（`app_handle.emit_all`）：
 
 | 常量 | 值 | 位置 |
 |---|---|---|
-| `API_PORT` | `5178`（被占用时向后探测 `5179–5188`） | `src-tauri/src/config/constants.rs` ↔ `src/constants/app.ts` |
+| `API_PORT` | `5178`（被占用时向后探测 `5179–5188`） | `src-tauri/src/config/constants.rs` ↔ `packages/shared/src/constants/app.ts` |
 | `MDNS_SERVICE_TYPE` | `_schworkbench._tcp.local.` | 同上 |
 | `MDNS_PORT` | `5353`（UDP，系统标准） | 同上 |
 | `API_VERSION` | `v1` → 路径前缀 `/api/v1` | 同上 |
@@ -397,7 +397,13 @@ Rust → 前端（`app_handle.emit_all`）：
 | `BACKOFF_CAP_MS` | `300000` | 同上 |
 | `BACKOFF_JITTER` | `±20%` | 同上 |
 | `DB_BUSY_TIMEOUT_MS` | `5000` | 同上 |
-| `VITE_DEV_PORT` | `1420` | `vite.config.ts` |
+| Vite dev 端口（教务端） | `1420` / HMR `1421` | `apps/affairs/vite.config.ts` |
+| Vite dev 端口（班级端） | `1430` / HMR `1431` | `apps/classroom/vite.config.ts` |
+
+**双实例同机联调**：
+
+- 两端 P2P API 都从 `5178` 起向后探测 `5179–5188`，自然错开（例如教务 `5178` + 班级 `5179`）。
+- 前端 dev 端口不参与业务协议：mDNS TXT `role` + 实际 API 端口是发现与建联的唯一依据。
 
 **mDNS TXT Record 键**（全部小写，短键以控制包长）：
 
@@ -450,6 +456,45 @@ export async function invokeCmd<T>(cmd: string, args?: Record<string, unknown>):
 6. **状态色 token**：`present=#16a34a`(绿)、`leave=#ca8a04`(琥珀)、`absent=#dc2626`(红)、`late=#ea580c`(橙)、`transferred=#64748b`(灰)。
 7. **日志**：Rust 侧统一 `tracing`（`info!` 记录请求摘要，`warn!`/`error!` 记录失败），前端错误上报 `sync_log`（仅同步类）。
 8. **禁止**：前端直接写 SQL；`commands` 层写裸 SQL；`security` 模块依赖 `db`。
+
+### 4.8 双 App 启动与构建（v1.1 拆分后）
+
+**目录**：
+
+```
+lan-workbench/
+├── apps/
+│   ├── affairs/        # 教务端入口（identifier: cn.yipaike.lanworkbench.affairs）
+│   └── classroom/      # 班级端入口（identifier: cn.yipaike.lanworkbench.classroom）
+├── packages/shared/    # 两端共享：types / components / stores / lib / styles
+└── src-tauri/          # 共享 Rust 后端
+```
+
+**根脚本**：
+
+| 脚本 | 作用 |
+|---|---|
+| `npm run dev:affairs` | Vite dev 1420（教务端前端） |
+| `npm run dev:classroom` | Vite dev 1430（班级端前端） |
+| `npm run build:affairs` | tsc + `vite build` → `dist/affairs` |
+| `npm run build:classroom` | tsc + `vite build` → `dist/classroom` |
+| `npm run tauri:dev:affairs` | Tauri 启动教务端（含 dev identifier override） |
+| `npm run tauri:dev:classroom` | Tauri 启动班级端（含 dev identifier override） |
+| `npm run tauri:build:affairs` | 产物：教务端安装包 |
+| `npm run tauri:build:classroom` | 产物：班级端安装包 |
+| `npm run check:boundaries` | 静态检查端边界（router 不引用另一端页面） |
+| `npm run check:build-targets` | 静态检查端脚本与 Tauri 配置齐全 |
+
+**同机双开**：
+
+1. 两端使用不同 identifier → Tauri 把它们装到不同应用数据目录，设备 ID / SQLite / 模式相互独立。
+2. Vite dev 端口固定 1420 / 1430，不冲突。
+3. P2P API 都从 5178 起自动探测；同机时一个用 5178、另一个用 5179；通过 mDNS TXT `role` + 实际端口建联。
+4. 共享密钥两端必须完全一致，否则建联后解密失败不同步。
+
+**默认 `src-tauri/tauri.conf.json`**：保留为教务端配置（与 `tauri.affairs.conf.json` 等价），仅用于裸 `cargo` 构建。**正式出包**一律使用 `tauri:build:affairs` / `tauri:build:classroom`，它们通过 `--config` 显式选择 target 并设置 `TAURI_CONFIG`，绕开默认配置。
+
+**旧版综合 app 数据**：**不迁移**。新 identifier 对应全新应用数据目录；旧数据库保留在原位置，不读取、不删除、不转换。重复创建 `app_mode` 写入逻辑会按 app target 强制覆盖篡改值。
 
 ---
 
