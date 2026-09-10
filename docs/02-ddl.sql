@@ -383,7 +383,7 @@ CREATE INDEX IF NOT EXISTS ix_receipt_task ON broadcast_receipts(broadcast_task_
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS pending_queue (
     id               TEXT    NOT NULL PRIMARY KEY,
-    op_type          TEXT    NOT NULL CHECK (op_type IN ('upsert','delete','ack','heartbeat','broadcast')),
+    op_type          TEXT    NOT NULL CHECK (op_type IN ('upsert','delete','ack','heartbeat','broadcast','recall')),
     -- 注意：grade / class 由迁移 002 引入，school_year 由迁移 003 引入；
     --       此处必须与 src-tauri/migrations/001_init.sql 保持逐字一致，
     --       漏掉任一取值都会让对应实体入队时报 CHECK 约束失败。

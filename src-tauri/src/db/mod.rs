@@ -217,7 +217,8 @@ type Conn = SqliteConnection;
 const PENDING_QUEUE_DDL: &str = "\
 CREATE TABLE IF NOT EXISTS pending_queue (
     id               TEXT    NOT NULL PRIMARY KEY,
-    op_type          TEXT    NOT NULL CHECK (op_type IN ('upsert','delete','ack','heartbeat','broadcast')),
+    op_type          TEXT    NOT NULL CHECK (op_type IN
+                     ('upsert','delete','ack','heartbeat','broadcast','recall')),
     entity_type      TEXT    NOT NULL CHECK (entity_type IN
                      ('student','checkin','custom_task','task_node','task_record',
                       'broadcast_task','receipt','device','grade','class','school_year',
@@ -562,11 +563,13 @@ async fn upgrade_pending_queue_check(conn: &mut Conn) -> AppResult<()> {
         Some(sql) => sql,
         None => return Ok(()), // 上游已保证表存在；此处仅作防御
     };
-    if sql.contains("school_year") && sql.contains("classroom") {
-        return Ok(()); // 约束已是新版
+    // 约束已是新版：① 目录实体（school_year / classroom）② 撤回指令（recall）。
+    // 新增任何 CHECK 取值都要在这里加一道判定，老库才会在启动时自动升级。
+    if sql.contains("school_year") && sql.contains("classroom") && sql.contains("'recall'") {
+        return Ok(());
     }
 
-    tracing::warn!("检测到旧版 pending_queue CHECK 约束（缺少目录实体），正在原地升级");
+    tracing::warn!("检测到旧版 pending_queue CHECK 约束（缺少目录实体或 recall），正在原地升级");
     if let Err(err) = enter_schema_surgery(conn).await {
         leave_schema_surgery(conn).await; // 半开状态也要复位，连接会放回池中复用
         return Err(err);
@@ -837,6 +840,7 @@ CREATE TABLE pending_queue (
             .unwrap()
             .expect("pending_queue 建表 SQL");
         assert!(sql.contains("school_year"), "新 CHECK 必须包含 school_year");
+        assert!(sql.contains("'recall'"), "新 CHECK 必须包含 recall（撤回指令）");
         assert!(
             !table_exists(db, "pending_queue_new").await.unwrap(),
             "不得残留 pending_queue_new"
@@ -866,6 +870,44 @@ CREATE TABLE pending_queue (
         insert_sync_log_row(&pool, "log-1", "q-school-year")
             .await
             .expect("sync_log 写入应成功（外键不得悬空）");
+
+        pool.close().await;
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 回归：`op_type='recall'`（教务端撤回指令）必须能入队。
+    ///
+    /// 历史缺陷：新增 op_type 却漏改 `pending_queue` 的 CHECK 定义，
+    /// 点撤回时报 `CHECK constraint failed: op_type IN ('upsert','delete',...)`。
+    #[tokio::test]
+    async fn pending_queue_accepts_recall_op_type() {
+        let (dir, pool) = temp_pool("queue_recall").await;
+        run_migrations(&pool).await.expect("迁移");
+
+        crate::db::repo::queue_repo::enqueue_to(
+            &pool,
+            "broadcast_task",
+            "bc-1",
+            "recall",
+            serde_json::json!({ "broadcastTaskId": "bc-1" }),
+            crate::config::constants::PRIORITY_BROADCAST,
+            Some("dev-1"),
+            Some("http://127.0.0.1:5179"),
+        )
+        .await
+        .expect("撤回指令入队应成功（CHECK 必须允许 recall）");
+
+        let (op, endpoint): (String, String) = sqlx::query_as(
+            "SELECT op_type, target_endpoint FROM pending_queue WHERE entity_id = 'bc-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("读回撤回指令");
+        assert_eq!(op, "recall");
+        assert_eq!(
+            endpoint, "/api/v1/broadcast/recall",
+            "op_type 决定投递端点"
+        );
 
         pool.close().await;
         std::fs::remove_dir_all(&dir).ok();

@@ -398,7 +398,7 @@ CREATE INDEX IF NOT EXISTS ix_receipt_task ON broadcast_receipts(broadcast_task_
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS pending_queue (
     id               TEXT    NOT NULL PRIMARY KEY,
-    op_type          TEXT    NOT NULL CHECK (op_type IN ('upsert','delete','ack','heartbeat','broadcast')),
+    op_type          TEXT    NOT NULL CHECK (op_type IN ('upsert','delete','ack','heartbeat','broadcast','recall')),
     entity_type      TEXT    NOT NULL CHECK (entity_type IN
                      ('student','checkin','custom_task','task_node','task_record',
                       'broadcast_task','receipt','device','grade','class','school_year')),
