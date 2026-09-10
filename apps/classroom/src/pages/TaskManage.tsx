@@ -116,26 +116,32 @@ export function TaskManage(): JSX.Element {
       key: 'actions',
       header: '操作',
       align: 'right',
-      render: (t) => (
-        <div className="flex justify-end gap-2">
-          <Button
-            size="md"
-            variant="secondary"
-            onClick={() => {
-              setCurrentTask(t.id);
-              setEditNodesOpen(true);
-            }}
-          >
-            状态节点
-          </Button>
-          <Link to={`/matrix?task=${encodeURIComponent(t.id)}`}><Button size="md" variant="secondary">打开看板</Button></Link>
-          {t.source === 'broadcast' ? (
-            <span className="px-2 py-2 text-sm font-semibold text-ink-muted">教务下发 · 不可删除</span>
-          ) : (
-            <Button size="md" variant="danger" onClick={() => void removeTask(t.id)}>删除</Button>
-          )}
-        </div>
-      ),
+      render: (t) => {
+        // 教务下发的任务由教务端定义状态节点，班级端只能执行、不能改节点或删除。
+        const isBroadcast = t.source === 'broadcast';
+        return (
+          <div className="flex justify-end gap-2">
+            {!isBroadcast && (
+              <Button
+                size="md"
+                variant="secondary"
+                onClick={() => {
+                  setCurrentTask(t.id);
+                  setEditNodesOpen(true);
+                }}
+              >
+                状态节点
+              </Button>
+            )}
+            <Link to={`/matrix?task=${encodeURIComponent(t.id)}`}><Button size="md" variant="secondary">打开看板</Button></Link>
+            {isBroadcast ? (
+              <span className="px-2 py-2 text-sm font-semibold text-ink-muted">教务下发 · 不可删除</span>
+            ) : (
+              <Button size="md" variant="danger" onClick={() => void removeTask(t.id)}>删除</Button>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
