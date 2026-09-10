@@ -35,7 +35,10 @@ pub fn start(state: Arc<AppState>) {
 /// 执行一轮补发。
 async fn run_once(state: &Arc<AppState>) {
     // 设备重新上线时，之前因断网进入死信的广播自动恢复，不需要用户手动逐条重试。
-    let _ = queue_repo::revive_dead_for_online_devices(&state.pool).await;
+    // 错误必须记录：这里曾因 `let _ =` 吞掉唯一索引冲突，导致死信静默地永不恢复。
+    if let Err(e) = queue_repo::revive_dead_for_online_devices(&state.pool).await {
+        tracing::warn!("同步：唤醒死信失败: {}", e);
+    }
     recover_unsynced_broadcast_entities(state).await;
     let pending = match queue_repo::claim_batch(&state.pool, QUEUE_BATCH_SIZE).await {
         Ok(items) => items,

@@ -195,22 +195,82 @@ pub async fn claim_batch(pool: &SqlitePool, limit: i32) -> AppResult<Vec<Pending
 }
 
 /// 网络恢复后自动唤醒广播死信，允许重新发现地址并继续投递。
+///
+/// 同键重复死信必须**先去重再唤醒**：`ux_queue_dedup` 只在
+/// `status IN ('pending','sending')` 时生效，所以一条条目进入 `dead` 就离开了索引作用域，
+/// 同键的新条目可以再次入队并同样变成 `dead`。若唤醒语句一次把同键的多条一起改成
+/// `pending`，唯一索引冲突会让**整条语句**回滚 —— 于是所有死信再也无法自愈。
+/// 因此这里先在快照上选出「每个键的最新一条」，再合并旧条目、再唤醒。
 pub async fn revive_dead_for_online_devices(pool: &SqlitePool) -> AppResult<u64> {
-    let result = sqlx::query(
-        "UPDATE pending_queue SET status='pending', attempt_count=0, next_retry_at=0,
-                last_error=NULL, updated_at=?
-         WHERE deleted_at IS NULL AND status='dead'
-           AND (
-             target_device_id IN (SELECT device_id FROM devices WHERE status='online')
-             OR (target_device_id IS NULL AND EXISTS (
-               SELECT 1 FROM devices WHERE device_role='master' AND status='online' AND deleted_at IS NULL
-             ))
+    let now = now_ms();
+
+    // 1) 快照读取存活名单。必须在独立的读语句里定好名单：若把这套 NOT EXISTS 写进
+    //    UPDATE 的 WHERE，子查询会逐行求值，而前面的行已经被改成 pending，
+    //    判断结果会随更新漂移。
+    let survivors: Vec<String> = sqlx::query_scalar(
+        "SELECT q.id FROM pending_queue q
+         WHERE q.deleted_at IS NULL AND q.status = 'dead'
+           AND NOT EXISTS (
+             SELECT 1 FROM pending_queue newer
+             WHERE newer.deleted_at IS NULL AND newer.status = 'dead'
+               AND newer.entity_type = q.entity_type AND newer.entity_id = q.entity_id
+               AND newer.op_type = q.op_type
+               AND COALESCE(newer.target_device_id, '*') = COALESCE(q.target_device_id, '*')
+               AND (newer.created_at > q.created_at
+                    OR (newer.created_at = q.created_at AND newer.id > q.id))
            )",
     )
-    .bind(now_ms())
-    .execute(pool)
+    .fetch_all(pool)
     .await?;
-    Ok(result.rows_affected())
+
+    if survivors.is_empty() {
+        return Ok(0);
+    }
+
+    let mut tx = pool.begin().await?;
+
+    // 2) 被同键新条目取代的旧死信合并掉，不再无限期堆在死信里。
+    let placeholders = std::iter::repeat("?")
+        .take(survivors.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let drop_sql = format!(
+        "UPDATE pending_queue SET deleted_at = ?, updated_at = ?
+         WHERE deleted_at IS NULL AND status = 'dead' AND id NOT IN ({})",
+        placeholders
+    );
+    let mut drop_query = sqlx::query(&drop_sql).bind(now).bind(now);
+    for id in &survivors {
+        drop_query = drop_query.bind(id);
+    }
+    drop_query.execute(&mut *tx).await?;
+
+    // 3) 目标可达的死信恢复为待发。逐条执行：确保同一键最多只有一行重新进入索引作用域。
+    let mut revived = 0u64;
+    for id in &survivors {
+        let affected = sqlx::query(
+            "UPDATE pending_queue SET status = 'pending', attempt_count = 0, next_retry_at = 0,
+                    last_error = NULL, updated_at = ?
+             WHERE id = ? AND deleted_at IS NULL AND status = 'dead'
+               AND (
+                 target_device_id IN (
+                   SELECT device_id FROM devices WHERE status = 'online' AND deleted_at IS NULL
+                 )
+                 OR (target_device_id IS NULL AND EXISTS (
+                   SELECT 1 FROM devices
+                   WHERE device_role = 'master' AND status = 'online' AND deleted_at IS NULL
+                 ))
+               )",
+        )
+        .bind(now)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        revived += affected.rows_affected();
+    }
+
+    tx.commit().await?;
+    Ok(revived)
 }
 
 /// 标记为发送中并累加尝试次数。
@@ -320,4 +380,145 @@ pub async fn purge_finished(pool: &SqlitePool, keep_ms: i64) -> AppResult<u64> {
         .execute(pool)
         .await?;
     Ok(result.rows_affected())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::revive_dead_for_online_devices;
+    use crate::db::{create_pool, run_migrations};
+    use sqlx::SqlitePool;
+
+    async fn temp_pool() -> (SqlitePool, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("lanwb_queue_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        let pool = create_pool(&dir.join("test.db")).await.expect("建池");
+        run_migrations(&pool).await.expect("跑迁移");
+        (pool, dir)
+    }
+
+    async fn mark_master_online(pool: &SqlitePool, device_id: &str) {
+        sqlx::query(
+            "INSERT INTO devices (id, device_id, device_name, device_role, status, created_at, updated_at)
+             VALUES (?, ?, '教务处-1', 'master', 'online', 1, 1)",
+        )
+        .bind(format!("row-{}", device_id))
+        .bind(device_id)
+        .execute(pool)
+        .await
+        .expect("插入在线教务处端");
+    }
+
+    async fn insert_dead(pool: &SqlitePool, id: &str, entity_id: &str, target: Option<&str>, created_at: i64) {
+        sqlx::query(
+            "INSERT INTO pending_queue (id, op_type, entity_type, entity_id, payload, target_device_id,
+                                        attempt_count, max_attempts, next_retry_at, last_error, status,
+                                        created_at, updated_at)
+             VALUES (?, 'upsert', 'custom_task', ?, '{}', ?, 5, 5, 0, 'ERR_NET', 'dead', ?, ?)",
+        )
+        .bind(id)
+        .bind(entity_id)
+        .bind(target)
+        .bind(created_at)
+        .bind(created_at)
+        .execute(pool)
+        .await
+        .expect("插入死信");
+    }
+
+    /// 回归：同键重复死信不能让整批唤醒失败。
+    ///
+    /// `ux_queue_dedup` 只在 `status IN ('pending','sending')` 时生效，因此一条条目进入
+    /// dead 后离开索引范围，同键的新条目可以再次入队并同样变成 dead —— 于是同键出现多条
+    /// dead。若唤醒语句一次把两条都改成 pending，就会撞上唯一索引、整条语句回滚，
+    /// 结果是**所有**死信永远无法自愈（且错误被 `let _ =` 吞掉，完全静默）。
+    #[tokio::test]
+    async fn revive_dead_survives_duplicate_keys_and_keeps_one_row_per_entity() {
+        let (pool, dir) = temp_pool().await;
+        mark_master_online(&pool, "master-1").await;
+        insert_dead(&pool, "q-old", "task-1", None, 1_000).await;
+        insert_dead(&pool, "q-new", "task-1", None, 2_000).await;
+
+        let revived = revive_dead_for_online_devices(&pool)
+            .await
+            .expect("唤醒死信不应因唯一索引冲突而整体失败");
+
+        assert_eq!(revived, 1, "同键只应唤醒最新一条");
+
+        let pending: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM pending_queue WHERE deleted_at IS NULL AND status = 'pending' ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("查待发行");
+        assert_eq!(pending, vec!["q-new".to_string()], "只保留最新一条待发");
+
+        let (attempts, last_error): (i32, Option<String>) = sqlx::query_as(
+            "SELECT attempt_count, last_error FROM pending_queue WHERE id = 'q-new'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("查唤醒后的次数");
+        assert_eq!(attempts, 0, "唤醒后重试次数应清零");
+        assert_eq!(last_error, None, "唤醒后应清空上次错误");
+
+        let dropped: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pending_queue WHERE id = 'q-old' AND deleted_at IS NOT NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("查被合并的旧条目");
+        assert_eq!(dropped, 1, "同键旧条目应被软删，而不是永久挂在死信里");
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// 目标不可达时保持死信，等对端上线再自愈。
+    #[tokio::test]
+    async fn revive_dead_waits_until_a_target_is_online() {
+        let (pool, dir) = temp_pool().await;
+        insert_dead(&pool, "q-1", "task-1", None, 1_000).await;
+
+        let revived = revive_dead_for_online_devices(&pool).await.expect("唤醒");
+        assert_eq!(revived, 0, "没有在线教务处端时不应唤醒");
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM pending_queue WHERE id = 'q-1'")
+                .fetch_one(&pool)
+                .await
+                .expect("查状态");
+        assert_eq!(status, "dead");
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// 指定了目标设备时，只有该设备在线才唤醒。
+    #[tokio::test]
+    async fn revive_dead_respects_explicit_target_online_state() {
+        let (pool, dir) = temp_pool().await;
+        sqlx::query(
+            "INSERT INTO devices (id, device_id, device_name, device_role, status, created_at, updated_at)
+             VALUES ('row-c1', 'client-1', '一年级1班', 'client', 'offline', 1, 1)",
+        )
+        .execute(&pool)
+        .await
+        .expect("插入离线目标");
+        insert_dead(&pool, "q-1", "task-1", Some("client-1"), 1_000).await;
+
+        // 目标离线：即便有在线教务处端，也不应唤醒这条（它要发给特定设备）。
+        mark_master_online(&pool, "master-1").await;
+        let revived = revive_dead_for_online_devices(&pool).await.expect("唤醒");
+        assert_eq!(revived, 0, "目标设备离线时不应唤醒");
+
+        // 目标上线后即可唤醒。
+        sqlx::query("UPDATE devices SET status = 'online' WHERE device_id = 'client-1'")
+            .execute(&pool)
+            .await
+            .expect("目标上线");
+        let revived = revive_dead_for_online_devices(&pool).await.expect("唤醒");
+        assert_eq!(revived, 1);
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
 }
