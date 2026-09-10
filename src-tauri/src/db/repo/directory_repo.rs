@@ -98,8 +98,7 @@ pub struct BatchCreateResult {
 pub async fn batch_create(
     pool: &SqlitePool,
     req: BatchCreateRequest,
-) -> AppResult<BatchCreateResult> {
-    let has_grades = req.grades.iter().any(|g| !g.grade_name.trim().is_empty() || g.grade_id.is_some());
+) -> AppResult<BatchCreateResult> {    let has_grades = req.grades.iter().any(|g| !g.grade_name.trim().is_empty() || g.grade_id.is_some());
     if !has_grades && req.classes.is_empty() {
         return Err(AppError::validation("至少要创建一个年级或班级"));
     }
@@ -380,6 +379,155 @@ pub async fn batch_create(
     })
 }
 
+/// 「确保这些班级存在」的输入引用：整校名册导入时，Excel 里的 (年级, 班级)
+/// 名字对需要先落到目录上，学生行才能拿到 `class_id`。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EnsureClassRef {
+    pub grade_name: String,
+    pub class_name: String,
+}
+
+/// 目录预置结果：计数 + (年级名, 班级名) → 班级目录 的映射。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnsureClassesResult {
+    pub grades_created: usize,
+    pub classes_created: usize,
+    /// 键为 (grade_name, class_name)，两者均已 trim。
+    pub class_map: Vec<(String, String, String)>,
+    /// 本次实际新建的年级 id（供命令层补发离线队列）。
+    pub created_grade_ids: Vec<String>,
+    /// 本次实际新建的班级 id（供命令层补发离线队列）。
+    pub created_class_ids: Vec<String>,
+}
+
+/// 按名字幂等地确保一批 (年级, 班级) 存在于指定学年下（单事务）。
+///
+/// 与 [`batch_create`] 的区别：这里没有 `class_no`（Excel 名册只有名字），
+/// 去重只按 `(school_year_id, grade_id, class_name)`；年级按名复用，
+/// 不存在则创建（grade_no 暂用年级名填充，可在目录管理中修正）。
+pub async fn ensure_classes(
+    pool: &SqlitePool,
+    school_year_id: &str,
+    refs: &[EnsureClassRef],
+) -> AppResult<EnsureClassesResult> {
+    if refs.is_empty() {
+        return Ok(EnsureClassesResult {
+            grades_created: 0,
+            classes_created: 0,
+            class_map: Vec::new(),
+            created_grade_ids: Vec::new(),
+            created_class_ids: Vec::new(),
+        });
+    }
+
+    let mut tx = pool.begin().await?;
+    let mut grades_created = 0usize;
+    let mut classes_created = 0usize;
+    let mut class_map: Vec<(String, String, String)> = Vec::new();
+    let mut grade_ids: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut created_grade_ids: Vec<String> = Vec::new();
+    let mut created_class_ids: Vec<String> = Vec::new();
+
+    for r in refs {
+        let grade_name = r.grade_name.trim();
+        let class_name = r.class_name.trim();
+        if grade_name.is_empty() || class_name.is_empty() {
+            continue;
+        }
+        let key = (grade_name.to_string(), class_name.to_string());
+        if class_map.iter().any(|(g, c, _)| g == &key.0 && c == &key.1) {
+            continue;
+        }
+
+        // 年级：按名幂等。
+        let grade_id = match grade_ids.get(grade_name) {
+            Some(id) => id.clone(),
+            None => {
+                let existing: Option<(String, String)> = sqlx::query_as(
+                    "SELECT id, grade_no FROM grades WHERE grade_name = ? AND deleted_at IS NULL LIMIT 1",
+                )
+                .bind(grade_name)
+                .fetch_optional(&mut *tx)
+                .await?;
+                match existing {
+                    Some((id, _)) => {
+                        grade_ids.insert(grade_name.to_string(), id.clone());
+                        id
+                    }
+                    None => {
+                        let id = new_id();
+                        let now = now_ms();
+                        sqlx::query(
+                            "INSERT INTO grades (id, grade_no, grade_name, sort_order, remark,
+                                 created_at, updated_at, deleted_at, sync_state, dirty)
+                             VALUES (?, ?, ?, 0, NULL, ?, ?, NULL, 'pending', 1)",
+                        )
+                        .bind(&id)
+                        .bind(grade_name)
+                        .bind(grade_name)
+                        .bind(now)
+                        .bind(now)
+                        .execute(&mut *tx)
+                        .await?;
+                        grades_created += 1;
+                        created_grade_ids.push(id.clone());
+                        grade_ids.insert(grade_name.to_string(), id.clone());
+                        id
+                    }
+                }
+            }
+        };
+
+        // 班级：按 (学年, 年级, 班名) 幂等。
+        let existing_class: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM classes
+             WHERE deleted_at IS NULL AND school_year_id = ? AND grade_id = ? AND class_name = ?
+             LIMIT 1",
+        )
+        .bind(school_year_id)
+        .bind(&grade_id)
+        .bind(class_name)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let class_id = match existing_class {
+            Some(id) => id,
+            None => {
+                let id = new_id();
+                let now = now_ms();
+                sqlx::query(
+                    "INSERT INTO classes (id, grade_id, school_year_id, grade_no, grade_name, class_no, class_name,
+                         head_teacher, sort_order, remark, created_at, updated_at, deleted_at, sync_state, dirty)
+                     VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, 0, NULL, ?, ?, NULL, 'pending', 1)",
+                )
+                .bind(&id)
+                .bind(&grade_id)
+                .bind(school_year_id)
+                .bind(grade_name)
+                .bind(grade_name)
+                .bind(class_name)
+                .bind(now)
+                .bind(now)
+                .execute(&mut *tx)
+                .await?;
+                classes_created += 1;
+                created_class_ids.push(id.clone());
+                id
+            }
+        };
+        class_map.push((grade_name.to_string(), class_name.to_string(), class_id));
+    }
+
+    tx.commit().await?;
+    Ok(EnsureClassesResult {
+        grades_created,
+        classes_created,
+        class_map,
+        created_grade_ids,
+        created_class_ids,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -556,5 +704,58 @@ mod tests {
         let classes = class_repo::list_by_year(&pool, &year.id).await.expect("classes");
         assert_eq!(classes.len(), 1);
         assert_eq!(classes[0].grade_name.as_deref(), Some("三年级"));
+    }
+
+    #[tokio::test]
+    async fn ensure_classes_creates_missing_directory_and_backfills_map() {
+        let pool = fresh_pool().await;
+        let year = school_year_repo::upsert(
+            &pool,
+            SchoolYear { school_year_no: "2026".into(), school_year_name: "2026学年".into(), ..Default::default() },
+        )
+        .await
+        .expect("year");
+
+        let refs = vec![
+            EnsureClassRef { grade_name: "一年级".into(), class_name: "一年级1班".into() },
+            EnsureClassRef { grade_name: "一年级".into(), class_name: "一年级2班".into() },
+            EnsureClassRef { grade_name: "二年级".into(), class_name: "二年级1班".into() },
+        ];
+        let first = ensure_classes(&pool, &year.id, &refs).await.expect("ensure");
+        assert_eq!(first.grades_created, 2);
+        assert_eq!(first.classes_created, 3);
+        assert_eq!(first.class_map.len(), 3);
+
+        // 幂等重跑：不再新建。
+        let second = ensure_classes(&pool, &year.id, &refs).await.expect("ensure again");
+        assert_eq!(second.grades_created, 0);
+        assert_eq!(second.classes_created, 0);
+        // 映射指向同一批班级。
+        for (grade, class, class_id) in &second.class_map {
+            let found = first
+                .class_map
+                .iter()
+                .find(|(g, c, _)| g == grade && c == class)
+                .expect("same key");
+            assert_eq!(&found.2, class_id);
+        }
+
+        let classes = class_repo::list_by_year(&pool, &year.id).await.expect("classes");
+        assert_eq!(classes.len(), 3);
+        assert!(classes.iter().all(|c| c.grade_id.is_some()));
+    }
+
+    #[tokio::test]
+    async fn ensure_classes_empty_refs_is_noop() {
+        let pool = fresh_pool().await;
+        let year = school_year_repo::upsert(
+            &pool,
+            SchoolYear { school_year_no: "2026".into(), school_year_name: "2026学年".into(), ..Default::default() },
+        )
+        .await
+        .expect("year");
+        let report = ensure_classes(&pool, &year.id, &[]).await.expect("ensure");
+        assert_eq!(report.class_map.len(), 0);
+        assert!(grade_repo::list(&pool).await.expect("grades").is_empty());
     }
 }

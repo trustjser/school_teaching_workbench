@@ -193,8 +193,19 @@ export interface StudentImportRowInput {
 export async function studentBatchImport(
   rows: StudentImportRowInput[],
   batchName: string,
+  options?: {
+    /** 整校模式：把 Excel 中的 (年级, 班级) 幂等落到学年目录，缺失即建 */
+    autoCreateDirectory?: boolean;
+    /** 整校模式的目标学年 id（必填 when autoCreateDirectory） */
+    schoolYearId?: string | null;
+  },
 ): Promise<ImportReport> {
-  return invokeCmd<ImportReport>('student_batch_import', { rows, batchName });
+  return invokeCmd<ImportReport>('student_batch_import', {
+    rows,
+    batchName,
+    autoCreateDirectory: options?.autoCreateDirectory ?? null,
+    schoolYearId: options?.schoolYearId ?? null,
+  });
 }
 
 export async function studentUpdateStatus(id: string, status: StudentStatus): Promise<Student> {

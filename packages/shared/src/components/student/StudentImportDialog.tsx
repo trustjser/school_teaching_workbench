@@ -1,14 +1,16 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Download, FileSpreadsheet, Upload } from 'lucide-react';
 import { Modal } from '@shared/components/ui/Modal';
 import { Button } from '@shared/components/ui/Button';
 import { Select } from '@shared/components/ui/Select';
+import { SearchableSelect } from '@shared/components/ui/SearchableSelect';
 import { ProgressBar } from '@shared/components/ui/ProgressBar';
 import { Table, type TableColumn } from '@shared/components/ui/Table';
 import { Input } from '@shared/components/ui/Input';
 import { buildStudentTemplate, parseStudentFile } from '@shared/lib/excel';
 import { exportSheetsToXlsx } from '@shared/lib/exporter';
-import { studentBatchImport, studentList } from '@shared/lib/db';
+import { schoolYearList, studentBatchImport, studentList } from '@shared/lib/db';
+import type { SchoolYear } from '@shared/types/models';
 import { useAppStore } from '@shared/store/useAppStore';
 import { useStudentStore } from '@shared/store/useStudentStore';
 import type { ParsedStudentRow } from '@shared/types/api';
@@ -57,7 +59,20 @@ export function StudentImportDialog({
   const [result, setResult] = useState<{ success: number; failed: number } | null>(null);
   const [errorList, setErrorList] = useState<ImportRowError[]>([]);
   const [existingStudents, setExistingStudents] = useState<import('@shared/types/models').Student[]>([]);
+  const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
+  const [schoolYearId, setSchoolYearId] = useState('');
+  const [autoCreate, setAutoCreate] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /** 整校模式：无班级上下文时启用，Excel 的年级/班级列参与目录落位 */
+  const schoolMode = !classContext;
+
+  useEffect(() => {
+    if (!open || !schoolMode) return;
+    void schoolYearList()
+      .then((list) => setSchoolYears(list))
+      .catch(() => setSchoolYears([]));
+  }, [open, schoolMode]);
 
   const reset = useCallback(() => {
     setStep('pick');
@@ -71,6 +86,8 @@ export function StudentImportDialog({
     setResult(null);
     setErrorList([]);
     setExistingStudents([]);
+    setSchoolYearId('');
+    setAutoCreate(true);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -135,6 +152,7 @@ export function StudentImportDialog({
 
   const handleConfirmImport = useCallback(async () => {
     if (validRows.length === 0) return;
+    if (schoolMode && autoCreate && !schoolYearId) return;
     setStep('importing');
     setProgress(10);
     try {
@@ -151,6 +169,9 @@ export function StudentImportDialog({
           note: r.note || null,
         })),
         batchName || '名册导入',
+        schoolMode
+          ? { autoCreateDirectory: autoCreate, schoolYearId: schoolYearId || null }
+          : undefined,
       );
       setProgress(100);
       setResult({ success: report.successRows, failed: report.failedRows });
@@ -162,7 +183,7 @@ export function StudentImportDialog({
       app.toastError(err, '导入失败');
       setStep('preview');
     }
-  }, [app, batchName, loadStudents, onImported, validRows]);
+  }, [app, autoCreate, batchName, loadStudents, onImported, schoolMode, schoolYearId, validRows]);
 
   const handleDownloadTemplate = useCallback(async () => {
     try {
@@ -207,7 +228,10 @@ export function StudentImportDialog({
             关闭
           </Button>
           {step === 'map' && (
-            <Button onClick={() => setStep('preview')} disabled={rows.length === 0}>
+            <Button
+              onClick={() => setStep('preview')}
+              disabled={rows.length === 0 || (schoolMode && autoCreate && !schoolYearId)}
+            >
               下一步：校验预览
             </Button>
           )}
@@ -228,6 +252,14 @@ export function StudentImportDialog({
         <div className="flex flex-col items-center gap-5 py-6">
           <FileSpreadsheet className="h-16 w-16 text-brand-600" aria-hidden />
           <p className="text-lg text-ink">选择名册文件，或将文件拖拽到此处</p>
+          {schoolMode && (
+            <div className="w-full max-w-xl rounded-lg border border-brand-300 bg-brand-50 px-4 py-3 text-sm text-ink">
+              <p className="font-semibold">整校导入模式</p>
+              <p className="mt-1 text-ink-muted">
+                未选择具体班级：Excel 中的「年级」「班级」列将参与落位，缺失的年级 / 班级可自动创建到指定学年。
+              </p>
+            </div>
+          )}
           <input
             ref={fileInputRef}
             type="file"
@@ -254,6 +286,25 @@ export function StudentImportDialog({
 
       {step === 'map' && (
         <div className="space-y-4">
+          {schoolMode && (
+            <div className="grid min-w-0 grid-cols-1 gap-4 rounded-lg border border-surface-border bg-surface-muted p-4 sm:grid-cols-2">
+              <SearchableSelect
+                label="导入到学年（必填）"
+                options={schoolYears.map((y) => ({ value: y.id, label: y.schoolYearName }))}
+                value={schoolYearId}
+                onChange={(value) => setSchoolYearId(value)}
+                placeholder="— 请选择学年 —"
+              />
+              <label className="flex items-end gap-2 pb-1 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={autoCreate}
+                  onChange={(e) => setAutoCreate(e.target.checked)}
+                />
+                自动创建缺失的年级 / 班级
+              </label>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-3 rounded-lg bg-surface-muted px-4 py-3">
             <span className="text-base font-semibold text-ink">文件：{fileName}</span>
             <span className="text-sm text-ink-muted">编码：{encoding}</span>
