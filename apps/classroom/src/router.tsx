@@ -6,7 +6,6 @@ import { APP_TARGET } from './app-target';
 import { CLASSROOM_NAV_ITEMS } from './nav';
 
 import { ClientHome } from './pages/ClientHome';
-import { StudentRoster } from './pages/StudentRoster';
 import { CheckinPage } from './pages/CheckinPage';
 import { TaskManage } from './pages/TaskManage';
 import { TaskMatrix } from './pages/TaskMatrix';
@@ -17,10 +16,11 @@ import { InboxPage } from './pages/InboxPage';
  *
  * 只注册班级端页面；教务端路径（/devices、/attendance、/broadcast…）在此不存在，
  * 手动修改 hash 也会被回落到本端首页。
+ *
+ * 班级端不提供名册页面：学生名册由教务端维护并随目录同步下发。
  */
 const classroomRoutes: RouteObject[] = [
   { index: true, element: <ClientHome /> },
-  { path: 'students', element: <StudentRoster /> },
   { path: 'checkin', element: <CheckinPage /> },
   { path: 'tasks', element: <TaskManage /> },
   { path: 'matrix', element: <TaskMatrix /> },

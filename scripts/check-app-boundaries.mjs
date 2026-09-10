@@ -8,8 +8,24 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const checks = [
-  ['apps/affairs/src/router.tsx', ['/client', 'ClientHome', 'StudentRoster']],
-  ['apps/classroom/src/router.tsx', ['/master', 'MasterHome', 'TaskDashboard']],
+  [
+    'apps/affairs/src/router.tsx',
+    ['/client', 'ClientHome', 'CheckinPage', 'TaskManage', 'TaskMatrix', 'InboxPage'],
+  ],
+  [
+    'apps/classroom/src/router.tsx',
+    [
+      '/master',
+      'MasterHome',
+      'DeviceMonitor',
+      'AttendanceBoard',
+      'BroadcastCenter',
+      'GradeClassManage',
+      'Analytics',
+      'TaskDashboard',
+      'TaskDetail',
+    ],
+  ],
 ];
 
 /** shared 层不得反向依赖任一 app：端专属实现必须留在各自的入口内。 */
