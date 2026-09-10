@@ -129,6 +129,7 @@ async fn run_once(state: &Arc<AppState>) {
                 )
                 .await
                 .ok();
+                settle_broadcast_delivery(state, &item).await;
                 sent += 1;
             }
             Err((code, msg)) => {
@@ -169,6 +170,9 @@ async fn run_once(state: &Arc<AppState>) {
                         }),
                     );
                 }
+                // 永久失败会让条目离开 pending 集合，同样可能让投递流程收尾。
+                // 瞬时失败仍停留在 pending，结算函数会自行判定不必推进。
+                settle_broadcast_delivery(state, &item).await;
                 failed += 1;
             }
         }
@@ -184,8 +188,25 @@ async fn run_once(state: &Arc<AppState>) {
     }
 }
 
-async fn recover_unsynced_broadcast_entities(state: &Arc<AppState>) {
-    if settings_repo::get_string(&state.pool, "app_mode", "client")
+/// 广播推送投递结束后结算下发状态（`sending` → `sent`）。
+///
+/// 只管 `op_type = 'broadcast'` 的下发推送；`op_type = 'ack'` 是回执投递，
+/// 与下发的投递进度无关。瞬时失败仍停留在 pending，结算函数自行判定不必推进。
+async fn settle_broadcast_delivery(
+    state: &Arc<AppState>,
+    item: &crate::db::models::PendingQueueItem,
+) {
+    if item.entity_type != "broadcast_task" || item.op_type != "broadcast" {
+        return;
+    }
+    if let Err(e) =
+        crate::db::repo::broadcast_repo::mark_sent_when_delivered(&state.pool, &item.entity_id).await
+    {
+        tracing::warn!("同步：结算广播投递状态失败: {}", e);
+    }
+}
+
+async fn recover_unsynced_broadcast_entities(state: &Arc<AppState>) {    if settings_repo::get_string(&state.pool, "app_mode", "client")
         .await
         .ok()
         .as_deref()
@@ -466,6 +487,7 @@ pub async fn flush(
             match deliver_item(state, &item).await {
                 Ok(_) => {
                     queue_repo::mark_done(&state.pool, &item.id).await.ok();
+                    settle_broadcast_delivery(state, &item).await;
                     sent += 1;
                 }
                 Err((code, _msg)) => {
@@ -478,6 +500,7 @@ pub async fn flush(
                     )
                     .await
                     .ok();
+                    settle_broadcast_delivery(state, &item).await;
                     failed += 1;
                 }
             }

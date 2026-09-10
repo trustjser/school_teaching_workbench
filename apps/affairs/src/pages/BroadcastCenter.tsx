@@ -13,6 +13,7 @@ import { Table, type TableColumn } from '@shared/components/ui/Table';
 import { Badge } from '@shared/components/ui/Badge';
 import { Toggle } from '@shared/components/ui/Toggle';
 import { EmptyState } from '@shared/components/ui/EmptyState';
+import { ConfirmDialog } from '@shared/components/ui/ConfirmDialog';
 import { SkeletonRows } from '@shared/components/ui/Skeleton';
 import { StatusNodeEditor, type EditableNode } from '@shared/components/task/StatusNodeEditor';
 import { TASK_TYPE_OPTIONS, BROADCAST_STATUS_OPTIONS, PRIORITY_OPTIONS, DEFAULT_NODE_TEMPLATES } from '@shared/constants/status';
@@ -47,6 +48,25 @@ export function BroadcastCenter(): JSX.Element {
   const [statusFilter, setStatusFilter] = useState('');
   /** 是否处于筛选态：决定空状态是「没有数据」还是「没有匹配」 */
   const hasFilter = keyword.trim() !== '' || statusFilter !== '';
+  /** 待执行的取消 / 关闭操作：非空即弹出二次确认 */
+  const [actionTarget, setActionTarget] = useState<{ task: BroadcastTask; kind: 'cancel' | 'close' } | null>(null);
+  const [actionSaving, setActionSaving] = useState(false);
+  const cancelOutbox = useBroadcastStore((s) => s.cancelOutbox);
+  const closeOutbox = useBroadcastStore((s) => s.closeOutbox);
+
+  const applyAction = async (): Promise<void> => {
+    if (!actionTarget) return;
+    setActionSaving(true);
+    try {
+      if (actionTarget.kind === 'cancel') await cancelOutbox(actionTarget.task.id);
+      else await closeOutbox(actionTarget.task.id);
+    } catch {
+      // store 已 toast 后端返回的原因（例如「已有班级接收，请改用关闭」）。
+    } finally {
+      setActionSaving(false);
+      setActionTarget(null);
+    }
+  };
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -140,11 +160,30 @@ export function BroadcastCenter(): JSX.Element {
       key: 'actions',
       header: '操作',
       align: 'right',
-      render: (t) => (
-        <Button size="md" variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={() => void loadReceipts(t.id)}>
-          回执
-        </Button>
-      ),
+      render: (t) => {
+        // 终态不再提供操作。
+        const terminal = t.status === 'closed' || t.status === 'cancelled';
+        // 已有班级接收就撤回不了，只能「关闭」；否则给「取消」。
+        const canCancel = !terminal && !t.delivered;
+        return (
+          <div className="flex justify-end gap-2">
+            <Button size="md" variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={() => void loadReceipts(t.id)}>
+              回执
+            </Button>
+            {canCancel && (
+              <Button size="md" variant="ghost" onClick={() => setActionTarget({ task: t, kind: 'cancel' })}>
+                取消
+              </Button>
+            )}
+            {!terminal && (
+              <Button size="md" variant="secondary" onClick={() => setActionTarget({ task: t, kind: 'close' })}>
+                关闭
+              </Button>
+            )}
+            {terminal && <span className="px-2 py-2 text-sm font-semibold text-ink-muted">已结束</span>}
+          </div>
+        );
+      },
     },
   ];
 
@@ -213,6 +252,27 @@ export function BroadcastCenter(): JSX.Element {
         onClose={() => setCreateOpen(false)}
         devices={devices}
         onSubmit={handleCreate}
+      />
+
+      <ConfirmDialog
+        open={actionTarget !== null}
+        title={actionTarget?.kind === 'cancel' ? '取消下发' : '关闭下发'}
+        message={
+          actionTarget?.kind === 'cancel'
+            ? `确定要取消「${actionTarget?.task.title ?? ''}」吗？`
+            : `确定要关闭「${actionTarget?.task.title ?? ''}」吗？`
+        }
+        detail={
+          actionTarget?.kind === 'cancel'
+            ? '尚未投递的目标会被撤回，不会再送达班级端；已经收到的班级不受影响。取消不会记录发送时间。'
+            : '关闭后该下发不再出现在待处理列表里。这不会改动班级端已经收到的任务，班级端仍可继续标记。'
+        }
+        confirmText={actionTarget?.kind === 'cancel' ? '取消下发' : '关闭下发'}
+        cancelText={actionTarget?.kind === 'cancel' ? '再想想' : '取消'}
+        danger={actionTarget?.kind === 'cancel'}
+        loading={actionSaving}
+        onConfirm={() => void applyAction()}
+        onCancel={() => setActionTarget(null)}
       />
     </div>
   );

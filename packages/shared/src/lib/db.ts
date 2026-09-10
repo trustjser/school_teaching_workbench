@@ -490,6 +490,16 @@ export async function broadcastReceipts(broadcastTaskId: string): Promise<Broadc
   return invokeCmd<BroadcastReceipt[]>('broadcast_receipts', { broadcastTaskId });
 }
 
+/** 取消（撤回）尚未送达的下发；已送达时后端返回 ERR_MODE。 */
+export async function broadcastCancel(id: string): Promise<BroadcastTask> {
+  return invokeCmd<BroadcastTask>('broadcast_cancel', { id });
+}
+
+/** 关闭已下发的任务（教务端宣布结束）。 */
+export async function broadcastClose(id: string): Promise<BroadcastTask> {
+  return invokeCmd<BroadcastTask>('broadcast_close', { id });
+}
+
 export async function broadcastAccept(broadcastTaskId: string): Promise<CustomTask> {
   return invokeCmd<CustomTask>('broadcast_accept', { broadcastTaskId });
 }

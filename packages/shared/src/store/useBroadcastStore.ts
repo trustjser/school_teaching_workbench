@@ -5,6 +5,8 @@ import type { Page } from '@shared/types/api';
 import { appModeForTarget, getAppTarget } from '@shared/app-target';
 import {
   broadcastAccept,
+  broadcastCancel,
+  broadcastClose,
   broadcastCreate,
   broadcastList,
   broadcastPage,
@@ -30,11 +32,14 @@ interface BroadcastState {
   loadOutbox: () => Promise<void>;
   loadOutboxPage: (page: number, pageSize: number, keyword?: string | null, status?: string | null) => Promise<void>;
   loadInbox: () => Promise<void>;
-  loadReceipts: (broadcastTaskId: string) => Promise<void>;
-  select: (id: string | null) => void;
+  loadReceipts: (broadcastTaskId: string) => Promise<void>;  select: (id: string | null) => void;
   create: (task: Partial<BroadcastTask> & { title: string; payload: string }) => Promise<BroadcastTask>;
   /** `targetDeviceIds` 需为已展开的设备 ID 数组（见 resolveTargetDeviceIds） */
   send: (id: string, targetDeviceIds: string[]) => Promise<SendReport>;
+  /** 取消（撤回）尚未送达的下发 */
+  cancelOutbox: (id: string) => Promise<void>;
+  /** 关闭已下发的任务 */
+  closeOutbox: (id: string) => Promise<void>;
   accept: (broadcastTaskId: string) => Promise<CustomTask | null>;
   /** 收到新下发任务（事件驱动） */
   pushIncoming: (task: BroadcastTask) => void;
@@ -78,8 +83,47 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
     }
   },
 
-  loadInbox: async () => {
+  /**
+   * 取消（撤回）尚未送达的下发：后端会撤回队列里待投递的条目。
+   *
+   * 已送达时后端返回 `ERR_MODE`，这里原样 toast，由后端负责引导改用「关闭」。
+   */
+  cancelOutbox: async (id) => {
     const app = useAppStore.getState();
+    try {
+      const saved = await broadcastCancel(id);
+      set((s) => ({
+        outbox: s.outbox.map((t) => (t.id === id ? saved : t)),
+        outboxPage: s.outboxPage
+          ? { ...s.outboxPage, items: s.outboxPage.items.map((t) => (t.id === id ? saved : t)) }
+          : s.outboxPage,
+      }));
+      app.pushToast({ kind: 'success', title: '已取消下发', description: '尚未投递的目标已撤回' });
+    } catch (err) {
+      app.toastError(err, '取消下发失败');
+      throw err;
+    }
+  },
+
+  /** 关闭已下发的任务（教务端宣布结束）。 */
+  closeOutbox: async (id) => {
+    const app = useAppStore.getState();
+    try {
+      const saved = await broadcastClose(id);
+      set((s) => ({
+        outbox: s.outbox.map((t) => (t.id === id ? saved : t)),
+        outboxPage: s.outboxPage
+          ? { ...s.outboxPage, items: s.outboxPage.items.map((t) => (t.id === id ? saved : t)) }
+          : s.outboxPage,
+      }));
+      app.pushToast({ kind: 'success', title: '已关闭下发' });
+    } catch (err) {
+      app.toastError(err, '关闭下发失败');
+      throw err;
+    }
+  },
+
+  loadInbox: async () => {    const app = useAppStore.getState();
     set({ loading: true });
     try {
       const list = await broadcastList('in');

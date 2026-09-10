@@ -54,6 +54,12 @@ export interface BroadcastTask extends BaseEntity {
   closedAt: number | null;
   expectCount: number;
   ackCount: number;
+  /**
+   * 派生字段（非表列）：是否已成功投递给至少一个班级端。
+   *
+   * 由后端查询算出。界面据此决定给「取消」（尚未送达，可撤回）还是「关闭」。
+   */
+  delivered: boolean;
 }
 
 /** 广播回执 */

@@ -637,8 +637,7 @@ pub struct BroadcastTask {
     /// 方向：out / in。
     pub direction: String,
     /// 状态：draft / sending / sent / partial / closed / cancelled。
-    pub status: String,
-    /// 发送时间。
+    pub status: String,    /// 发送时间。
     pub sent_at: Option<i64>,
     /// 关闭时间。
     pub closed_at: Option<i64>,
@@ -652,6 +651,12 @@ pub struct BroadcastTask {
     pub updated_at: i64,
     /// 软删时间。
     pub deleted_at: Option<i64>,
+    /// **派生字段，非表列**：是否已成功投递给至少一个班级端。
+    ///
+    /// 由查询用 `EXISTS(... pending_queue.status='done')` 算出。界面据此决定给
+    /// 「取消」（尚未送达，可撤回）还是「关闭」（已送达，只能结束）。
+    /// `upsert` 的列清单不含它；远端推送缺该字段时由 `serde(default)` 兜底。
+    pub delivered: bool,
 }
 
 /// 广播回执（`broadcast_receipts`）。

@@ -153,6 +153,24 @@ pub async fn broadcast_receipts(
     broadcast_repo::receipts(&state.pool, &broadcast_task_id).await
 }
 
+/// 取消（撤回）尚未送达的下发。已有班级接收时返回 `ERR_MODE`，引导改用关闭。
+#[tauri::command]
+pub async fn broadcast_cancel(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> AppResult<BroadcastTask> {
+    broadcast_repo::withdraw(&state.pool, &id).await
+}
+
+/// 关闭已下发的任务（教务端宣布结束）。
+#[tauri::command]
+pub async fn broadcast_close(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> AppResult<BroadcastTask> {
+    broadcast_repo::close(&state.pool, &id).await
+}
+
 /// 将广播任务转换为班级待办。网络重投递时按 broadcast_task_id 幂等返回已有待办。
 pub async fn accept_broadcast_task(
     state: &AppState,

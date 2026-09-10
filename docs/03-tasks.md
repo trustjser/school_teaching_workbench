@@ -516,7 +516,32 @@ lan-workbench/
 3. 存活名单必须在**独立的读语句**里定好。把 `NOT EXISTS` 写进 `UPDATE ... WHERE` 会被逐行求值，而前面的行已被改成 `pending`，判断结果会随更新漂移。
 4. 这类自愈函数的错误**不得用 `let _ =` 吞掉** —— 正是它让上述索引冲突静默了半小时。
 
-### 4.10 任务状态语义（自定义任务）
+### 4.10 广播下发状态机
+
+| 状态 | 写入点 | 含义 |
+|---|---|---|
+| `draft` | `broadcast_create` 空值兜底 | 创建到下发之间的瞬态；「新建并下发」一步完成，列表中不会停留 |
+| `sending` | `broadcast_send` 入队时 | 已入队，投递中 |
+| `sent` | `worker::settle_broadcast_delivery` | **所有目标都已投递结束**（成功，或永久失败进死信）。语义是「投递流程结束」，逐班到达情况看回执 |
+| `partial` | 收到任一班级端回执（`net/handlers.rs`） | 已有班级回执；**收到 1 条即置位**，不区分比例 |
+| `closed` | `broadcast_close` 命令 | 教务端宣布结束（记 `closed_at`）。**不改动班级端已收到的本地任务** |
+| `cancelled` | `broadcast_cancel` 命令 | 撤回尚未送达的下发（记 `closed_at`，**不写 `sent_at`**） |
+
+**取消 vs 关闭的边界**（撤回不了已经送达的东西）：
+
+- **取消**只对「尚无任何班级接收」的下发开放。判定依据是 `BroadcastTask.delivered` ——
+  一个**派生字段**，由查询用 `EXISTS(... pending_queue.status='done')` 算出，不是表列。
+  取消时把该广播 `op_type='broadcast'` 的 `pending/sending` 队列条目软删
+  （`claim_batch` 只取 `deleted_at IS NULL`，因此即刻停止投递）。
+- 已送达时 `broadcast_cancel` 返回 `ERR_MODE` 并引导改用「关闭」。
+- 界面据 `delivered` 决定给哪一个按钮：`!delivered && !terminal` → 取消；`!terminal` → 关闭；终态 → 无操作。
+
+**投递结算**：`worker` 在每次投递成功或永久失败后调用
+`broadcast_repo::mark_sent_when_delivered(broadcast_id)` —— 该广播不再有
+`pending/sending` 的 `op_type='broadcast'` 条目时，把 `sending` 推进为 `sent`。
+瞬时失败仍停留在 `pending`，因此不会误判为「投递结束」；`partial` 不会被改写（回执是更靠后的状态）。
+
+### 4.11 任务状态语义（自定义任务）
 
 | 取值 | 含义 | 是否可手动写入 |
 |---|---|---|
