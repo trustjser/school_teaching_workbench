@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CalendarPlus, Pencil, Plus, Trash2, Users, Monitor } from 'lucide-react';
+import { CalendarPlus, Copy, ListPlus, Pencil, Plus, School, Trash2, Users, Monitor } from 'lucide-react';
 import { Card } from '@shared/components/ui/Card';
 import { Button } from '@shared/components/ui/Button';
 import { Input } from '@shared/components/ui/Input';
@@ -11,6 +11,11 @@ import { EmptyState } from '@shared/components/ui/EmptyState';
 import { StudentTable } from '@shared/components/student/StudentTable';
 import { StudentEditDrawer } from '@shared/components/student/StudentEditDrawer';
 import { StudentImportDialog } from '@shared/components/student/StudentImportDialog';
+import {
+  BatchAddClassesModal,
+  CloneYearModal,
+  QuickSchoolSetupModal,
+} from '@affairs/components/DirectoryBatchModals';
 import { useDirectoryStore } from '@shared/store/useDirectoryStore';
 import { useStudentStore } from '@shared/store/useStudentStore';
 import { useDeviceStore } from '@shared/store/useDeviceStore';
@@ -18,6 +23,7 @@ import { useAppStore } from '@shared/store/useAppStore';
 import { useTauriEventHandler } from '@shared/hooks/useTauriEvent';
 import { TAURI_EVENTS } from '@shared/types/events';
 import { classroomAssign, classroomAssignments, classroomDelete, classroomList, classroomUpsert } from '@shared/lib/db';
+import type { DirectoryBatchCreateReport } from '@shared/lib/db';
 import type { Class, Classroom, ClassroomAssignment, SchoolYear, Student } from '@shared/types/models';
 
 interface GradeDraft {
@@ -124,6 +130,9 @@ export function GradeClassManage(): JSX.Element {
 
   const [editTarget, setEditTarget] = useState<Student | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [quickSetupOpen, setQuickSetupOpen] = useState(false);
+  const [cloneYearOpen, setCloneYearOpen] = useState(false);
+  const [batchAddOpen, setBatchAddOpen] = useState(false);
 
   useEffect(() => {
     void loadGrades();
@@ -302,18 +311,42 @@ export function GradeClassManage(): JSX.Element {
     setPendingDelete(null);
   };
 
+  /** 批量创建成功后的统一收尾：刷新目录 stores、切到新学年、汇总 toast。 */
+  const handleBatchDone = async (report: DirectoryBatchCreateReport): Promise<void> => {
+    await loadGrades();
+    await loadSchoolYears();
+    if (report.schoolYearCreated) selectSchoolYear(report.schoolYearId);
+    if (selectedGradeId) await loadClasses(selectedGradeId);
+    pushToast({
+      kind: 'success',
+      title: '批量创建完成',
+      description:
+        `学年×${report.schoolYearCreated ? 1 : 0} · 年级×${report.gradesCreated} · 班级×${report.classesCreated}` +
+        (report.classesSkipped > 0 ? `（跳过重复 ${report.classesSkipped}）` : ''),
+    });
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-ink">年级与班级管理</h1>
-        <Button
-          variant="secondary"
-          icon={<Plus className="h-5 w-5" />}
-          onClick={() => openGradeEdit()}
-          disabled={!!gradeDraft}
-        >
-          新增年级
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            icon={<School className="h-5 w-5" />}
+            onClick={() => setQuickSetupOpen(true)}
+          >
+            快速建校
+          </Button>
+          <Button
+            variant="secondary"
+            icon={<Plus className="h-5 w-5" />}
+            onClick={() => openGradeEdit()}
+            disabled={!!gradeDraft}
+          >
+            新增年级
+          </Button>
+        </div>
       </div>
 
       {/* 学年维度选择器 */}
@@ -336,6 +369,14 @@ export function GradeClassManage(): JSX.Element {
           disabled={!!yearDraft}
         >
           新增学年
+        </Button>
+        <Button
+          variant="secondary"
+          size="md"
+          icon={<Copy className="h-4 w-4" />}
+          onClick={() => setCloneYearOpen(true)}
+        >
+          克隆学年结构
         </Button>
         {selectedYear && (
           <Button
@@ -471,14 +512,24 @@ export function GradeClassManage(): JSX.Element {
                       </span>
                     )}
                   </p>
-                  <Button
-                    variant="secondary"
-                    size="md"
-                    icon={<Plus className="h-4 w-4" />}
-                    onClick={() => openClassEdit()}
-                  >
-                    新增班级
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      icon={<ListPlus className="h-4 w-4" />}
+                      onClick={() => setBatchAddOpen(true)}
+                    >
+                      批量加班
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      icon={<Plus className="h-4 w-4" />}
+                      onClick={() => openClassEdit()}
+                    >
+                      新增班级
+                    </Button>
+                  </div>
                 </div>
                 {classesLoading && <p className="text-sm text-ink-muted">加载中…</p>}
                 {!classesLoading && classes.length === 0 && (
@@ -799,6 +850,27 @@ export function GradeClassManage(): JSX.Element {
           />
         </>
       )}
+
+      {/* 快速建校 / 克隆学年 / 批量加班 */}
+      <QuickSchoolSetupModal
+        open={quickSetupOpen}
+        onClose={() => setQuickSetupOpen(false)}
+        onDone={handleBatchDone}
+      />
+      <CloneYearModal
+        open={cloneYearOpen}
+        schoolYears={schoolYears}
+        onClose={() => setCloneYearOpen(false)}
+        onDone={handleBatchDone}
+      />
+      <BatchAddClassesModal
+        open={batchAddOpen}
+        grade={selectedGrade}
+        schoolYearId={selectedSchoolYearId ?? selectedClass?.schoolYearId ?? null}
+        existingClasses={classes}
+        onClose={() => setBatchAddOpen(false)}
+        onDone={handleBatchDone}
+      />
     </div>
   );
 }

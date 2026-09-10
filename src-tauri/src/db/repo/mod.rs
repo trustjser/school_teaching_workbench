@@ -5,6 +5,7 @@ pub mod checkin_repo;
 pub mod class_repo;
 pub mod classroom_repo;
 pub mod device_repo;
+pub mod directory_repo;
 pub mod grade_repo;
 pub mod package_repo;
 pub mod queue_repo;

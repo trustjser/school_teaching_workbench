@@ -231,6 +231,8 @@ pub fn run() {
             crate::commands::school_year_cmd::school_year_list,
             crate::commands::school_year_cmd::school_year_upsert,
             crate::commands::school_year_cmd::school_year_delete,
+            // ---- 目录批量（快速建校）----
+            crate::commands::directory_cmd::directory_batch_create,
             // ---- 同步 ----
             crate::commands::sync_cmd::sync_queue_list,
             crate::commands::sync_cmd::sync_flush,

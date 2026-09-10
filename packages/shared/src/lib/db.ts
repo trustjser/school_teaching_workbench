@@ -302,6 +302,68 @@ export async function schoolYearDelete(id: string): Promise<void> {
 }
 
 /* -------------------------------------------------------------------------- */
+/* directory batch（快速建校）                                                   */
+/* -------------------------------------------------------------------------- */
+
+/** 批量新建学年输入（按名幂等，已存在时复用） */
+export interface DirectoryBatchSchoolYearInput {
+  schoolYearName: string;
+  schoolYearNo?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  sortOrder?: number;
+}
+
+/** 年级输入：gradeId 非空时直接复用现有年级 */
+export interface DirectoryBatchGradeInput {
+  /** 批内关联键，classes[].gradeKey 引用它 */
+  key: string;
+  gradeId?: string | null;
+  gradeName: string;
+  gradeNo?: string | null;
+  sortOrder?: number;
+}
+
+/** 班级输入（gradeKey 引用 grades[].key） */
+export interface DirectoryBatchClassInput {
+  gradeKey: string;
+  className: string;
+  classNo?: string | null;
+  headTeacher?: string | null;
+  sortOrder?: number;
+}
+
+/** 批量创建请求：前端物化后的实体列表，Rust 侧单事务幂等落库 */
+export interface DirectoryBatchCreateRequest {
+  /** 同时新建学年；为空时必须提供 schoolYearId */
+  schoolYear?: DirectoryBatchSchoolYearInput | null;
+  schoolYearId?: string | null;
+  grades: DirectoryBatchGradeInput[];
+  classes: DirectoryBatchClassInput[];
+}
+
+export interface DirectoryBatchCreateReport {
+  schoolYearId: string;
+  schoolYearCreated: boolean;
+  gradesCreated: number;
+  gradesReused: number;
+  classesCreated: number;
+  classesSkipped: number;
+}
+
+/**
+ * 批量创建学年 / 年级 / 班级（教务端专用）。
+ *
+ * 幂等：学年按名、年级按 gradeId 或名、班级按 (学年, 年级, 班号/班名) 复用，
+ * 重复执行不会产生重复目录；整批在单一事务内完成，任一输入非法整体回滚。
+ */
+export async function directoryBatchCreate(
+  request: DirectoryBatchCreateRequest,
+): Promise<DirectoryBatchCreateReport> {
+  return invokeCmd<DirectoryBatchCreateReport>('directory_batch_create', { request });
+}
+
+/* -------------------------------------------------------------------------- */
 /* checkin                                                                     */
 /* -------------------------------------------------------------------------- */
 
