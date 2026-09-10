@@ -30,6 +30,14 @@ export type TaskScope = 'class' | 'grade' | 'school';
 /** 任务状态 */
 export type TaskStatus = 'draft' | 'active' | 'closed' | 'archived';
 
+/**
+ * 任务生命周期中**可手动标记**的两态。
+ *
+ * `draft` / `archived` 仍保留在 `TaskStatus` 与数据库 CHECK 中（历史数据兼容），
+ * 但当前没有任何写入路径；界面只暴露「进行中 ⇄ 已结束」。
+ */
+export type TaskLifecycleStatus = Extract<TaskStatus, 'active' | 'closed'>;
+
 /** 矩阵视图模式 */
 export type ViewMode = 'grid' | 'table';
 

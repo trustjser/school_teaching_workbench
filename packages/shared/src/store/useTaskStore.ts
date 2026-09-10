@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { CustomTask, TaskRecord, TaskStatusNode } from '@shared/types/models';
+import type { TaskLifecycleStatus } from '@shared/types/enums';
 import type { Page, TaskCompletionRow, TaskProgressRow } from '@shared/types/api';
 import {
   taskCompletionStats,
@@ -14,6 +15,7 @@ import {
   taskProgressList,
   taskRecordUpsert,
   taskRecordsBatchUpsert,
+  taskSetStatus,
   taskUpsert,
 } from '@shared/lib/db';
 import { useAppStore } from './useAppStore';
@@ -48,6 +50,7 @@ interface TaskState {
   setViewMode: (mode: 'grid' | 'table') => void;
 
   upsertTask: (task: Partial<CustomTask> & { title: string }) => Promise<CustomTask>;
+  setTaskStatus: (taskId: string, status: TaskLifecycleStatus) => Promise<void>;
   removeTask: (taskId: string) => Promise<void>;
   saveNodes: (taskId: string, nodes: TaskStatusNode[]) => Promise<TaskStatusNode[]>;
   deleteNode: (taskId: string, nodeId: string) => Promise<void>;
@@ -169,6 +172,41 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       return saved;
     } catch (err) {
       app.toastError(err, '保存任务失败');
+      throw err;
+    }
+  },
+
+  /**
+   * 标记任务状态（进行中 ⇄ 已结束）。
+   *
+   * 乐观更新：先本地改状态让按钮即时反馈，失败时回滚并 toast。
+   * 状态变更会由后端重新标记为待同步，无需前端干预。
+   */
+  setTaskStatus: async (taskId, status) => {
+    const app = useAppStore.getState();
+    const snapshotTasks = get().tasks;
+    const snapshotPage = get().taskPage;
+    const patch = (task: CustomTask): CustomTask => (task.id === taskId ? { ...task, status } : task);
+    set((s) => ({
+      tasks: s.tasks.map(patch),
+      taskPage: s.taskPage ? { ...s.taskPage, items: s.taskPage.items.map(patch) } : s.taskPage,
+    }));
+    try {
+      const saved = await taskSetStatus(taskId, status);
+      // 以服务端返回为准（updated_at / dirty 等字段由后端刷新）。
+      set((s) => ({
+        tasks: s.tasks.map((t) => (t.id === taskId ? saved : t)),
+        taskPage: s.taskPage
+          ? { ...s.taskPage, items: s.taskPage.items.map((t) => (t.id === taskId ? saved : t)) }
+          : s.taskPage,
+      }));
+      app.pushToast({
+        kind: 'success',
+        title: status === 'closed' ? '任务已结束' : '任务已重新开始',
+      });
+    } catch (err) {
+      set({ tasks: snapshotTasks, taskPage: snapshotPage });
+      app.toastError(err, '标记任务状态失败');
       throw err;
     }
   },

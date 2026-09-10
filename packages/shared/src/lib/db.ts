@@ -1,6 +1,13 @@
 import { invokeCmd } from './tauri';
 import { safeJsonParse } from './format';
-import type { AppMode, CheckinPeriod, CheckinState, StudentStatus, SyncState } from '@shared/types/enums';
+import type {
+  AppMode,
+  CheckinPeriod,
+  CheckinState,
+  StudentStatus,
+  SyncState,
+  TaskLifecycleStatus,
+} from '@shared/types/enums';
 import type {
   AppRuntimeSettings,
   AppSetting,
@@ -370,6 +377,17 @@ export async function taskPage(
 
 export async function taskUpsert(task: Partial<CustomTask> & { title: string }): Promise<CustomTask> {
   return invokeCmd<CustomTask>('task_upsert', { task });
+}
+
+/**
+ * 标记任务状态（进行中 ⇄ 已结束）。
+ * 只传状态，不回传完整任务对象——Rust 侧只更新 status 一列。
+ */
+export async function taskSetStatus(
+  taskId: string,
+  status: TaskLifecycleStatus,
+): Promise<CustomTask> {
+  return invokeCmd<CustomTask>('task_set_status', { taskId, status });
 }
 
 export async function taskDelete(id: string): Promise<void> {

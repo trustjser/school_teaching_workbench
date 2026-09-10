@@ -11,6 +11,7 @@ import { Toggle } from '@shared/components/ui/Toggle';
 import { Modal } from '@shared/components/ui/Modal';
 import { Table, type TableColumn } from '@shared/components/ui/Table';
 import { SkeletonRows } from '@shared/components/ui/Skeleton';
+import { ConfirmDialog } from '@shared/components/ui/ConfirmDialog';
 import {
   TASK_TYPE_OPTIONS,
   TASK_STATUS_OPTIONS,
@@ -33,6 +34,7 @@ export function TaskManage(): JSX.Element {
   const loadMatrix = useTaskStore((s) => s.loadMatrix);
   const setCurrentTask = useTaskStore((s) => s.setCurrentTask);
   const upsertTask = useTaskStore((s) => s.upsertTask);
+  const setTaskStatus = useTaskStore((s) => s.setTaskStatus);
   const removeTask = useTaskStore((s) => s.removeTask);
   const saveNodes = useTaskStore((s) => s.saveNodes);
   const deleteNode = useTaskStore((s) => s.deleteNode);
@@ -40,6 +42,9 @@ export function TaskManage(): JSX.Element {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editNodesOpen, setEditNodesOpen] = useState(false);
+  /** 待切换状态的任务：非空即弹出二次确认 */
+  const [statusTarget, setStatusTarget] = useState<CustomTask | null>(null);
+  const [statusSaving, setStatusSaving] = useState(false);
   const [booting, setBooting] = useState(true);
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -94,6 +99,21 @@ export function TaskManage(): JSX.Element {
     pushToast({ kind: 'success', title: '任务已创建', description: `已生成 ${initNodes.length} 个状态节点` });
   };
 
+  const statusNext: 'active' | 'closed' = statusTarget?.status === 'closed' ? 'active' : 'closed';
+
+  const applyStatus = async (): Promise<void> => {
+    if (!statusTarget) return;
+    setStatusSaving(true);
+    try {
+      await setTaskStatus(statusTarget.id, statusNext);
+    } catch {
+      // store 已回滚本地状态并弹出错误 toast，这里只需关闭弹窗。
+    } finally {
+      setStatusSaving(false);
+      setStatusTarget(null);
+    }
+  };
+
   const columns: TableColumn<CustomTask>[] = [
     { key: 'title', header: '任务', accessor: (t) => t.title },
     {
@@ -117,8 +137,10 @@ export function TaskManage(): JSX.Element {
       header: '操作',
       align: 'right',
       render: (t) => {
-        // 教务下发的任务由教务端定义状态节点，班级端只能执行、不能改节点或删除。
+        // 教务下发的任务由教务端定义状态节点，班级端只能执行、不能改节点或删除；
+        // 但「这个任务我们班做完了没有」是班级侧的事实判断，因此状态仍可标记。
         const isBroadcast = t.source === 'broadcast';
+        const isClosed = t.status === 'closed';
         return (
           <div className="flex justify-end gap-2">
             {!isBroadcast && (
@@ -134,6 +156,13 @@ export function TaskManage(): JSX.Element {
               </Button>
             )}
             <Link to={`/matrix?task=${encodeURIComponent(t.id)}`}><Button size="md" variant="secondary">打开看板</Button></Link>
+            <Button
+              size="md"
+              variant={isClosed ? 'secondary' : 'ghost'}
+              onClick={() => setStatusTarget(t)}
+            >
+              {isClosed ? '重新开始' : '结束任务'}
+            </Button>
             {isBroadcast ? (
               <span className="px-2 py-2 text-sm font-semibold text-ink-muted">教务下发 · 不可删除</span>
             ) : (
@@ -183,6 +212,24 @@ export function TaskManage(): JSX.Element {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onSubmit={handleCreate}
+      />
+      <ConfirmDialog
+        open={statusTarget !== null}
+        title={statusNext === 'closed' ? '结束任务' : '重新开始任务'}
+        message={
+          statusNext === 'closed'
+            ? `确定要结束「${statusTarget?.title ?? ''}」吗？`
+            : `确定要把「${statusTarget?.title ?? ''}」重新标记为进行中吗？`
+        }
+        detail={
+          statusNext === 'closed'
+            ? '结束后任务仍保留在列表中，学生记录也仍可继续标记；如需再执行，可随时重新开始。'
+            : '任务将回到「进行中」状态。'
+        }
+        confirmText={statusNext === 'closed' ? '结束任务' : '重新开始'}
+        loading={statusSaving}
+        onConfirm={() => void applyStatus()}
+        onCancel={() => setStatusTarget(null)}
       />
       <NodeEditorModal
         open={editNodesOpen}

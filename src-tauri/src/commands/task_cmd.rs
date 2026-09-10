@@ -64,6 +64,31 @@ pub async fn task_upsert(
     Ok(saved)
 }
 
+/// 标记任务状态（进行中 ⇄ 已结束），并把变更写入待发队列。
+///
+/// 只改动 `status` 一列，因此不需要前端回传完整任务对象。
+#[tauri::command]
+pub async fn task_set_status(
+    state: State<'_, Arc<AppState>>,
+    task_id: String,
+    status: String,
+) -> AppResult<CustomTask> {
+    let saved = task_repo::set_status(&state.pool, &task_id, &status).await?;
+    if should_sync_task(&state, &saved).await {
+        outbox::enqueue_entity(
+            &state.pool,
+            "custom_task",
+            &saved.id,
+            "upsert",
+            &saved,
+            None,
+            None,
+        )
+        .await?;
+    }
+    Ok(saved)
+}
+
 /// 新增或修改状态节点（2–4 节点约束在服务内）。
 #[tauri::command]
 pub async fn task_node_upsert(

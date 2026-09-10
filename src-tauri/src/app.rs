@@ -241,6 +241,7 @@ pub fn run() {
             crate::commands::task_cmd::task_list,
             crate::commands::task_cmd::task_page,
             crate::commands::task_cmd::task_upsert,
+            crate::commands::task_cmd::task_set_status,
             crate::commands::task_cmd::task_node_upsert,
             crate::commands::task_cmd::task_node_delete,
             crate::commands::task_cmd::task_node_list,

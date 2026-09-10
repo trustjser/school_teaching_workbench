@@ -169,6 +169,45 @@ pub async fn upsert(pool: &SqlitePool, mut task: CustomTask) -> AppResult<Custom
     Ok(task)
 }
 
+/// 任务生命周期允许手动写入的取值：进行中 ⇄ 已结束。
+///
+/// `draft` / `archived` 仍保留在数据库 CHECK 里以兼容历史数据，但当前没有任何
+/// 代码路径会写入它们——状态标记回答的是「这个任务做完了没有」，只在这两态之间切换。
+pub const TASK_LIFECYCLE_STATUSES: [&str; 2] = ["active", "closed"];
+
+/// 只更新任务状态（进行中 ⇄ 已结束），并把任务重新标记为待同步。
+///
+/// 刻意不复用 `upsert`：`upsert` 是整行覆盖，让前端为了改一个状态而回传完整任务
+/// 对象，任何过期字段都会把标题、节点、排序一起写坏。
+pub async fn set_status(pool: &SqlitePool, id: &str, status: &str) -> AppResult<CustomTask> {
+    if !TASK_LIFECYCLE_STATUSES.contains(&status) {
+        return Err(AppError::validation(format!(
+            "任务状态只允许 active（进行中）或 closed（已结束），收到 `{}`",
+            status
+        )));
+    }
+
+    let now = now_ms();
+    let affected = sqlx::query(
+        "UPDATE custom_tasks SET status = ?, updated_at = ?, sync_state = 'pending', dirty = 1
+         WHERE id = ? AND deleted_at IS NULL",
+    )
+    .bind(status)
+    .bind(now)
+    .bind(id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    if affected == 0 {
+        return Err(AppError::not_found("任务不存在或已删除"));
+    }
+
+    get(pool, id)
+        .await?
+        .ok_or_else(|| AppError::not_found("任务不存在或已删除"))
+}
+
 /// 软删任务（级联由外键 `ON DELETE CASCADE` 的语义在应用层处理：节点与记录一并软删）。
 pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
     if let Some(source) = sqlx::query_scalar::<_, String>(
@@ -790,8 +829,135 @@ pub async fn mark_record_synced(pool: &SqlitePool, record_id: &str) -> AppResult
 
 #[cfg(test)]
 mod tests {
-    use super::{page, progress_list};
-    use crate::db::create_pool;
+    use super::{get, page, progress_list, set_status, upsert};
+    use crate::db::models::CustomTask;
+    use crate::db::{create_pool, run_migrations};
+    use sqlx::SqlitePool;
+
+    /// 用真实迁移建库：`custom_tasks.status` 的 CHECK 约束必须参与验证。
+    async fn migrated_pool() -> (SqlitePool, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("lanwb_task_status_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        let pool = create_pool(&dir.join("test.db")).await.expect("建池");
+        run_migrations(&pool).await.expect("跑迁移");
+        (pool, dir)
+    }
+
+    /// 造一个已经同步完成的本地任务：dirty=0 / sync_state='synced'，
+    /// 用来验证状态变更确实把它重新置为待同步。
+    async fn seed_synced_task(pool: &SqlitePool, id: &str, source: &str) -> CustomTask {
+        let saved = upsert(
+            pool,
+            CustomTask {
+                id: id.to_string(),
+                title: "听写".to_string(),
+                description: None,
+                task_type: "custom".to_string(),
+                scope: "class".to_string(),
+                grade: None,
+                class_name: Some("一年级1班".to_string()),
+                due_at: None,
+                status: "active".to_string(),
+                view_mode: "grid".to_string(),
+                score_enabled: false,
+                note_enabled: false,
+                default_node_id: None,
+                owner_device_id: None,
+                broadcast_task_id: None,
+                source: source.to_string(),
+                sort_order: 0,
+                created_at: 0,
+                updated_at: 0,
+                deleted_at: None,
+                sync_state: "pending".to_string(),
+                dirty: true,
+            },
+        )
+        .await
+        .expect("建任务");
+        sqlx::query("UPDATE custom_tasks SET dirty = 0, sync_state = 'synced' WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await
+            .expect("置为已同步");
+        saved
+    }
+
+    /// 回归：任务状态必须在「进行中 ⇄ 已结束」之间可切换，
+    /// 且每次变更都要把任务重新标记为待同步（否则教务端永远看不到状态变化）。
+    #[tokio::test]
+    async fn set_status_toggles_between_active_and_closed_and_marks_dirty() {
+        let (pool, dir) = migrated_pool().await;
+        seed_synced_task(&pool, "task-local", "local").await;
+
+        let closed = set_status(&pool, "task-local", "closed")
+            .await
+            .expect("结束任务");
+        assert_eq!(closed.status, "closed");
+        assert!(closed.dirty, "状态变更后必须置脏");
+        assert_eq!(closed.sync_state, "pending", "状态变更后必须回到待同步");
+        assert!(closed.updated_at > 0, "updated_at 应被刷新");
+
+        let reopened = set_status(&pool, "task-local", "active")
+            .await
+            .expect("重新开始");
+        assert_eq!(reopened.status, "active");
+
+        // 只改这三列：标题等业务字段不受影响。
+        let after = get(&pool, "task-local").await.expect("读回任务").expect("存在");
+        assert_eq!(after.title, "听写");
+        assert_eq!(after.scope, "class");
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// 只允许生命周期两态：draft / archived / 任意脏值都必须被拒绝，
+    /// 并返回 ERR_VALIDATION 而不是数据库层的约束错误。
+    #[tokio::test]
+    async fn set_status_rejects_values_outside_the_lifecycle_pair() {
+        let (pool, dir) = migrated_pool().await;
+        seed_synced_task(&pool, "task-local", "local").await;
+
+        for bad in ["draft", "archived", "bogus", "", "ACTIVE"] {
+            let err = set_status(&pool, "task-local", bad)
+                .await
+                .expect_err(&format!("{} 应被拒绝", bad));
+            assert_eq!(err.code, crate::error::ErrorCode::Validation, "{} 应返回校验错误", bad);
+        }
+
+        // 被拒绝的调用不能留下副作用。
+        let after = get(&pool, "task-local").await.expect("读回任务").expect("存在");
+        assert_eq!(after.status, "active");
+        assert_eq!(after.sync_state, "synced", "非法调用不应把任务置脏");
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// 任务不存在或已软删时返回 ERR_NOT_FOUND，而不是静默成功。
+    #[tokio::test]
+    async fn set_status_reports_not_found_for_missing_or_deleted_task() {
+        let (pool, dir) = migrated_pool().await;
+        seed_synced_task(&pool, "task-local", "local").await;
+
+        let err = set_status(&pool, "task-missing", "closed")
+            .await
+            .expect_err("不存在的任务应报错");
+        assert_eq!(err.code, crate::error::ErrorCode::NotFound);
+
+        sqlx::query("UPDATE custom_tasks SET deleted_at = 1 WHERE id = 'task-local'")
+            .execute(&pool)
+            .await
+            .expect("软删");
+        let err = set_status(&pool, "task-local", "closed")
+            .await
+            .expect_err("已软删的任务应报错");
+        assert_eq!(err.code, crate::error::ErrorCode::NotFound);
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
 
     #[tokio::test]
     async fn progress_list_aggregates_by_class_and_applies_filters() {

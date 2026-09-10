@@ -38,9 +38,6 @@ export function ClientHome(): JSX.Element {
             <p className="mt-0.5 text-ink-soft">先完成考勤，再处理待办任务和通知资料。</p>
           </div>
         </div>
-        <span className="rounded-full border border-surface-border bg-surface-muted px-3 py-1.5 text-sm text-ink-muted">
-          学生名册由教务处统一下发，无需导入
-        </span>
       </section>
 
       <Stagger className="grid grid-cols-2 gap-4 board:grid-cols-4" step={70}>
