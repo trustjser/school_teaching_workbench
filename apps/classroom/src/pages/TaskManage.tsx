@@ -45,6 +45,9 @@ export function TaskManage(): JSX.Element {
   /** 待切换状态的任务：非空即弹出二次确认 */
   const [statusTarget, setStatusTarget] = useState<CustomTask | null>(null);
   const [statusSaving, setStatusSaving] = useState(false);
+  /** 待删除的任务：非空即弹出二次确认 */
+  const [deleteTarget, setDeleteTarget] = useState<CustomTask | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [booting, setBooting] = useState(true);
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -114,6 +117,19 @@ export function TaskManage(): JSX.Element {
     }
   };
 
+  const confirmDelete = async (): Promise<void> => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await removeTask(deleteTarget.id);
+    } catch {
+      // store 已回滚并 toast。
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
+    }
+  };
+
   const columns: TableColumn<CustomTask>[] = [
     { key: 'title', header: '任务', accessor: (t) => t.title },
     {
@@ -166,7 +182,7 @@ export function TaskManage(): JSX.Element {
             {isBroadcast ? (
               <span className="px-2 py-2 text-sm font-semibold text-ink-muted">教务下发 · 不可删除</span>
             ) : (
-              <Button size="md" variant="danger" onClick={() => void removeTask(t.id)}>删除</Button>
+              <Button size="md" variant="danger" onClick={() => setDeleteTarget(t)}>删除</Button>
             )}
           </div>
         );
@@ -230,6 +246,17 @@ export function TaskManage(): JSX.Element {
         loading={statusSaving}
         onConfirm={() => void applyStatus()}
         onCancel={() => setStatusTarget(null)}
+      />
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="删除任务"
+        message={`确定要删除「${deleteTarget?.title ?? ''}」吗？`}
+        detail="该任务的状态节点与学生已标记的记录会一并删除，且无法恢复。"
+        confirmText="删除"
+        danger
+        loading={deleting}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setDeleteTarget(null)}
       />
       <NodeEditorModal
         open={editNodesOpen}

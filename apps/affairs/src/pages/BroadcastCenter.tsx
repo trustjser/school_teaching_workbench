@@ -45,6 +45,8 @@ export function BroadcastCenter(): JSX.Element {
   const [booting, setBooting] = useState(true);
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  /** 是否处于筛选态：决定空状态是「没有数据」还是「没有匹配」 */
+  const hasFilter = keyword.trim() !== '' || statusFilter !== '';
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -164,7 +166,34 @@ export function BroadcastCenter(): JSX.Element {
         {booting && outbox.length === 0 ? (
           <SkeletonRows rows={5} />
         ) : outbox.length === 0 ? (
-          <EmptyState title="尚未下发任务" description="点击「新建并下发」向班级 / 年级 / 全校推送任务。" />
+          hasFilter ? (
+            <EmptyState
+              title="没有符合筛选条件的任务"
+              description="当前的关键词或状态筛选没有匹配到下发任务，可以清空条件后重新查看。"
+              action={
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setKeyword('');
+                    setStatusFilter('');
+                    setPage(1);
+                  }}
+                >
+                  清空筛选
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              title="还没有下发过任务"
+              description="点击「新建并下发」，选择班级、年级或全校后推送任务；班级端收到会自动生成待办，处理进度通过回执回流到这里。"
+              action={
+                <Button icon={<Plus className="h-5 w-5" />} onClick={() => setCreateOpen(true)}>
+                  新建并下发
+                </Button>
+              }
+            />
+          )
         ) : (
           <Table columns={columns} data={outbox} rowKey={(t) => t.id} />
         )}

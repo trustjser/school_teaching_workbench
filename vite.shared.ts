@@ -26,6 +26,10 @@ export function createViteConfig(options: CreateViteConfigOptions): UserConfig {
 
   return defineConfig({
     root: fileURLToPath(new URL(options.root, import.meta.url)),
+    // 静态资源统一放在仓库根 public/。不显式指定的话 Vite 会去
+    // `<root>/public`（即 apps/<target>/public）找，那里并不存在，
+    // 于是 EmptyState 的插画与 favicon 全部 404。
+    publicDir: fileURLToPath(new URL('./public', import.meta.url)),
     plugins: [react()],
     define: {
       // 端标识在构建期注入：前端入口只读该值，运行期不可更改。
