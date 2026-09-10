@@ -5,14 +5,18 @@
   "description": "局域网分布式教务与班级协同工作台 (LAN School-Affairs & Class Collaboration Workbench)",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
+    "dev:affairs": "vite --config apps/affairs/vite.config.ts",
+    "dev:classroom": "vite --config apps/classroom/vite.config.ts",
+    "build:affairs": "tsc --noEmit && vite build --config apps/affairs/vite.config.ts",
+    "build:classroom": "tsc --noEmit && vite build --config apps/classroom/vite.config.ts",
     "typecheck": "tsc --noEmit",
     "check:boundaries": "node scripts/check-app-boundaries.mjs",
+    "check:build-targets": "node scripts/check-build-targets.mjs",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:dev:affairs": "tauri dev --config src-tauri/tauri.affairs.conf.json --config src-tauri/tauri.affairs.dev.conf.json",
+    "tauri:dev:classroom": "tauri dev --config src-tauri/tauri.classroom.conf.json --config src-tauri/tauri.classroom.dev.conf.json",
+    "tauri:build:affairs": "tauri build --config src-tauri/tauri.affairs.conf.json",
+    "tauri:build:classroom": "tauri build --config src-tauri/tauri.classroom.conf.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

@@ -1,19 +1,19 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "LAN Workbench",
+  "productName": "教务端",
   "version": "0.1.0",
-  "identifier": "cn.yipaike.lanworkbench",
+  "identifier": "cn.yipaike.lanworkbench.affairs",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run dev:affairs",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
-    "frontendDist": "../dist"
+    "beforeBuildCommand": "npm run build:affairs",
+    "frontendDist": "../dist/affairs"
   },
   "app": {
     "windows": [
       {
         "label": "main",
-        "title": "局域网教务与班级协同工作台",
+        "title": "教务端 · 局域网教务协同工作台",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
