@@ -122,6 +122,9 @@ export interface ExceptionStudentRow {
   grade: string | null;
   state: CheckinState;
   date: string;
+  /** 时段（当前固定为全天） */
+  period: string;
+  /** 班级端登记的备注 */
   note: string | null;
 }
 

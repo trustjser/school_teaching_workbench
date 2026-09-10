@@ -11,11 +11,20 @@ import { EmptyState } from '@shared/components/ui/EmptyState';
 import { StatCard } from '@shared/components/ui/StatCard';
 import { SkeletonStatCard } from '@shared/components/ui/Skeleton';
 import { Stagger } from '@shared/components/motion/Reveal';
+import { CHECKIN_STATUS_META } from '@shared/constants/status';
 import { checkinSchoolSummary, checkinClassAttendance, checkinExceptionStudents } from '@shared/lib/db';
 import { toDateKey, formatPercent } from '@shared/lib/format';
 import type { SchoolSummary, ClassAttendanceRow, ExceptionStudentRow } from '@shared/types/api';
+import type { CheckinState } from '@shared/types/enums';
 import { useTauriEventHandler } from '@shared/hooks/useTauriEvent';
 import { TAURI_EVENTS } from '@shared/types/events';
+
+/** 异常状态 → 徽标配色（与 CHECKIN_STATUS_META 的中文文案配套） */
+const EXCEPTION_TONE: Partial<Record<CheckinState, 'danger' | 'warning' | 'orange' | 'neutral'>> = {
+  absent: 'danger',
+  leave: 'warning',
+  late: 'orange',
+};
 
 /** 考勤大屏（教务处端）：全校汇总 + 按班级明细 + 异常学生名单 */
 export function AttendanceBoard(): JSX.Element {
@@ -83,13 +92,30 @@ export function AttendanceBoard(): JSX.Element {
     {
       key: 'state',
       header: '状态',
-      render: (e) => (
-        <Badge tone={e.state === 'absent' ? 'danger' : 'warning'}>
-          {e.state === 'absent' ? '缺勤' : e.state === 'leave' ? '请假' : e.state}
-        </Badge>
-      ),
+      render: (e) => {
+        // 统一走考勤状态字典，避免 raw 值（如 late）直接透到界面上。
+        const meta = CHECKIN_STATUS_META[e.state];
+        return (
+          <Badge tone={EXCEPTION_TONE[e.state] ?? 'neutral'} emoji={meta?.emoji}>
+            {meta?.label ?? e.state}
+          </Badge>
+        );
+      },
     },
-    { key: 'note', header: '备注', accessor: (e) => e.note ?? '—' },
+    { key: 'period', header: '时段', accessor: (e) => e.period },
+    {
+      key: 'note',
+      header: '备注',
+      render: (e) => {
+        const note = e.note?.trim();
+        if (!note) return <span className="text-ink-muted">—</span>;
+        return (
+          <span className="block max-w-[22rem] truncate" title={note}>
+            {note}
+          </span>
+        );
+      },
+    },
   ];
 
   return (

@@ -1223,6 +1223,8 @@ pub struct ExceptionStudentRow {
     pub date: String,
     /// 时段。
     pub period: String,
+    /// 班级端登记的备注（请假 / 迟到 / 跟进说明），未填为 `None`。
+    pub note: Option<String>,
 }
 
 /// 任务完成率统计行（教务处端统计与导出）。

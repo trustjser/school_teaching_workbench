@@ -228,30 +228,5 @@ pub async fn checkin_exception_students(
     date: String,
     class_name: Option<String>,
 ) -> AppResult<Vec<ExceptionStudentRow>> {
-    let rows = sqlx::query_as::<_, ExceptionStudentRow>(
-        "WITH latest AS (
-            SELECT c.* FROM checkin_records c
-            WHERE c.deleted_at IS NULL
-              AND NOT EXISTS (
-                SELECT 1 FROM checkin_records newer
-                WHERE newer.student_id = c.student_id AND newer.checkin_date = c.checkin_date
-                  AND newer.deleted_at IS NULL
-                  AND (newer.updated_at > c.updated_at OR (newer.updated_at = c.updated_at AND newer.id > c.id))
-              )
-         )
-         SELECT c.student_id AS student_id, s.student_no AS student_no, s.name AS name,
-                s.grade AS grade, s.class_name AS class_name, c.state AS state,
-                c.checkin_date AS date, c.period AS period
-         FROM latest c JOIN students s ON s.id=c.student_id
-         WHERE c.checkin_date = ? AND s.deleted_at IS NULL AND s.status<>'transferred'
-           AND c.state IN ('absent','leave','late')
-           AND (? IS NULL OR s.class_name = ?)
-         ORDER BY s.class_name, s.student_no",
-    )
-    .bind(&date)
-    .bind(&class_name)
-    .bind(&class_name)
-    .fetch_all(&state.pool)
-    .await?;
-    Ok(rows)
+    crate::db::repo::checkin_repo::exception_students(&state.pool, &date, class_name.as_deref()).await
 }

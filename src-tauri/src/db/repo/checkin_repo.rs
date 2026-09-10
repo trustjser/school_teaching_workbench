@@ -2,9 +2,47 @@
 
 use sqlx::SqlitePool;
 
-use crate::db::models::{CheckinRecord, DailySummary};
+use crate::db::models::{CheckinRecord, DailySummary, ExceptionStudentRow};
 use crate::db::repo::{decide_merge, merged_sync_state, new_id, now_ms, MergeOutcome};
 use crate::error::{AppError, AppResult};
+
+/// 异常学生名单（缺勤 / 请假 / 迟到）查询。
+///
+/// 取每个学生在 `date` 当天**最新**的一条考勤记录（按 `updated_at` 再按 `id` 兜底），
+/// 并带出班级端登记的 `note`。教务处端考勤大屏与 xlsx 导出共用这一份 SQL，
+/// 避免两处实现漂移（曾因其中一处漏 select `note` 导致大屏备注列恒为空）。
+pub async fn exception_students(
+    pool: &SqlitePool,
+    date: &str,
+    class_name: Option<&str>,
+) -> AppResult<Vec<ExceptionStudentRow>> {
+    let rows = sqlx::query_as::<_, ExceptionStudentRow>(
+        "WITH latest AS (
+            SELECT c.* FROM checkin_records c
+            WHERE c.deleted_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM checkin_records newer
+                WHERE newer.student_id = c.student_id AND newer.checkin_date = c.checkin_date
+                  AND newer.deleted_at IS NULL
+                  AND (newer.updated_at > c.updated_at OR (newer.updated_at = c.updated_at AND newer.id > c.id))
+              )
+         )
+         SELECT c.student_id AS student_id, s.student_no AS student_no, s.name AS name,
+                s.grade AS grade, s.class_name AS class_name, c.state AS state,
+                c.checkin_date AS date, c.period AS period, c.note AS note
+         FROM latest c JOIN students s ON s.id=c.student_id
+         WHERE c.checkin_date = ? AND s.deleted_at IS NULL AND s.status<>'transferred'
+           AND c.state IN ('absent','leave','late')
+           AND (? IS NULL OR s.class_name = ?)
+         ORDER BY s.class_name, s.student_no",
+    )
+    .bind(date)
+    .bind(class_name)
+    .bind(class_name)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
 
 /// 写入或更新一条考勤记录（按 `(student_id, date, period)` 唯一）。
 #[allow(clippy::too_many_arguments)]
@@ -312,7 +350,100 @@ pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::present_count;
+    use super::{exception_students, present_count};
+    use crate::db::{create_pool, run_migrations};
+    use sqlx::SqlitePool;
+
+    /// 播撒两名正常学生 + 一名已转出学生，以及若干考勤记录。
+    async fn seed(pool: &SqlitePool) {
+        sqlx::query(
+            "INSERT INTO students (id, student_no, name, gender, class_name, status, created_at, updated_at)
+             VALUES ('s1','001','张三','male','三年级二班','active',1,1),
+                    ('s2','002','李四','male','三年级二班','active',1,1),
+                    ('s3','003','王五','male','三年级一班','active',1,1),
+                    ('s4','004','赵六','male','三年级二班','transferred',1,1)",
+        )
+        .execute(pool)
+        .await
+        .expect("插入学生");
+
+        // 张三同一天两条记录：较早的 am 为出勤（非异常），较晚的 all 为迟到并带备注。
+        // 大屏只应看到最新的那条，且备注必须随行返回。
+        sqlx::query(
+            "INSERT INTO checkin_records (id, student_id, checkin_date, period, state, note, created_at, updated_at)
+             VALUES ('c1','s1','2026-09-10','am','present',NULL,100,100),
+                    ('c2','s1','2026-09-10','all','late','迟到 10 分钟',100,200),
+                    ('c3','s2','2026-09-10','all','absent',NULL,100,100),
+                    ('c4','s3','2026-09-10','all','leave','请假：发烧，家长已告知',100,100),
+                    ('c5','s4','2026-09-10','all','absent','已转出，不应出现',100,100)",
+        )
+        .execute(pool)
+        .await
+        .expect("插入考勤记录");
+    }
+
+    async fn temp_pool() -> (SqlitePool, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("lanwb_exc_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        let pool = create_pool(&dir.join("test.db")).await.expect("建池");
+        run_migrations(&pool).await.expect("跑迁移");
+        (pool, dir)
+    }
+
+    /// 回归：异常名单必须带上班级端填写的备注，且迟到属于异常集合。
+    ///
+    /// 曾经的缺陷是 `ExceptionStudentRow` 与查询都漏了 `note`，前端拿到 `undefined`
+    /// 后备注列恒显示 `—`，且 `late` 在前端只做了 absent/leave 的中文映射、原样透出
+    /// 英文 `late`。此用例锁住后端一侧。
+    #[tokio::test]
+    async fn exception_students_returns_note_and_includes_late() {
+        let (pool, dir) = temp_pool().await;
+        seed(&pool).await;
+
+        let rows = exception_students(&pool, "2026-09-10", None)
+            .await
+            .expect("查询异常名单");
+
+        // 转出学生被排除；张三只保留最新一条（late），不出现 am 的出勤记录。
+        assert_eq!(rows.len(), 3, "应只返回 3 条异常：{:?}", rows);
+
+        let zhang = rows.iter().find(|r| r.student_no == "001").expect("张三");
+        assert_eq!(zhang.state, "late", "同日多条记录应取最新一条");
+        assert_eq!(zhang.note.as_deref(), Some("迟到 10 分钟"));
+
+        let li = rows.iter().find(|r| r.student_no == "002").expect("李四");
+        assert_eq!(li.state, "absent");
+        assert_eq!(li.note, None, "未填备注应为 None，由前端渲染为 —");
+
+        let wang = rows.iter().find(|r| r.student_no == "003").expect("王五");
+        assert_eq!(wang.state, "leave");
+        assert_eq!(wang.note.as_deref(), Some("请假：发烧，家长已告知"));
+
+        assert!(
+            rows.iter().all(|r| r.student_no != "004"),
+            "已转出学生不应出现在异常名单中"
+        );
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// 按班级过滤时只返回该班学生。
+    #[tokio::test]
+    async fn exception_students_filters_by_class_name() {
+        let (pool, dir) = temp_pool().await;
+        seed(&pool).await;
+
+        let rows = exception_students(&pool, "2026-09-10", Some("三年级一班"))
+            .await
+            .expect("按班级查询异常名单");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].student_no, "003");
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
 
     #[test]
     fn present_count_does_not_double_count_explicit_present_records() {

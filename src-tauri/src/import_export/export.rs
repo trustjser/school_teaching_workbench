@@ -190,7 +190,7 @@ fn write_exception_sheet(
     fmt: &Format,
     rows: &[ExceptionStudentRow],
 ) -> AppResult<()> {
-    let headers = ["学号", "姓名", "年级", "班级", "状态", "日期", "时段"];
+    let headers = ["学号", "姓名", "年级", "班级", "状态", "日期", "时段", "备注"];
     for (c, h) in headers.iter().copied().enumerate() {
         ws.write_string_with_format(0, c as u16, h, fmt)
             .map_err(xlsx_err)?;
@@ -206,6 +206,8 @@ fn write_exception_sheet(
         ws.write_string(r, 4, &er.state).map_err(xlsx_err)?;
         ws.write_string(r, 5, &er.date).map_err(xlsx_err)?;
         ws.write_string(r, 6, &er.period).map_err(xlsx_err)?;
+        ws.write_string(r, 7, er.note.as_deref().unwrap_or(""))
+            .map_err(xlsx_err)?;
     }
     Ok(())
 }
@@ -299,33 +301,8 @@ async fn exception_students(
     date: &str,
     class_name: Option<&str>,
 ) -> AppResult<Vec<ExceptionStudentRow>> {
-    let class = class_name.map(|c| c.to_string());
-    let rows = sqlx::query_as::<_, ExceptionStudentRow>(
-        "WITH latest AS (
-            SELECT c.* FROM checkin_records c
-            WHERE c.deleted_at IS NULL
-              AND NOT EXISTS (
-                SELECT 1 FROM checkin_records newer
-                WHERE newer.student_id = c.student_id AND newer.checkin_date = c.checkin_date
-                  AND newer.deleted_at IS NULL
-                  AND (newer.updated_at > c.updated_at OR (newer.updated_at = c.updated_at AND newer.id > c.id))
-              )
-         )
-         SELECT c.student_id AS student_id, s.student_no AS student_no, s.name AS name,
-                s.grade AS grade, s.class_name AS class_name, c.state AS state,
-                c.checkin_date AS date, c.period AS period
-         FROM latest c JOIN students s ON s.id=c.student_id
-         WHERE c.checkin_date = ? AND s.deleted_at IS NULL AND s.status <> 'transferred'
-           AND c.state IN ('absent','leave','late')
-           AND (? IS NULL OR s.class_name = ?)
-         ORDER BY s.class_name, s.student_no",
-    )
-    .bind(date)
-    .bind(&class)
-    .bind(&class)
-    .fetch_all(pool)
-    .await?;
-    Ok(rows)
+    // 与教务处端考勤大屏共用同一份查询，避免两处 SQL 漂移。
+    crate::db::repo::checkin_repo::exception_students(pool, date, class_name).await
 }
 
 async fn task_completion(pool: &DbPool, since: Option<i64>) -> AppResult<Vec<TaskCompletionRow>> {
