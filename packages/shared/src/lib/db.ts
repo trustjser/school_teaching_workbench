@@ -97,10 +97,6 @@ export async function settingsCompleteSetup(args: CompleteSetupArgs): Promise<vo
   });
 }
 
-export async function settingsSwitchMode(mode: AppMode): Promise<AppMode> {
-  return invokeCmd<AppMode>('settings_switch_mode', { mode });
-}
-
 export async function settingsRotateKey(): Promise<{ kid: string }> {
   return invokeCmd<{ kid: string }>('settings_rotate_key');
 }

@@ -75,12 +75,22 @@ pub async fn settings_set(
     Ok(())
 }
 
-/// 首次启动完成设置：写入模式/名称/年级/班级（目录 class_id）/学年/绑定班级/学校，
+/// 首次设置使用的运行模式：恒等于 app target 的固定角色。
+///
+/// 保留为具名函数，使「首次设置不接受用户选择模式」这一约束有唯一落点且可被测试：
+/// 教务端安装包永远落成 `master`，班级端永远落成 `client`。
+pub fn setup_mode_for_state(target_mode: AppMode) -> AppMode {
+    target_mode
+}
+
+/// 首次启动完成设置：写入名称/年级/班级（目录 class_id）/学年/绑定班级/学校，
 /// 可选导入共享密钥，标记已完成。
+///
+/// 运行模式**不接受参数**：直接使用 `state.mode()`（由 app target 固定），
+/// 避免恶意或被篡改的前端调用把教务端降级/升级成另一端。
 #[tauri::command]
 pub async fn settings_complete_setup(
     state: State<'_, Arc<AppState>>,
-    mode: String,
     device_name: String,
     grade: Option<String>,
     class_name: Option<String>,
@@ -90,7 +100,7 @@ pub async fn settings_complete_setup(
     school_name: Option<String>,
     secret: Option<String>,
 ) -> AppResult<()> {
-    let mode = AppMode::parse(&mode);
+    let mode = setup_mode_for_state(state.mode());
     let secret = validate_setup_secret(mode, secret.as_deref())?;
     settings_repo::set_raw(&state.pool, "app_mode", Some(mode.as_str()), "string").await?;
     settings_repo::set_raw(&state.pool, "device_name", Some(&device_name), "string").await?;
@@ -177,6 +187,12 @@ mod tests {
     #[test]
     fn master_setup_requires_secret() {
         assert!(validate_setup_secret(AppMode::Master, None).is_err());
+    }
+
+    #[test]
+    fn setup_mode_is_derived_from_fixed_state_target() {
+        assert_eq!(setup_mode_for_state(AppMode::Master), AppMode::Master);
+        assert_eq!(setup_mode_for_state(AppMode::Client), AppMode::Client);
     }
 }
 

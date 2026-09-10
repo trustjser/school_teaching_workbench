@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { AppMode, ThemeName } from '@shared/types/enums';
 import type { AppRuntimeSettings } from '@shared/types/models';
 import { DEFAULT_SETTINGS, LS_KEYS } from '@shared/constants/app';
-import { settingsSet, settingsSwitchMode, toRuntimeSettings } from '@shared/lib/db';
+import { settingsSet, toRuntimeSettings } from '@shared/lib/db';
 import type { AppSetting } from '@shared/types/models';
 import { getErrorMessage } from '@shared/constants/errorCodes';
 
@@ -44,7 +44,6 @@ interface AppState {
   setError: (error: string | null) => void;
   applySettings: (raw: AppSetting[]) => void;
   setSettings: (patch: Partial<AppRuntimeSettings>) => void;
-  switchMode: (mode: AppMode) => Promise<void>;
   setUiScale: (scale: number) => Promise<void>;
   setTheme: (theme: ThemeName) => Promise<void>;
   setOnline: (online: boolean) => void;
@@ -124,20 +123,6 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSettings: (patch) =>
     set((state) => ({ settings: { ...state.settings, ...patch } })),
-
-  switchMode: async (mode) => {
-    try {
-      await settingsSwitchMode(mode);
-      set((state) => ({ settings: { ...state.settings, appMode: mode } }));
-      get().pushToast({
-        kind: 'success',
-        title: mode === 'master' ? '已切换为教务处端' : '已切换为班级端',
-      });
-    } catch (err) {
-      get().toastError(err, '切换模式失败');
-      throw err;
-    }
-  },
 
   setUiScale: async (scale) => {
     set({ uiScale: scale, settings: { ...get().settings, uiScale: scale } });

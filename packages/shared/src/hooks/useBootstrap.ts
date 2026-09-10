@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { appModeForTarget, getAppTarget } from '@shared/app-target';
 import { listenEvents } from '@shared/lib/events';
 import { settingsGetAll } from '@shared/lib/db';
 import { useAppStore } from '@shared/store/useAppStore';
@@ -34,6 +35,9 @@ export function useBootstrap(): void {
         const settings = await settingsGetAll();
         if (disposed) return;
         app.applySettings(settings);
+        // 运行模式由 app target 固定：数据库里的 app_mode 只是镜像，若被篡改
+        // 则以 target 为准覆盖，避免旧库/手工改库把一端变成另一端。
+        app.setSettings({ appMode: appModeForTarget(getAppTarget()) });
 
         // 注意：applySettings 内部调用 set() 会生成「新的」state 对象，而上面捕获的
         // `app` 仍是启动前的旧引用，其 settings 还是默认值（firstRunDone=false）。
@@ -147,12 +151,12 @@ export function useBootstrap(): void {
         [TAURI_EVENTS.STUDENT_CHANGED]: () => {
           void useStudentStore.getState().load();
         },
-        [TAURI_EVENTS.MODE_CHANGED]: ({ mode }) => {
-          const app = useAppStore.getState();
-          app.setSettings({ appMode: mode });
-          app.pushToast({
-            kind: 'info',
-            title: mode === 'master' ? '已切换为教务处端' : '已切换为班级端',
+        // 角色已由 app target 锁定：这里只做兼容刷新，不改变 target，也不重建路由。
+        [TAURI_EVENTS.MODE_CHANGED]: () => {
+          void settingsGetAll().then((raw) => {
+            const app = useAppStore.getState();
+            app.applySettings(raw);
+            app.setSettings({ appMode: appModeForTarget(getAppTarget()) });
           });
           void useDeviceStore.getState().load();
         },
