@@ -21,13 +21,15 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
 
-    /* 路径别名：与 vite.config.ts 保持一致 */
+    /* 路径别名：与 vite.config.ts / vite.shared.ts 保持一致 */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@shared/*": ["packages/shared/src/*"],
+      "@affairs/*": ["apps/affairs/src/*"],
+      "@classroom/*": ["apps/classroom/src/*"]
     },
     "types": ["vite/client"]
   },
-  "include": ["src"],
+  "include": ["src", "packages/shared/src", "apps/affairs/src", "apps/classroom/src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

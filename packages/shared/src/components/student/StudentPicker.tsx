@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
-import { Input } from '@/components/ui/Input';
-import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
+import { Input } from '@shared/components/ui/Input';
+import { Button } from '@shared/components/ui/Button';
+import { Badge } from '@shared/components/ui/Badge';
 import { StudentStatusBadge } from './StudentStatusBadge';
-import type { Student } from '@/types/models';
-import { filterStudents } from '@/store/useStudentStore';
+import type { Student } from '@shared/types/models';
+import { filterStudents } from '@shared/store/useStudentStore';
 
 export interface StudentPickerProps {
   students: Student[];

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { UI_SCALE_RULES } from '@/constants/ui';
-import { useAppStore } from '@/store/useAppStore';
+import { UI_SCALE_RULES } from '@shared/constants/ui';
+import { useAppStore } from '@shared/store/useAppStore';
 
 export interface BigScreenInfo {
   width: number;

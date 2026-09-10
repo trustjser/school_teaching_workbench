@@ -1,6 +1,6 @@
 import { invokeCmd } from './tauri';
 import { safeJsonParse } from './format';
-import type { AppMode, CheckinPeriod, CheckinState, StudentStatus, SyncState } from '@/types/enums';
+import type { AppMode, CheckinPeriod, CheckinState, StudentStatus, SyncState } from '@shared/types/enums';
 import type {
   AppRuntimeSettings,
   AppSetting,
@@ -19,7 +19,7 @@ import type {
   SyncLogEntry,
   TaskRecord,
   TaskStatusNode,
-} from '@/types/models';
+} from '@shared/types/models';
 import type {
   ClassAttendanceRow,
   ExceptionStudentRow,
@@ -32,13 +32,13 @@ import type {
   TaskCompletionRow,
   TaskProgressRow,
   TaskMatrix,
-} from '@/types/api';
+} from '@shared/types/api';
 import type {
   BroadcastReceipt,
   BroadcastTask,
   SendReport,
-} from '@/types/broadcast';
-import { DEFAULT_SETTINGS } from '@/constants/app';
+} from '@shared/types/broadcast';
+import { DEFAULT_SETTINGS } from '@shared/constants/app';
 
 /**
  * 数据访问服务：按领域分组。

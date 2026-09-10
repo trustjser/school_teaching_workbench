@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { parseCsvBytes } from './csv';
-import type { ImportRowError, ParsedStudentRow } from '@/types/api';
-import { NOTE_MAX_LENGTH } from '@/constants/app';
+import type { ImportRowError, ParsedStudentRow } from '@shared/types/api';
+import { NOTE_MAX_LENGTH } from '@shared/constants/app';
 
 /**
  * 名册导入解析：.xlsx / .xls / .csv

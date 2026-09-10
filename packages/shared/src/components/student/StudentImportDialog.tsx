@@ -1,19 +1,19 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Download, FileSpreadsheet, Upload } from 'lucide-react';
-import { Modal } from '@/components/ui/Modal';
-import { Button } from '@/components/ui/Button';
-import { Select } from '@/components/ui/Select';
-import { ProgressBar } from '@/components/ui/ProgressBar';
-import { Table, type TableColumn } from '@/components/ui/Table';
-import { Input } from '@/components/ui/Input';
-import { buildStudentTemplate, parseStudentFile } from '@/lib/excel';
-import { exportSheetsToXlsx } from '@/lib/exporter';
-import { studentBatchImport, studentList } from '@/lib/db';
-import { useAppStore } from '@/store/useAppStore';
-import { useStudentStore } from '@/store/useStudentStore';
-import type { ParsedStudentRow } from '@/types/api';
-import type { ImportRowError } from '@/types/api';
-import type { ClassContext } from '@/types/models';
+import { Modal } from '@shared/components/ui/Modal';
+import { Button } from '@shared/components/ui/Button';
+import { Select } from '@shared/components/ui/Select';
+import { ProgressBar } from '@shared/components/ui/ProgressBar';
+import { Table, type TableColumn } from '@shared/components/ui/Table';
+import { Input } from '@shared/components/ui/Input';
+import { buildStudentTemplate, parseStudentFile } from '@shared/lib/excel';
+import { exportSheetsToXlsx } from '@shared/lib/exporter';
+import { studentBatchImport, studentList } from '@shared/lib/db';
+import { useAppStore } from '@shared/store/useAppStore';
+import { useStudentStore } from '@shared/store/useStudentStore';
+import type { ParsedStudentRow } from '@shared/types/api';
+import type { ImportRowError } from '@shared/types/api';
+import type { ClassContext } from '@shared/types/models';
 
 export interface StudentImportDialogProps {
   open: boolean;
@@ -56,7 +56,7 @@ export function StudentImportDialog({
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<{ success: number; failed: number } | null>(null);
   const [errorList, setErrorList] = useState<ImportRowError[]>([]);
-  const [existingStudents, setExistingStudents] = useState<import('@/types/models').Student[]>([]);
+  const [existingStudents, setExistingStudents] = useState<import('@shared/types/models').Student[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const reset = useCallback(() => {

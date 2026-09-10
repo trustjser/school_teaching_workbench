@@ -1,6 +1,6 @@
-import { Badge, type BadgeTone } from '@/components/ui/Badge';
-import { STUDENT_STATUS_META } from '@/constants/status';
-import type { StudentStatus } from '@/types/enums';
+import { Badge, type BadgeTone } from '@shared/components/ui/Badge';
+import { STUDENT_STATUS_META } from '@shared/constants/status';
+import type { StudentStatus } from '@shared/types/enums';
 
 const TONE: Record<StudentStatus, BadgeTone> = {
   active: 'success',

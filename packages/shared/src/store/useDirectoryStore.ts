@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Class, Grade, SchoolYear } from '@/types/models';
+import type { Class, Grade, SchoolYear } from '@shared/types/models';
 import {
   classDelete,
   classList,
@@ -10,7 +10,7 @@ import {
   schoolYearDelete,
   schoolYearList,
   schoolYearUpsert,
-} from '@/lib/db';
+} from '@shared/lib/db';
 import { useAppStore } from './useAppStore';
 
 interface DirectoryState {

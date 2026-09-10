@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import type { ClassContext, Student, StudentStatus } from '@/types/models';
-import { studentDelete, studentList, studentUpdateStatus, studentUpsert } from '@/lib/db';
-import { compareStudentNo } from '@/lib/format';
+import type { ClassContext, Student, StudentStatus } from '@shared/types/models';
+import { studentDelete, studentList, studentUpdateStatus, studentUpsert } from '@shared/lib/db';
+import { compareStudentNo } from '@shared/lib/format';
 import { useAppStore } from './useAppStore';
 
 /** 名册筛选 */

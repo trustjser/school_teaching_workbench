@@ -1,32 +1,32 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, RefreshCw } from 'lucide-react';
-import { useBroadcastStore, summarizeReceipts } from '@/store/useBroadcastStore';
-import { useDeviceStore } from '@/store/useDeviceStore';
-import { useAppStore } from '@/store/useAppStore';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Textarea } from '@/components/ui/Textarea';
-import { Select } from '@/components/ui/Select';
-import { Modal } from '@/components/ui/Modal';
-import { Table, type TableColumn } from '@/components/ui/Table';
-import { Badge } from '@/components/ui/Badge';
-import { Toggle } from '@/components/ui/Toggle';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { SkeletonRows } from '@/components/ui/Skeleton';
-import { StatusNodeEditor, type EditableNode } from '@/components/task/StatusNodeEditor';
-import { TASK_TYPE_OPTIONS, BROADCAST_STATUS_OPTIONS, PRIORITY_OPTIONS, DEFAULT_NODE_TEMPLATES } from '@/constants/status';
-import { TASK_NODE_MIN, TASK_NODE_MAX } from '@/constants/app';
-import type { BroadcastPriority, BroadcastTargetType, ColorToken } from '@/types/enums';
-import type { BroadcastTask } from '@/types/broadcast';
+import { useBroadcastStore, summarizeReceipts } from '@shared/store/useBroadcastStore';
+import { useDeviceStore } from '@shared/store/useDeviceStore';
+import { useAppStore } from '@shared/store/useAppStore';
+import { Card } from '@shared/components/ui/Card';
+import { Button } from '@shared/components/ui/Button';
+import { Input } from '@shared/components/ui/Input';
+import { Textarea } from '@shared/components/ui/Textarea';
+import { Select } from '@shared/components/ui/Select';
+import { Modal } from '@shared/components/ui/Modal';
+import { Table, type TableColumn } from '@shared/components/ui/Table';
+import { Badge } from '@shared/components/ui/Badge';
+import { Toggle } from '@shared/components/ui/Toggle';
+import { EmptyState } from '@shared/components/ui/EmptyState';
+import { SkeletonRows } from '@shared/components/ui/Skeleton';
+import { StatusNodeEditor, type EditableNode } from '@shared/components/task/StatusNodeEditor';
+import { TASK_TYPE_OPTIONS, BROADCAST_STATUS_OPTIONS, PRIORITY_OPTIONS, DEFAULT_NODE_TEMPLATES } from '@shared/constants/status';
+import { TASK_NODE_MIN, TASK_NODE_MAX } from '@shared/constants/app';
+import type { BroadcastPriority, BroadcastTargetType, ColorToken } from '@shared/types/enums';
+import type { BroadcastTask } from '@shared/types/broadcast';
 import {
   stringifyBroadcastPayload,
   resolveTargetDeviceIds,
   type BroadcastNodeTemplate,
   type BroadcastTaskTemplate,
-} from '@/types/broadcast';
-import type { BroadcastReceipt } from '@/types/broadcast';
-import { formatDateTime } from '@/lib/format';
+} from '@shared/types/broadcast';
+import type { BroadcastReceipt } from '@shared/types/broadcast';
+import { formatDateTime } from '@shared/lib/format';
 
 /** 任务下发中心（教务处端）：创建广播任务 → 选择目标 → 下发 */
 export function BroadcastCenter(): JSX.Element {

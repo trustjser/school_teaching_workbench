@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
-import { useQueueStore } from '@/store/useQueueStore';
-import { useDeviceStore } from '@/store/useDeviceStore';
-import { AUTO_SYNC_INTERVAL_MS, DEVICE_REFRESH_INTERVAL_MS } from '@/constants/app';
-import { TAURI_EVENTS } from '@/types/events';
+import { useQueueStore } from '@shared/store/useQueueStore';
+import { useDeviceStore } from '@shared/store/useDeviceStore';
+import { AUTO_SYNC_INTERVAL_MS, DEVICE_REFRESH_INTERVAL_MS } from '@shared/constants/app';
+import { TAURI_EVENTS } from '@shared/types/events';
 import { useTauriEventHandler } from './useTauriEvent';
 
 /**

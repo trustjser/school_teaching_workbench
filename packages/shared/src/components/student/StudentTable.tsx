@@ -1,15 +1,15 @@
 import { useMemo, useState } from 'react';
 import { UserMinus, UserX } from 'lucide-react';
-import { Table, type TableColumn } from '@/components/ui/Table';
+import { Table, type TableColumn } from '@shared/components/ui/Table';
 import { StudentStatusBadge } from './StudentStatusBadge';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { Button } from '@/components/ui/Button';
-import { Tabs } from '@/components/ui/Tabs';
-import type { Student } from '@/types/models';
-import { filterStudents, useStudentStore, type StudentFilter } from '@/store/useStudentStore';
-import { useAppStore } from '@/store/useAppStore';
-import { maskPhone } from '@/lib/format';
+import { ConfirmDialog } from '@shared/components/ui/ConfirmDialog';
+import { EmptyState } from '@shared/components/ui/EmptyState';
+import { Button } from '@shared/components/ui/Button';
+import { Tabs } from '@shared/components/ui/Tabs';
+import type { Student } from '@shared/types/models';
+import { filterStudents, useStudentStore, type StudentFilter } from '@shared/store/useStudentStore';
+import { useAppStore } from '@shared/store/useAppStore';
+import { maskPhone } from '@shared/lib/format';
 
 export interface StudentTableProps {
   onEdit: (student: Student) => void;

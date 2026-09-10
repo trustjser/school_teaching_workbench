@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/Button';
-import { Modal } from '@/components/ui/Modal';
-import { Select } from '@/components/ui/Select';
-import { Textarea } from '@/components/ui/Textarea';
-import { CHECKIN_STATUS_META, CHECKIN_STATES_ALL } from '@/constants/status';
-import type { CheckinRecord, Student } from '@/types/models';
-import type { CheckinState } from '@/types/enums';
+import { Button } from '@shared/components/ui/Button';
+import { Modal } from '@shared/components/ui/Modal';
+import { Select } from '@shared/components/ui/Select';
+import { Textarea } from '@shared/components/ui/Textarea';
+import { CHECKIN_STATUS_META, CHECKIN_STATES_ALL } from '@shared/constants/status';
+import type { CheckinRecord, Student } from '@shared/types/models';
+import type { CheckinState } from '@shared/types/enums';
 
 export interface CheckinRecordEditorProps {
   open: boolean;

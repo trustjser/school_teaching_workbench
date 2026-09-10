@@ -1,8 +1,8 @@
 import { create } from 'zustand';
-import type { Device } from '@/types/models';
-import { deviceForget, deviceList, deviceRefresh } from '@/lib/db';
+import type { Device } from '@shared/types/models';
+import { deviceForget, deviceList, deviceRefresh } from '@shared/lib/db';
 import { useAppStore } from './useAppStore';
-import { OFFLINE_TTL_SEC } from '@/constants/app';
+import { OFFLINE_TTL_SEC } from '@shared/constants/app';
 
 interface DeviceState {
   devices: Device[];

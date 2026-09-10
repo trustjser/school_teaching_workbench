@@ -1,15 +1,15 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAppStore } from '@/store/useAppStore';
-import { classroomAssignments, classroomClaim, classroomList, classList, directorySync, settingsCompleteSetup, settingsGetAll, settingsSetSharedSecret, schoolYearList } from '@/lib/db';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { SearchableSelect } from '@/components/ui/SearchableSelect';
-import { Textarea } from '@/components/ui/Textarea';
-import type { AppMode } from '@/types/enums';
-import type { Class, Classroom, ClassroomAssignment, SchoolYear } from '@/types/models';
-import { keyFingerprint } from '@/lib/crypto';
+import { useAppStore } from '@shared/store/useAppStore';
+import { classroomAssignments, classroomClaim, classroomList, classList, directorySync, settingsCompleteSetup, settingsGetAll, settingsSetSharedSecret, schoolYearList } from '@shared/lib/db';
+import { Card } from '@shared/components/ui/Card';
+import { Button } from '@shared/components/ui/Button';
+import { Input } from '@shared/components/ui/Input';
+import { SearchableSelect } from '@shared/components/ui/SearchableSelect';
+import { Textarea } from '@shared/components/ui/Textarea';
+import type { AppMode } from '@shared/types/enums';
+import type { Class, Classroom, ClassroomAssignment, SchoolYear } from '@shared/types/models';
+import { keyFingerprint } from '@shared/lib/crypto';
 
 /** 共享密钥必须是 base64 编码的 32 字节 */
 function isBase64Secret(s: string): boolean {

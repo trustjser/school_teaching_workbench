@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
-import { useStudentStore } from '@/store/useStudentStore';
-import { AttendanceGrid } from '@/components/checkin/AttendanceGrid';
-import { Card } from '@/components/ui/Card';
+import { useStudentStore } from '@shared/store/useStudentStore';
+import { AttendanceGrid } from '@shared/components/checkin/AttendanceGrid';
+import { Card } from '@shared/components/ui/Card';
 
 /** 快捷考勤页：全屏反向标记考勤网格 */
 export function CheckinPage(): JSX.Element {

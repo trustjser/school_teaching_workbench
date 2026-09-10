@@ -1,27 +1,27 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, LayoutGrid } from 'lucide-react';
-import { useTaskStore } from '@/store/useTaskStore';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
-import { Textarea } from '@/components/ui/Textarea';
-import { Toggle } from '@/components/ui/Toggle';
-import { Modal } from '@/components/ui/Modal';
-import { Table, type TableColumn } from '@/components/ui/Table';
-import { SkeletonRows } from '@/components/ui/Skeleton';
+import { useTaskStore } from '@shared/store/useTaskStore';
+import { Card } from '@shared/components/ui/Card';
+import { Button } from '@shared/components/ui/Button';
+import { Input } from '@shared/components/ui/Input';
+import { Select } from '@shared/components/ui/Select';
+import { Textarea } from '@shared/components/ui/Textarea';
+import { Toggle } from '@shared/components/ui/Toggle';
+import { Modal } from '@shared/components/ui/Modal';
+import { Table, type TableColumn } from '@shared/components/ui/Table';
+import { SkeletonRows } from '@shared/components/ui/Skeleton';
 import {
   TASK_TYPE_OPTIONS,
   TASK_STATUS_OPTIONS,
   DEFAULT_NODE_TEMPLATES,
-} from '@/constants/status';
-import { TASK_NODE_MIN, TASK_NODE_MAX } from '@/constants/app';
-import type { TaskScope, TaskType, ColorToken } from '@/types/enums';
-import type { CustomTask, TaskStatusNode } from '@/types/models';
-import { uuidV4 } from '@/lib/crypto';
-import { StatusNodeEditor, type EditableNode } from '@/components/task/StatusNodeEditor';
-import { useAppStore } from '@/store/useAppStore';
+} from '@shared/constants/status';
+import { TASK_NODE_MIN, TASK_NODE_MAX } from '@shared/constants/app';
+import type { TaskScope, TaskType, ColorToken } from '@shared/types/enums';
+import type { CustomTask, TaskStatusNode } from '@shared/types/models';
+import { uuidV4 } from '@shared/lib/crypto';
+import { StatusNodeEditor, type EditableNode } from '@shared/components/task/StatusNodeEditor';
+import { useAppStore } from '@shared/store/useAppStore';
 
 /** 任务中心：统一管理班级自建任务与教务下发任务 */
 export function TaskManage(): JSX.Element {

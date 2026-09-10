@@ -1,10 +1,10 @@
 import { CalendarDays, Search } from 'lucide-react';
 import { ModeBadge } from './ModeBadge';
 import { SyncIndicator } from './SyncIndicator';
-import { Input } from '@/components/ui/Input';
-import { ThemeSwitcher } from '@/components/motion/ThemeSwitcher';
-import { useAppStore } from '@/store/useAppStore';
-import { formatDateCN, toDateKey } from '@/lib/format';
+import { Input } from '@shared/components/ui/Input';
+import { ThemeSwitcher } from '@shared/components/motion/ThemeSwitcher';
+import { useAppStore } from '@shared/store/useAppStore';
+import { formatDateCN, toDateKey } from '@shared/lib/format';
 
 export interface TopBarProps {
   /** 全局搜索值 */

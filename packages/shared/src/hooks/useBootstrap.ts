@@ -1,14 +1,14 @@
 import { useEffect, useRef } from 'react';
-import { listenEvents } from '@/lib/events';
-import { settingsGetAll } from '@/lib/db';
-import { useAppStore } from '@/store/useAppStore';
-import { useDeviceStore } from '@/store/useDeviceStore';
-import { useQueueStore } from '@/store/useQueueStore';
-import { useStudentStore } from '@/store/useStudentStore';
-import { useBroadcastStore } from '@/store/useBroadcastStore';
-import { useTaskStore } from '@/store/useTaskStore';
-import { TAURI_EVENTS } from '@/types/events';
-import { reloadCheckin } from '@/store/useCheckinStore';
+import { listenEvents } from '@shared/lib/events';
+import { settingsGetAll } from '@shared/lib/db';
+import { useAppStore } from '@shared/store/useAppStore';
+import { useDeviceStore } from '@shared/store/useDeviceStore';
+import { useQueueStore } from '@shared/store/useQueueStore';
+import { useStudentStore } from '@shared/store/useStudentStore';
+import { useBroadcastStore } from '@shared/store/useBroadcastStore';
+import { useTaskStore } from '@shared/store/useTaskStore';
+import { TAURI_EVENTS } from '@shared/types/events';
+import { reloadCheckin } from '@shared/store/useCheckinStore';
 
 /**
  * 启动引导：

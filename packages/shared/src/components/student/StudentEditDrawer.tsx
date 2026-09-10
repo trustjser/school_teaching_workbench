@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Drawer } from '@/components/ui/Drawer';
-import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
-import { Textarea } from '@/components/ui/Textarea';
-import { Button } from '@/components/ui/Button';
-import { useStudentStore } from '@/store/useStudentStore';
-import { useAppStore } from '@/store/useAppStore';
-import type { Gender, StudentStatus } from '@/types/enums';
-import type { ClassContext, Student as StudentModel } from '@/types/models';
-import { uuidV4 } from '@/lib/crypto';
-import { formatDateTime } from '@/lib/format';
+import { Drawer } from '@shared/components/ui/Drawer';
+import { Input } from '@shared/components/ui/Input';
+import { Select } from '@shared/components/ui/Select';
+import { Textarea } from '@shared/components/ui/Textarea';
+import { Button } from '@shared/components/ui/Button';
+import { useStudentStore } from '@shared/store/useStudentStore';
+import { useAppStore } from '@shared/store/useAppStore';
+import type { Gender, StudentStatus } from '@shared/types/enums';
+import type { ClassContext, Student as StudentModel } from '@shared/types/models';
+import { uuidV4 } from '@shared/lib/crypto';
+import { formatDateTime } from '@shared/lib/format';
 
 export interface StudentEditDrawerProps {
   open: boolean;

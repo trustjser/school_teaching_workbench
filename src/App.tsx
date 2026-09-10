@@ -1,6 +1,6 @@
 import { RouterProvider } from 'react-router-dom';
 import { router } from './router';
-import { ToastHost } from '@/components/ui/Toast';
+import { ToastHost } from '@shared/components/ui/Toast';
 
 /**
  * 应用根组件。

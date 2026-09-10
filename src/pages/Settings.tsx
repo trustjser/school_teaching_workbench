@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useAppStore } from '@/store/useAppStore';
-import { classroomList, classroomRelease, directorySync, settingsGetAll, settingsKeyInfo, settingsSet, settingsSetSharedSecret, settingsResetClient } from '@/lib/db';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Select } from '@/components/ui/Select';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { ThemeSwitcher } from '@/components/motion/ThemeSwitcher';
-import { UI_SCALE_OPTIONS } from '@/constants/ui';
-import { formatFingerprint } from '@/lib/crypto';
-import { keyFingerprint } from '@/lib/crypto';
-import { Input } from '@/components/ui/Input';
-import type { KeyInfo } from '@/types/api';
-import type { Classroom } from '@/types/models';
+import { useAppStore } from '@shared/store/useAppStore';
+import { classroomList, classroomRelease, directorySync, settingsGetAll, settingsKeyInfo, settingsSet, settingsSetSharedSecret, settingsResetClient } from '@shared/lib/db';
+import { Card } from '@shared/components/ui/Card';
+import { Button } from '@shared/components/ui/Button';
+import { Select } from '@shared/components/ui/Select';
+import { ConfirmDialog } from '@shared/components/ui/ConfirmDialog';
+import { ThemeSwitcher } from '@shared/components/motion/ThemeSwitcher';
+import { UI_SCALE_OPTIONS } from '@shared/constants/ui';
+import { formatFingerprint } from '@shared/lib/crypto';
+import { keyFingerprint } from '@shared/lib/crypto';
+import { Input } from '@shared/components/ui/Input';
+import type { KeyInfo } from '@shared/types/api';
+import type { Classroom } from '@shared/types/models';
 
 /** 设置页：UI 缩放、主题、共享密钥与班级端重置 */
 export function Settings(): JSX.Element {

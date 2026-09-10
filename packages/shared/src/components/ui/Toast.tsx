@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { AlertTriangle, CheckCircle2, Info, Loader2, X, XCircle } from 'lucide-react';
-import { useAppStore, type ToastItem } from '@/store/useAppStore';
+import { useAppStore, type ToastItem } from '@shared/store/useAppStore';
 
 const KIND_STYLE: Record<
   ToastItem['kind'],

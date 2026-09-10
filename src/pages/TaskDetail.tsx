@@ -1,17 +1,17 @@
 import { useEffect } from 'react';
 import { ArrowLeft, Clock3, Users } from 'lucide-react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useStudentStore } from '@/store/useStudentStore';
-import { useTaskStore } from '@/store/useTaskStore';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
-import { ProgressBar } from '@/components/ui/ProgressBar';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { TaskMatrixView } from '@/components/task/TaskMatrixView';
-import { formatDateTime, formatPercent } from '@/lib/format';
-import { useTauriEventHandler } from '@/hooks/useTauriEvent';
-import { TAURI_EVENTS } from '@/types/events';
+import { useStudentStore } from '@shared/store/useStudentStore';
+import { useTaskStore } from '@shared/store/useTaskStore';
+import { Button } from '@shared/components/ui/Button';
+import { Card } from '@shared/components/ui/Card';
+import { Badge } from '@shared/components/ui/Badge';
+import { ProgressBar } from '@shared/components/ui/ProgressBar';
+import { EmptyState } from '@shared/components/ui/EmptyState';
+import { TaskMatrixView } from '@shared/components/task/TaskMatrixView';
+import { formatDateTime, formatPercent } from '@shared/lib/format';
+import { useTauriEventHandler } from '@shared/hooks/useTauriEvent';
+import { TAURI_EVENTS } from '@shared/types/events';
 
 /** 教务端单班级任务详情：学生状态矩阵 + 评分/备注编辑。 */
 export function TaskDetail(): JSX.Element {

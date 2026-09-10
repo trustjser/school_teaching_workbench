@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Monitor, Wifi, WifiOff } from 'lucide-react';
-import { useDeviceStore } from '@/store/useDeviceStore';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Table, type TableColumn } from '@/components/ui/Table';
-import { Badge } from '@/components/ui/Badge';
-import { StatCard } from '@/components/ui/StatCard';
-import { SkeletonStatCard } from '@/components/ui/Skeleton';
-import { Stagger } from '@/components/motion/Reveal';
-import { DEVICE_STATUS_META } from '@/constants/status';
-import { formatRelative } from '@/lib/format';
-import type { Device } from '@/types/models';
+import { useDeviceStore } from '@shared/store/useDeviceStore';
+import { Card } from '@shared/components/ui/Card';
+import { Button } from '@shared/components/ui/Button';
+import { Table, type TableColumn } from '@shared/components/ui/Table';
+import { Badge } from '@shared/components/ui/Badge';
+import { StatCard } from '@shared/components/ui/StatCard';
+import { SkeletonStatCard } from '@shared/components/ui/Skeleton';
+import { Stagger } from '@shared/components/motion/Reveal';
+import { DEVICE_STATUS_META } from '@shared/constants/status';
+import { formatRelative } from '@shared/lib/format';
+import type { Device } from '@shared/types/models';
 
 /** 节点监控页：局域网内所有发现节点的状态、角色、IP、最近活跃 */
 export function DeviceMonitor(): JSX.Element {

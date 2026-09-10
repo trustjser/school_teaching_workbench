@@ -3,8 +3,8 @@
  * 所有取值与 docs/02-ddl.sql 的 CHECK 约束、Rust 侧枚举严格一致。
  */
 
-/** 运行模式：班级端 / 教务处端 */
-export type AppMode = 'client' | 'master';
+// `AppMode` 由固定 app target 定义，此处再导出以保持既有导入路径不变。
+export type { AppMode } from '../app-target';
 
 /** 学生状态：在读 / 请假(长期) / 已转出 */
 export type StudentStatus = 'active' | 'leave' | 'transferred';

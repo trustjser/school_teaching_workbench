@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useStudentStore } from '@/store/useStudentStore';
-import { useTaskStore } from '@/store/useTaskStore';
-import { TaskMatrixView } from '@/components/task/TaskMatrixView';
-import { Card } from '@/components/ui/Card';
+import { useStudentStore } from '@shared/store/useStudentStore';
+import { useTaskStore } from '@shared/store/useTaskStore';
+import { TaskMatrixView } from '@shared/components/task/TaskMatrixView';
+import { Card } from '@shared/components/ui/Card';
 
 /** 任务矩阵页：学生 × 状态节点双视图 */
 export function TaskMatrix(): JSX.Element {

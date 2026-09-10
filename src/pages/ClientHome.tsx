@@ -1,14 +1,14 @@
 import { Link } from 'react-router-dom';
 import { CalendarCheck, ClipboardList, GraduationCap, Inbox, Users } from 'lucide-react';
-import { useStudentStore } from '@/store/useStudentStore';
-import { useCheckinStore } from '@/store/useCheckinStore';
-import { useTaskStore } from '@/store/useTaskStore';
-import { useBroadcastStore } from '@/store/useBroadcastStore';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import { StatCard } from '@/components/ui/StatCard';
-import { Stagger } from '@/components/motion/Reveal';
+import { useStudentStore } from '@shared/store/useStudentStore';
+import { useCheckinStore } from '@shared/store/useCheckinStore';
+import { useTaskStore } from '@shared/store/useTaskStore';
+import { useBroadcastStore } from '@shared/store/useBroadcastStore';
+import { Card } from '@shared/components/ui/Card';
+import { Button } from '@shared/components/ui/Button';
+import { Badge } from '@shared/components/ui/Badge';
+import { StatCard } from '@shared/components/ui/StatCard';
+import { Stagger } from '@shared/components/motion/Reveal';
 
 /** 班级首页：名册导入入口 + 出勤率概览 + 任务矩阵 + 教务指令收件箱 */
 export function ClientHome(): JSX.Element {

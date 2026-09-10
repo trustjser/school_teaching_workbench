@@ -1,4 +1,4 @@
-import type { CheckinState, StudentStatus } from '@/types/enums';
+import type { CheckinState, StudentStatus } from '@shared/types/enums';
 
 /** 状态显示元数据：emoji + 中文文案 + 高对比配色（色盲友好：颜色 + 图标 + 文字） */
 export interface StatusMeta {

@@ -1,5 +1,5 @@
-import type { CheckinState } from '@/types/enums';
-import { CHECKIN_STATUS_META } from '@/constants/status';
+import type { CheckinState } from '@shared/types/enums';
+import { CHECKIN_STATUS_META } from '@shared/constants/status';
 
 /** 毫秒时间戳 → 'YYYY-MM-DD'（本地日历日，不做时区转换） */
 export function toDateKey(ts: number | null | undefined): string {

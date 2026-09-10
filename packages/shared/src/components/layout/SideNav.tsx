@@ -11,9 +11,9 @@ import {
   BookMarked,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { AppMode } from '@/types/enums';
-import { useBroadcastStore } from '@/store/useBroadcastStore';
-import { useQueueStore } from '@/store/useQueueStore';
+import type { AppMode } from '@shared/types/enums';
+import { useBroadcastStore } from '@shared/store/useBroadcastStore';
+import { useQueueStore } from '@shared/store/useQueueStore';
 
 export interface NavItem {
   to: string;

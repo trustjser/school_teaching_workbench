@@ -1,12 +1,12 @@
 import { Plus, Trash2 } from 'lucide-react';
-import { IconButton, resolveIcon } from '@/components/ui/IconButton';
-import { Input } from '@/components/ui/Input';
-import { Toggle } from '@/components/ui/Toggle';
-import { Button } from '@/components/ui/Button';
-import { COLOR_TOKENS, COLOR_TOKEN_HEX, COLOR_TOKEN_LABEL, NODE_ICON_OPTIONS } from '@/constants/status';
-import { TASK_NODE_MIN, TASK_NODE_MAX } from '@/constants/app';
-import type { ColorToken } from '@/types/enums';
-import { uuidV4 } from '@/lib/crypto';
+import { IconButton, resolveIcon } from '@shared/components/ui/IconButton';
+import { Input } from '@shared/components/ui/Input';
+import { Toggle } from '@shared/components/ui/Toggle';
+import { Button } from '@shared/components/ui/Button';
+import { COLOR_TOKENS, COLOR_TOKEN_HEX, COLOR_TOKEN_LABEL, NODE_ICON_OPTIONS } from '@shared/constants/status';
+import { TASK_NODE_MIN, TASK_NODE_MAX } from '@shared/constants/app';
+import type { ColorToken } from '@shared/types/enums';
+import { uuidV4 } from '@shared/lib/crypto';
 
 /** 可编辑状态节点（新建任务 / 编辑节点共用，班级端与教务处端一致） */
 export interface EditableNode {

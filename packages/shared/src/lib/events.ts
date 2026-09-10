@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { isTauriRuntime } from './tauri';
-import type { TauriEventMap, TauriEventName } from '@/types/events';
+import type { TauriEventMap, TauriEventName } from '@shared/types/events';
 
 /**
  * Tauri 事件 listen 封装。

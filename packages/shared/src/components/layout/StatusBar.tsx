@@ -1,8 +1,8 @@
-import { useAppStore } from '@/store/useAppStore';
-import { useDeviceStore } from '@/store/useDeviceStore';
-import { useQueueStore } from '@/store/useQueueStore';
-import { API_PORT, MDNS_SERVICE_TYPE } from '@/constants/app';
-import { formatRelative } from '@/lib/format';
+import { useAppStore } from '@shared/store/useAppStore';
+import { useDeviceStore } from '@shared/store/useDeviceStore';
+import { useQueueStore } from '@shared/store/useQueueStore';
+import { API_PORT, MDNS_SERVICE_TYPE } from '@shared/constants/app';
+import { formatRelative } from '@shared/lib/format';
 
 /** 底部状态栏：本地库路径提示 + 端口 + mDNS 类型 + 已发现节点数 + 待发数量 */
 export function StatusBar(): JSX.Element {

@@ -1,4 +1,4 @@
-import type { ThemeName } from '@/types/enums';
+import type { ThemeName } from '@shared/types/enums';
 
 /**
  * 主题应用层：把 ThemeName 映射到 <html> 上的类（light/dark/high-contrast），

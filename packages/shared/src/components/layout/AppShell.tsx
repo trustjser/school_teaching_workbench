@@ -4,10 +4,10 @@ import { Menu } from 'lucide-react';
 import { SideNav } from './SideNav';
 import { TopBar } from './TopBar';
 import { StatusBar } from './StatusBar';
-import { useAppStore } from '@/store/useAppStore';
-import { useBigScreen } from '@/hooks/useBigScreen';
-import { useAutoSync } from '@/hooks/useAutoSync';
-import { PageTransition } from '@/components/motion/PageTransition';
+import { useAppStore } from '@shared/store/useAppStore';
+import { useBigScreen } from '@shared/hooks/useBigScreen';
+import { useAutoSync } from '@shared/hooks/useAutoSync';
+import { PageTransition } from '@shared/components/motion/PageTransition';
 
 export interface AppShellProps {
   children: ReactNode;

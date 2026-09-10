@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import type { BroadcastReceipt, BroadcastTask, SendReport } from '@/types/broadcast';
-import type { CustomTask } from '@/types/models';
-import type { Page } from '@/types/api';
+import type { BroadcastReceipt, BroadcastTask, SendReport } from '@shared/types/broadcast';
+import type { CustomTask } from '@shared/types/models';
+import type { Page } from '@shared/types/api';
 import {
   broadcastAccept,
   broadcastCreate,
@@ -9,7 +9,7 @@ import {
   broadcastPage,
   broadcastReceipts,
   broadcastSend,
-} from '@/lib/db';
+} from '@shared/lib/db';
 import { useAppStore } from './useAppStore';
 import { useTaskStore } from './useTaskStore';
 

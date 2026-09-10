@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, ClipboardCheck, RefreshCw } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useTaskStore } from '@/store/useTaskStore';
-import { Card } from '@/components/ui/Card';
-import { SearchableSelect } from '@/components/ui/SearchableSelect';
-import { Table, type TableColumn } from '@/components/ui/Table';
-import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
-import { ProgressBar } from '@/components/ui/ProgressBar';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { formatDateTime, formatPercent } from '@/lib/format';
-import type { TaskProgressRow } from '@/types/api';
+import { useTaskStore } from '@shared/store/useTaskStore';
+import { Card } from '@shared/components/ui/Card';
+import { SearchableSelect } from '@shared/components/ui/SearchableSelect';
+import { Table, type TableColumn } from '@shared/components/ui/Table';
+import { Badge } from '@shared/components/ui/Badge';
+import { Button } from '@shared/components/ui/Button';
+import { ProgressBar } from '@shared/components/ui/ProgressBar';
+import { EmptyState } from '@shared/components/ui/EmptyState';
+import { formatDateTime, formatPercent } from '@shared/lib/format';
+import type { TaskProgressRow } from '@shared/types/api';
 
 /** 教务端任务全局处理看板：任务总览 → 班级进度 → 学生明细。 */
 export function TaskDashboard(): JSX.Element {

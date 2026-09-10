@@ -1,10 +1,10 @@
 import { create } from 'zustand';
-import type { AppMode, ThemeName } from '@/types/enums';
-import type { AppRuntimeSettings } from '@/types/models';
-import { DEFAULT_SETTINGS, LS_KEYS } from '@/constants/app';
-import { settingsSet, settingsSwitchMode, toRuntimeSettings } from '@/lib/db';
-import type { AppSetting } from '@/types/models';
-import { getErrorMessage } from '@/constants/errorCodes';
+import type { AppMode, ThemeName } from '@shared/types/enums';
+import type { AppRuntimeSettings } from '@shared/types/models';
+import { DEFAULT_SETTINGS, LS_KEYS } from '@shared/constants/app';
+import { settingsSet, settingsSwitchMode, toRuntimeSettings } from '@shared/lib/db';
+import type { AppSetting } from '@shared/types/models';
+import { getErrorMessage } from '@shared/constants/errorCodes';
 
 /** Toast 类型 */
 export type ToastKind = 'success' | 'error' | 'warning' | 'info' | 'pending';

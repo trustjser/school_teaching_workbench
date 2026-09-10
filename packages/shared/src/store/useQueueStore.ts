@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import type { PendingQueueItem, SyncLogEntry } from '@/types/models';
-import type { FlushReport } from '@/types/api';
-import { syncFlush, syncLogList, syncQueueList, syncRetry } from '@/lib/db';
+import type { PendingQueueItem, SyncLogEntry } from '@shared/types/models';
+import type { FlushReport } from '@shared/types/api';
+import { syncFlush, syncLogList, syncQueueList, syncRetry } from '@shared/lib/db';
 import { useAppStore } from './useAppStore';
 
 interface QueueState {

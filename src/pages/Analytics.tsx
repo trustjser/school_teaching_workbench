@@ -1,24 +1,24 @@
 import { useEffect, useState } from 'react';
 import { BarChart3, Download, ListChecks } from 'lucide-react';
-import { useTaskStore } from '@/store/useTaskStore';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Table, type TableColumn } from '@/components/ui/Table';
-import { Badge } from '@/components/ui/Badge';
-import { Spinner } from '@/components/ui/Spinner';
-import { StatCard } from '@/components/ui/StatCard';
-import { SkeletonStatCard } from '@/components/ui/Skeleton';
-import { Stagger } from '@/components/motion/Reveal';
-import { checkinClassAttendance } from '@/lib/db';
+import { useTaskStore } from '@shared/store/useTaskStore';
+import { Card } from '@shared/components/ui/Card';
+import { Button } from '@shared/components/ui/Button';
+import { Table, type TableColumn } from '@shared/components/ui/Table';
+import { Badge } from '@shared/components/ui/Badge';
+import { Spinner } from '@shared/components/ui/Spinner';
+import { StatCard } from '@shared/components/ui/StatCard';
+import { SkeletonStatCard } from '@shared/components/ui/Skeleton';
+import { Stagger } from '@shared/components/motion/Reveal';
+import { checkinClassAttendance } from '@shared/lib/db';
 import {
   exportSheetsToXlsx,
   buildTaskCompletionSheet,
   buildClassSummarySheet,
   defaultExportName,
-} from '@/lib/exporter';
-import { toDateKey, formatPercent } from '@/lib/format';
-import type { TaskCompletionRow } from '@/types/api';
-import type { ClassSummaryExportRow } from '@/lib/exporter';
+} from '@shared/lib/exporter';
+import { toDateKey, formatPercent } from '@shared/lib/format';
+import type { TaskCompletionRow } from '@shared/types/api';
+import type { ClassSummaryExportRow } from '@shared/lib/exporter';
 
 /** 统计导出页（教务处端）：任务完成率 + 班级考勤汇总，导出 xlsx */
 export function Analytics(): JSX.Element {

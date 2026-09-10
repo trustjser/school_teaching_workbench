@@ -1,5 +1,5 @@
 import type { TextareaHTMLAttributes } from 'react';
-import { NOTE_MAX_LENGTH } from '@/constants/app';
+import { NOTE_MAX_LENGTH } from '@shared/constants/app';
 
 export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   label?: string;

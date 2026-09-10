@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useStudentStore } from '@/store/useStudentStore';
-import { useCheckinStore } from '@/store/useCheckinStore';
+import { useStudentStore } from '@shared/store/useStudentStore';
+import { useCheckinStore } from '@shared/store/useCheckinStore';
 import {
   CHECKIN_STATUS_META,
   CHECKIN_STATES_ALL,
-} from '@/constants/status';
-import { toDateKey } from '@/lib/format';
-import type { CheckinState } from '@/types/enums';
-import { Input } from '@/components/ui/Input';
-import { Button } from '@/components/ui/Button';
+} from '@shared/constants/status';
+import { toDateKey } from '@shared/lib/format';
+import type { CheckinState } from '@shared/types/enums';
+import { Input } from '@shared/components/ui/Input';
+import { Button } from '@shared/components/ui/Button';
 import { CheckinRecordEditor } from './CheckinRecordEditor';
 
 export interface AttendanceGridProps {

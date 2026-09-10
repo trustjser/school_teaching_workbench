@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useBroadcastStore } from '@/store/useBroadcastStore';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { SkeletonCard } from '@/components/ui/Skeleton';
-import { PRIORITY_OPTIONS } from '@/constants/status';
-import { parseBroadcastPayload } from '@/types/broadcast';
-import { formatDateTime } from '@/lib/format';
+import { useBroadcastStore } from '@shared/store/useBroadcastStore';
+import { Card } from '@shared/components/ui/Card';
+import { Button } from '@shared/components/ui/Button';
+import { Badge } from '@shared/components/ui/Badge';
+import { EmptyState } from '@shared/components/ui/EmptyState';
+import { SkeletonCard } from '@shared/components/ui/Skeleton';
+import { PRIORITY_OPTIONS } from '@shared/constants/status';
+import { parseBroadcastPayload } from '@shared/types/broadcast';
+import { formatDateTime } from '@shared/lib/format';
 
 /** 通知资料收件箱（班级端）：查看教务通知、资料并确认接收 */
 export function InboxPage(): JSX.Element {

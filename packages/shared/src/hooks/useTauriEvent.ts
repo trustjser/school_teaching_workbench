@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { listenEvent } from '@/lib/events';
-import type { TauriEventMap, TauriEventName } from '@/types/events';
+import { listenEvent } from '@shared/lib/events';
+import type { TauriEventMap, TauriEventName } from '@shared/types/events';
 
 /**
  * 订阅单个 Tauri 事件，返回最新 payload，并在卸载时自动卸载监听。

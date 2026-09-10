@@ -1,5 +1,5 @@
 import { invoke, isTauri as _isTauri } from '@tauri-apps/api/core';
-import type { ErrorCode } from '@/types/enums';
+import type { ErrorCode } from '@shared/types/enums';
 
 /* =============================================================================
  * 前端唯一 invoke 出口。禁止在其它文件中裸调 invoke()。

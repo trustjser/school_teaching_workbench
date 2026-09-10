@@ -1,8 +1,8 @@
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import './index.css';
-import { readStoredTheme, applyThemeClass, persistTheme } from './lib/theme';
-import { useAppStore } from './store/useAppStore';
+import '@shared/styles/index.css';
+import { readStoredTheme, applyThemeClass, persistTheme } from '@shared/lib/theme';
+import { useAppStore } from '@shared/store/useAppStore';
 
 // 首帧前应用主题，避免闪白 / 闪黑
 const initialTheme = readStoredTheme();

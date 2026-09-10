@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { useStudentStore } from '@/store/useStudentStore';
-import { useAppStore } from '@/store/useAppStore';
-import { StudentTable } from '@/components/student/StudentTable';
-import { StudentEditDrawer } from '@/components/student/StudentEditDrawer';
-import type { Student } from '@/types/models';
+import { useStudentStore } from '@shared/store/useStudentStore';
+import { useAppStore } from '@shared/store/useAppStore';
+import { StudentTable } from '@shared/components/student/StudentTable';
+import { StudentEditDrawer } from '@shared/components/student/StudentEditDrawer';
+import type { Student } from '@shared/types/models';
 
 /** 学生名册页：编辑 / 删除 / 状态变更（班级端按绑定班级消费，名册由教务处下发，本地不导入） */
 export function StudentRoster(): JSX.Element {

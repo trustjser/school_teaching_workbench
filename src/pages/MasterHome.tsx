@@ -1,21 +1,21 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart3, CalendarCheck, Monitor, Radio, RefreshCw } from 'lucide-react';
-import { useDeviceStore } from '@/store/useDeviceStore';
-import { useBroadcastStore } from '@/store/useBroadcastStore';
-import { useDirectoryStore } from '@/store/useDirectoryStore';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Select } from '@/components/ui/Select';
-import { Badge } from '@/components/ui/Badge';
-import { Spinner } from '@/components/ui/Spinner';
-import { StatCard } from '@/components/ui/StatCard';
-import { SkeletonStatCard } from '@/components/ui/Skeleton';
-import { Table, type TableColumn } from '@/components/ui/Table';
-import { Stagger } from '@/components/motion/Reveal';
-import { checkinSchoolSummary, checkinClassAttendance } from '@/lib/db';
-import { toDateKey, formatPercent } from '@/lib/format';
-import type { SchoolSummary, ClassAttendanceRow } from '@/types/api';
+import { useDeviceStore } from '@shared/store/useDeviceStore';
+import { useBroadcastStore } from '@shared/store/useBroadcastStore';
+import { useDirectoryStore } from '@shared/store/useDirectoryStore';
+import { Card } from '@shared/components/ui/Card';
+import { Button } from '@shared/components/ui/Button';
+import { Select } from '@shared/components/ui/Select';
+import { Badge } from '@shared/components/ui/Badge';
+import { Spinner } from '@shared/components/ui/Spinner';
+import { StatCard } from '@shared/components/ui/StatCard';
+import { SkeletonStatCard } from '@shared/components/ui/Skeleton';
+import { Table, type TableColumn } from '@shared/components/ui/Table';
+import { Stagger } from '@shared/components/motion/Reveal';
+import { checkinSchoolSummary, checkinClassAttendance } from '@shared/lib/db';
+import { toDateKey, formatPercent } from '@shared/lib/format';
+import type { SchoolSummary, ClassAttendanceRow } from '@shared/types/api';
 
 /** 教务处首页：节点监控概览 + 全校考勤大屏 + 任务下发 + 统计导出入口 */
 export function MasterHome(): JSX.Element {

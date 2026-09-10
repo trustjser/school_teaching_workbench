@@ -1,4 +1,4 @@
-import type { ErrorCode } from '@/types/enums';
+import type { ErrorCode } from '@shared/types/enums';
 
 /** 错误码元信息：中文提示 + 是否可重试 + 建议操作 */
 export interface ErrorMeta {

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Modal } from '@/components/ui/Modal';
-import { Select } from '@/components/ui/Select';
-import { Textarea } from '@/components/ui/Textarea';
-import type { CustomTask, Student, TaskRecord, TaskStatusNode } from '@/types/models';
+import { Button } from '@shared/components/ui/Button';
+import { Input } from '@shared/components/ui/Input';
+import { Modal } from '@shared/components/ui/Modal';
+import { Select } from '@shared/components/ui/Select';
+import { Textarea } from '@shared/components/ui/Textarea';
+import type { CustomTask, Student, TaskRecord, TaskStatusNode } from '@shared/types/models';
 
 export interface TaskRecordPatch {
   nodeKey: string;

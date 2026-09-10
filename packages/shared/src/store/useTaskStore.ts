@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import type { CustomTask, TaskRecord, TaskStatusNode } from '@/types/models';
-import type { Page, TaskCompletionRow, TaskProgressRow } from '@/types/api';
+import type { CustomTask, TaskRecord, TaskStatusNode } from '@shared/types/models';
+import type { Page, TaskCompletionRow, TaskProgressRow } from '@shared/types/api';
 import {
   taskCompletionStats,
   taskDelete,
@@ -15,10 +15,10 @@ import {
   taskRecordUpsert,
   taskRecordsBatchUpsert,
   taskUpsert,
-} from '@/lib/db';
+} from '@shared/lib/db';
 import { useAppStore } from './useAppStore';
 import { useStudentStore } from './useStudentStore';
-import { TASK_NODE_MAX, TASK_NODE_MIN } from '@/constants/app';
+import { TASK_NODE_MAX, TASK_NODE_MIN } from '@shared/constants/app';
 
 /**
  * 自定义任务引擎状态。

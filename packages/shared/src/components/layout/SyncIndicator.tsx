@@ -1,8 +1,8 @@
 import { RefreshCw, Wifi, WifiOff } from 'lucide-react';
-import { useQueueStore } from '@/store/useQueueStore';
-import { useAppStore } from '@/store/useAppStore';
-import { useDeviceStore } from '@/store/useDeviceStore';
-import { Tooltip } from '@/components/ui/Tooltip';
+import { useQueueStore } from '@shared/store/useQueueStore';
+import { useAppStore } from '@shared/store/useAppStore';
+import { useDeviceStore } from '@shared/store/useDeviceStore';
+import { Tooltip } from '@shared/components/ui/Tooltip';
 
 export interface SyncIndicatorProps {
   compact?: boolean;

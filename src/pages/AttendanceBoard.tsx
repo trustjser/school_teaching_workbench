@@ -1,21 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CalendarCheck, CheckCircle2, RefreshCw, UserMinus, UserX } from 'lucide-react';
-import { useDeviceStore } from '@/store/useDeviceStore';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Tabs } from '@/components/ui/Tabs';
-import { Table, type TableColumn } from '@/components/ui/Table';
-import { Badge } from '@/components/ui/Badge';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { StatCard } from '@/components/ui/StatCard';
-import { SkeletonStatCard } from '@/components/ui/Skeleton';
-import { Stagger } from '@/components/motion/Reveal';
-import { checkinSchoolSummary, checkinClassAttendance, checkinExceptionStudents } from '@/lib/db';
-import { toDateKey, formatPercent } from '@/lib/format';
-import type { SchoolSummary, ClassAttendanceRow, ExceptionStudentRow } from '@/types/api';
-import { useTauriEventHandler } from '@/hooks/useTauriEvent';
-import { TAURI_EVENTS } from '@/types/events';
+import { useDeviceStore } from '@shared/store/useDeviceStore';
+import { Card } from '@shared/components/ui/Card';
+import { Button } from '@shared/components/ui/Button';
+import { Input } from '@shared/components/ui/Input';
+import { Tabs } from '@shared/components/ui/Tabs';
+import { Table, type TableColumn } from '@shared/components/ui/Table';
+import { Badge } from '@shared/components/ui/Badge';
+import { EmptyState } from '@shared/components/ui/EmptyState';
+import { StatCard } from '@shared/components/ui/StatCard';
+import { SkeletonStatCard } from '@shared/components/ui/Skeleton';
+import { Stagger } from '@shared/components/motion/Reveal';
+import { checkinSchoolSummary, checkinClassAttendance, checkinExceptionStudents } from '@shared/lib/db';
+import { toDateKey, formatPercent } from '@shared/lib/format';
+import type { SchoolSummary, ClassAttendanceRow, ExceptionStudentRow } from '@shared/types/api';
+import { useTauriEventHandler } from '@shared/hooks/useTauriEvent';
+import { TAURI_EVENTS } from '@shared/types/events';
 
 /** 考勤大屏（教务处端）：全校汇总 + 按班级明细 + 异常学生名单 */
 export function AttendanceBoard(): JSX.Element {

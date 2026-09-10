@@ -2,10 +2,10 @@ import * as XLSX from 'xlsx';
 import { saveBinary, saveText } from './download';
 import { toCsvText } from './csv';
 import { formatDateTime, toDateKey } from './format';
-import type { ExportSheet } from '@/types/api';
-import type { CheckinState, StudentStatus } from '@/types/enums';
-import type { Student, TaskRecord, TaskStatusNode } from '@/types/models';
-import { CHECKIN_STATUS_META, STUDENT_STATUS_META } from '@/constants/status';
+import type { ExportSheet } from '@shared/types/api';
+import type { CheckinState, StudentStatus } from '@shared/types/enums';
+import type { Student, TaskRecord, TaskStatusNode } from '@shared/types/models';
+import { CHECKIN_STATUS_META, STUDENT_STATUS_META } from '@shared/constants/status';
 
 /**
  * 导出：xlsx（SheetJS，前端生成）+ csv。

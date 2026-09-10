@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useStudentStore } from '@/store/useStudentStore';
-import { useTaskStore } from '@/store/useTaskStore';
-import { Tabs } from '@/components/ui/Tabs';
-import { Badge } from '@/components/ui/Badge';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { Select } from '@/components/ui/Select';
-import { SearchableSelect } from '@/components/ui/SearchableSelect';
-import { Button } from '@/components/ui/Button';
-import { COLOR_TOKEN_HEX } from '@/constants/status';
-import { resolveIcon } from '@/components/ui/IconButton';
+import { useStudentStore } from '@shared/store/useStudentStore';
+import { useTaskStore } from '@shared/store/useTaskStore';
+import { Tabs } from '@shared/components/ui/Tabs';
+import { Badge } from '@shared/components/ui/Badge';
+import { EmptyState } from '@shared/components/ui/EmptyState';
+import { Select } from '@shared/components/ui/Select';
+import { SearchableSelect } from '@shared/components/ui/SearchableSelect';
+import { Button } from '@shared/components/ui/Button';
+import { COLOR_TOKEN_HEX } from '@shared/constants/status';
+import { resolveIcon } from '@shared/components/ui/IconButton';
 import { TaskRecordEditor } from './TaskRecordEditor';
 
 export interface TaskMatrixViewProps {

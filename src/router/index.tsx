@@ -1,27 +1,27 @@
 import { createHashRouter, Navigate, Outlet } from 'react-router-dom';
-import { useBootstrap } from '@/hooks/useBootstrap';
-import { useAppStore } from '@/store/useAppStore';
-import { AppShell } from '@/components/layout/AppShell';
-import { Spinner } from '@/components/ui/Spinner';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
+import { useBootstrap } from '@shared/hooks/useBootstrap';
+import { useAppStore } from '@shared/store/useAppStore';
+import { AppShell } from '@shared/components/layout/AppShell';
+import { Spinner } from '@shared/components/ui/Spinner';
+import { Card } from '@shared/components/ui/Card';
+import { Button } from '@shared/components/ui/Button';
 
-import { ClientHome } from '@/pages/ClientHome';
-import { StudentRoster } from '@/pages/StudentRoster';
-import { CheckinPage } from '@/pages/CheckinPage';
-import { TaskManage } from '@/pages/TaskManage';
-import { TaskMatrix } from '@/pages/TaskMatrix';
-import { InboxPage } from '@/pages/InboxPage';
-import { SetupWizard } from '@/components/setup/SetupWizard';
-import { MasterHome } from '@/pages/MasterHome';
-import { DeviceMonitor } from '@/pages/DeviceMonitor';
-import { AttendanceBoard } from '@/pages/AttendanceBoard';
-import { BroadcastCenter } from '@/pages/BroadcastCenter';
-import { Analytics } from '@/pages/Analytics';
-import { TaskDashboard } from '@/pages/TaskDashboard';
-import { TaskDetail } from '@/pages/TaskDetail';
-import { GradeClassManage } from '@/pages/GradeClassManage';
-import { Settings } from '@/pages/Settings';
+import { ClientHome } from '../pages/ClientHome';
+import { StudentRoster } from '../pages/StudentRoster';
+import { CheckinPage } from '../pages/CheckinPage';
+import { TaskManage } from '../pages/TaskManage';
+import { TaskMatrix } from '../pages/TaskMatrix';
+import { InboxPage } from '../pages/InboxPage';
+import { SetupWizard } from '@shared/components/setup/SetupWizard';
+import { MasterHome } from '../pages/MasterHome';
+import { DeviceMonitor } from '../pages/DeviceMonitor';
+import { AttendanceBoard } from '../pages/AttendanceBoard';
+import { BroadcastCenter } from '../pages/BroadcastCenter';
+import { Analytics } from '../pages/Analytics';
+import { TaskDashboard } from '../pages/TaskDashboard';
+import { TaskDetail } from '../pages/TaskDetail';
+import { GradeClassManage } from '../pages/GradeClassManage';
+import { Settings } from '../pages/Settings';
 
 /** 启动中全屏遮罩 */
 function FullScreenLoading(): JSX.Element {

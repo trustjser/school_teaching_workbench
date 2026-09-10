@@ -1,7 +1,7 @@
 import { Contrast, Moon, Sun } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { ThemeName } from '@/types/enums';
-import { useAppStore } from '@/store/useAppStore';
+import type { ThemeName } from '@shared/types/enums';
+import { useAppStore } from '@shared/store/useAppStore';
 
 interface Option {
   value: ThemeName;

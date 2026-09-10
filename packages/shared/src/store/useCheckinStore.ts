@@ -1,9 +1,9 @@
 import { create } from 'zustand';
-import type { CheckinPeriod, CheckinState } from '@/types/enums';
-import type { CheckinRecord, CheckinRow, DailySummary, Student } from '@/types/models';
-import { checkinBatchMark, checkinList, checkinMark } from '@/lib/db';
-import { nextCheckinState } from '@/constants/status';
-import { toDateKey } from '@/lib/format';
+import type { CheckinPeriod, CheckinState } from '@shared/types/enums';
+import type { CheckinRecord, CheckinRow, DailySummary, Student } from '@shared/types/models';
+import { checkinBatchMark, checkinList, checkinMark } from '@shared/lib/db';
+import { nextCheckinState } from '@shared/constants/status';
+import { toDateKey } from '@shared/lib/format';
 import { useAppStore } from './useAppStore';
 import { useStudentStore } from './useStudentStore';
 
