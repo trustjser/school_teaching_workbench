@@ -1,5 +1,6 @@
 //! 进程启动配置：首次运行播种默认值（设备 ID、共享密钥、模式、端口等）。
 
+use crate::db::models::AppMode;
 use crate::db::repo::settings_repo;
 use crate::db::DbPool;
 use crate::error::AppResult;
@@ -35,31 +36,35 @@ fn local_machine_id() -> String {
 /// 播种首次运行所需的全部默认配置项；幂等（已存在则跳过）。
 ///
 /// `identity_namespace` 是应用端类型（例如教务端与班级端使用不同的
-/// Tauri bundle identifier）。首次启动时向导还没有让用户选择模式，不能
-/// 直接用默认的 `client` 生成设备 ID，否则同一台机器的两个端会得到相同
-/// 的 ID，mDNS 会把对端当成本机而不再拉取目录。
-pub async fn ensure_defaults(pool: &DbPool, identity_namespace: &str) -> AppResult<()> {
-    let had_mode = settings_repo::get_raw(pool, "app_mode").await?.is_some();
-    if !had_mode {
-        settings_repo::set_raw(pool, "app_mode", Some("client"), "string").await?;
+/// Tauri bundle identifier），用于给同机两端生成不同的设备 ID。
+/// `target_mode` 是当前 app target 的固定角色：运行模式**只能**由
+/// 构建期 identifier 决定，数据库里的 `app_mode` 只是镜像，篡改后会被
+/// 这里强制覆盖。
+pub async fn ensure_defaults(
+    pool: &DbPool,
+    identity_namespace: &str,
+    target_mode: AppMode,
+) -> AppResult<()> {
+    let stored_mode = settings_repo::get_string(pool, "app_mode", "").await?;
+    if stored_mode != target_mode.as_str() {
+        // 角色由 app target 锁定：缺失或被篡改的 app_mode 一律以 target 为准。
+        settings_repo::set_raw(pool, "app_mode", Some(target_mode.as_str()), "string").await?;
     }
-    let mode = settings_repo::get_string(pool, "app_mode", "client").await?;
+
     let machine_id = local_machine_id();
     if settings_repo::get_raw(pool, "device_id").await?.is_none() {
-        // 已完成过模式配置的旧库继续沿用模式命名空间；全新库使用 bundle
-        // 标识区分教务端/班级端，待向导完成后仍保持同一稳定 ID。
-        let namespace = if had_mode { mode.as_str() } else { identity_namespace };
+        // 新库：设备 ID 命名空间使用 bundle identifier，保证同机两端 ID 不同。
         settings_repo::set_raw(
             pool,
             "device_id",
-            Some(&stable_device_id(&machine_id, namespace)),
+            Some(&stable_device_id(&machine_id, identity_namespace)),
             "string",
         )
         .await?;
-    } else if had_mode && mode == "master" {
-        // 兼容早期稳定 ID 实现：首次启动时把尚未选择模式的数据库按
-        // `client` 命名空间生成了 ID。若该库后来完成为教务端，启动时
-        // 自动迁移为教务端 ID，避免与同机班级端发生 mDNS 自身过滤。
+    } else if target_mode == AppMode::Master {
+        // 兼容早期稳定 ID 实现：曾按 `client` 命名空间生成过 ID 的旧库，
+        // 升级为教务端后重新按教务端命名空间生成，避免与同机班级端发生
+        // mDNS 自身过滤。
         let current = settings_repo::get_string(pool, "device_id", "").await?;
         let legacy_client_id = stable_device_id(&machine_id, "client");
         if current == legacy_client_id {
@@ -104,6 +109,7 @@ pub async fn ensure_defaults(pool: &DbPool, identity_namespace: &str) -> AppResu
 #[cfg(test)]
 mod tests {
     use super::{ensure_defaults, local_machine_id, stable_device_id};
+    use crate::db::models::AppMode;
     use crate::db::{create_pool, run_migrations};
     use crate::db::repo::settings_repo;
 
@@ -125,6 +131,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fresh_target_defaults_use_requested_mode() {
+        let dir = std::env::temp_dir().join(format!("lanwb_target_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pool = create_pool(&dir.join("settings.db")).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        ensure_defaults(
+            &pool,
+            "cn.yipaike.lanworkbench.affairs",
+            crate::db::models::AppMode::Master,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            settings_repo::get_string(&pool, "app_mode", "client").await.unwrap(),
+            "master"
+        );
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn fresh_target_defaults_write_client_for_classroom() {
+        let dir = std::env::temp_dir().join(format!("lanwb_target_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pool = create_pool(&dir.join("settings.db")).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        ensure_defaults(
+            &pool,
+            "cn.yipaike.lanworkbench.classroom",
+            crate::db::models::AppMode::Client,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            settings_repo::get_string(&pool, "app_mode", "master").await.unwrap(),
+            "client"
+        );
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn target_mode_overwrites_tampered_app_mode() {
+        let dir = std::env::temp_dir().join(format!("lanwb_target_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pool = create_pool(&dir.join("settings.db")).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        // 模拟被手工改库的班级端：数据库里写成了 master，target 仍是 client。
+        settings_repo::set_raw(&pool, "app_mode", Some("master"), "string")
+            .await
+            .unwrap();
+        ensure_defaults(
+            &pool,
+            "cn.yipaike.lanworkbench.classroom",
+            crate::db::models::AppMode::Client,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            settings_repo::get_string(&pool, "app_mode", "master").await.unwrap(),
+            "client"
+        );
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
     async fn migrates_legacy_client_namespace_when_master_is_already_configured() {
         let dir = std::env::temp_dir().join(format!("lanwb_settings_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("create temp dir");
@@ -138,7 +211,7 @@ mod tests {
             .await
             .expect("set legacy id");
 
-        ensure_defaults(&pool, "cn.yipaike.lanworkbench")
+        ensure_defaults(&pool, "cn.yipaike.lanworkbench", AppMode::Master)
             .await
             .expect("migrate defaults");
         let migrated = settings_repo::get_string(&pool, "device_id", "")

@@ -78,8 +78,9 @@ async fn bootstrap(app: tauri::AppHandle) -> Result<AppState, AppError> {
     };
     let mode = target.mode();
 
-    // 4) 播种默认配置（降级）
-    match settings::ensure_defaults(&pool, app.config().identifier.as_str()).await {
+    // 4) 播种默认配置（降级）。角色由 app target 固定传入，数据库里的 app_mode
+    //    若被篡改会被这里强制覆盖。
+    match settings::ensure_defaults(&pool, app.config().identifier.as_str(), target.mode()).await {
         Ok(()) => step!("ensure_defaults OK"),
         Err(e) => step!("WARN ensure_defaults 失败: {} (使用空默认值继续)", e),
     }
@@ -181,7 +182,6 @@ pub fn run() {
             crate::commands::settings_cmd::settings_set,
             crate::commands::settings_cmd::settings_complete_setup,
             crate::commands::settings_cmd::settings_reset_client,
-            crate::commands::settings_cmd::settings_switch_mode,
             crate::commands::settings_cmd::settings_rotate_key,
             crate::commands::settings_cmd::settings_key_info,
             // ---- 广播 ----

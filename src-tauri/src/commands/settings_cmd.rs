@@ -196,26 +196,6 @@ mod tests {
     }
 }
 
-/// 运行模式热切换（班级端 ↔ 教务处端）。
-#[tauri::command]
-pub async fn settings_switch_mode(
-    state: State<'_, Arc<AppState>>,
-    mode: String,
-) -> AppResult<AppMode> {
-    if settings_repo::get_bool(&state.pool, "completed_setup", false).await? {
-        return Err(AppError::mode(
-            "已完成初始化，不能切换运行模式；班级端请使用重置配置",
-        ));
-    }
-    let mode = AppMode::parse(&mode);
-    settings_repo::set_raw(&state.pool, "app_mode", Some(mode.as_str()), "string").await?;
-    let _ = state.app.emit(
-        Events::MODE_CHANGED,
-        serde_json::json!({ "mode": mode.as_str() }),
-    );
-    Ok(mode)
-}
-
 /// 轮换共享密钥，返回新 kid（旧包立刻失效）。
 #[tauri::command]
 pub async fn settings_rotate_key(
