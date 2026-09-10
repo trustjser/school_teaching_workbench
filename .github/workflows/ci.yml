@@ -1,0 +1,92 @@
+name: CI
+
+# 持续集成：在每次 push / PR 到 main 时运行。
+# 轻量校验，不做原生打包（原生打包在 release.yml 中进行）。
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.77.2"
+
+jobs:
+  # ---------- 前端：类型检查 + 静态边界检查 + 双端构建 ----------
+  frontend:
+    name: Frontend typecheck & build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+
+      - name: App boundary check
+        run: npm run check:boundaries
+
+      - name: Build-target check
+        run: npm run check:build-targets
+
+      - name: Build affairs frontend
+        run: npm run build:affairs
+
+      - name: Build classroom frontend
+        run: npm run build:classroom
+
+  # ---------- Rust：fmt / clippy / check / test ----------
+  rust:
+    name: Rust check & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.77.2"
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev
+
+      - name: Cargo fmt check
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+
+      - name: Cargo clippy
+        # 当前不开启 -D warnings，避免历史告警阻塞流水线；
+        # 待代码整洁后可将末尾改为 `-- -D warnings`。
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+
+      - name: Cargo check
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Cargo test
+        # 当前无 #[test]，仅作占位以便后续接入单元测试。
+        run: cargo test --manifest-path src-tauri/Cargo.toml

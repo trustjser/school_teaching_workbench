@@ -1,0 +1,101 @@
+name: Release
+
+# 发布 / 部署：打 tag（v*）时触发，三 OS 矩阵原生打包双端（教务端 + 班级端），
+# 产物作为 Release 资源上传到 GitHub Releases，即完成「部署」。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.77.2"
+
+  # ---------- 可选：macOS 代码签名与公证 ----------
+  # 在仓库 Settings → Secrets 中配置后生效；留空则走未签名构建，不阻塞流水线。
+  APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}            # base64 编码的 .p12
+  APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+  APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}  # "Developer ID Application: ..."
+  APPLE_ID: ${{ secrets.APPLE_ID }}                              # 苹果账号邮箱
+  APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}                  # App 专用密码
+  APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+  # ---------- 可选：Windows 代码签名 ----------
+  # Tauri v2 通过 SIGN_COMMAND 调用外部签名工具；此处仅注入证书，供签名脚本使用。
+  WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}        # base64 编码的 .pfx
+  WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.77.2"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # ---------- 各 OS 系统依赖 ----------
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev
+
+      # Windows / macOS 自带 WebView（WebView2 / WKWebView），无需额外系统依赖。
+      # 如需 Windows 签名，可在此步骤还原 WINDOWS_CERTIFICATE 并配置 SIGN_COMMAND。
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # ---------- 原生打包：教务端 ----------
+      - name: Tauri build (affairs / 教务端)
+        run: npm run tauri:build:affairs
+
+      # ---------- 原生打包：班级端 ----------
+      - name: Tauri build (classroom / 班级端)
+        run: npm run tauri:build:classroom
+
+      - name: List bundle output
+        shell: bash
+        run: ls -R src-tauri/target/release/bundle | head -60
+
+      # ---------- 上传到 GitHub Release ----------
+      - name: Upload release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: src-tauri/target/release/bundle/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
