@@ -375,6 +375,85 @@ export async function directoryBatchCreate(
 }
 
 /* -------------------------------------------------------------------------- */
+/* rollover（学年换届 / 班级端切绑）                                              */
+/* -------------------------------------------------------------------------- */
+
+/** 换届请求 */
+export interface RolloverRequest {
+  sourceSchoolYearId: string;
+  newSchoolYearName: string;
+  newSchoolYearNo?: string | null;
+  newStartDate?: string | null;
+  newEndDate?: string | null;
+  /** 这些年级的学生整体毕业（保留在原学年班级，不升入新学年名册） */
+  graduatingGradeIds: string[];
+  /** 逐行勾选留级的学生 id（完全不动） */
+  retainedStudentIds: string[];
+}
+
+/** 单个学生的换届计划 */
+export interface RolloverStudentPlan {
+  studentId: string;
+  studentNo: string;
+  name: string;
+  fromClassId: string;
+  fromGrade: string;
+  fromClass: string;
+  action: 'promote' | 'graduate' | 'retain';
+  toGrade: string | null;
+  toClass: string | null;
+  toClassId: string | null;
+}
+
+/** 教室重绑计划 */
+export interface RolloverRebindPlan {
+  classroomId: string;
+  roomName: string;
+  fromClass: string;
+  toClass: string;
+  toClassId: string;
+}
+
+/** 换届预览 / 执行结果 */
+export interface RolloverReport {
+  sourceSchoolYearId: string;
+  newSchoolYearId: string;
+  newSchoolYearName: string;
+  newYearCreated: boolean;
+  classesCreated: number;
+  classesReused: number;
+  promoteCount: number;
+  graduateCount: number;
+  retainCount: number;
+  rebindCount: number;
+  studentPlans: RolloverStudentPlan[];
+  rebindPlans: RolloverRebindPlan[];
+  warnings: string[];
+}
+
+/**
+ * 学年换届（教务端）。`dryRun=true` 返回预览不写库；确认后 `dryRun=false`
+ * 在单一事务内执行（新学年 + 克隆班级 + 学生升级 + 教室重绑）。
+ */
+export async function schoolYearRollover(
+  request: RolloverRequest,
+  dryRun: boolean,
+): Promise<RolloverReport> {
+  return invokeCmd<RolloverReport>('school_year_rollover', { request, dryRun });
+}
+
+/** 班级端换届切绑：把本机绑定切到新学年班级（只切绑定、不重装） */
+export async function clientSwitchBinding(
+  schoolYearId: string,
+  classId: string,
+): Promise<RolloverReport> {
+  return invokeCmd<RolloverReport>('client_switch_binding', {
+    schoolYearId,
+    classId,
+  });
+}
+
+/* -------------------------------------------------------------------------- */
 /* checkin                                                                     */
 /* -------------------------------------------------------------------------- */
 

@@ -9,6 +9,7 @@ pub mod directory_repo;
 pub mod grade_repo;
 pub mod package_repo;
 pub mod queue_repo;
+pub mod rollover_repo;
 pub mod school_year_repo;
 pub mod settings_repo;
 pub mod student_repo;

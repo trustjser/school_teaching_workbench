@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CalendarPlus, Copy, ListPlus, Pencil, Plus, School, Trash2, Users, Monitor } from 'lucide-react';
+import { CalendarPlus, ArrowRightLeft, Copy, ListPlus, Pencil, Plus, School, Trash2, Users, Monitor } from 'lucide-react';
 import { Card } from '@shared/components/ui/Card';
 import { Button } from '@shared/components/ui/Button';
 import { Input } from '@shared/components/ui/Input';
@@ -15,7 +15,9 @@ import {
   BatchAddClassesModal,
   CloneYearModal,
   QuickSchoolSetupModal,
+  RolloverWizardModal,
 } from '@affairs/components/DirectoryBatchModals';
+import type { DirectoryBatchCreateReport, RolloverReport } from '@shared/lib/db';
 import { useDirectoryStore } from '@shared/store/useDirectoryStore';
 import { useStudentStore } from '@shared/store/useStudentStore';
 import { useDeviceStore } from '@shared/store/useDeviceStore';
@@ -23,7 +25,6 @@ import { useAppStore } from '@shared/store/useAppStore';
 import { useTauriEventHandler } from '@shared/hooks/useTauriEvent';
 import { TAURI_EVENTS } from '@shared/types/events';
 import { classroomAssign, classroomAssignments, classroomDelete, classroomList, classroomUpsert } from '@shared/lib/db';
-import type { DirectoryBatchCreateReport } from '@shared/lib/db';
 import type { Class, Classroom, ClassroomAssignment, SchoolYear, Student } from '@shared/types/models';
 
 interface GradeDraft {
@@ -133,6 +134,7 @@ export function GradeClassManage(): JSX.Element {
   const [quickSetupOpen, setQuickSetupOpen] = useState(false);
   const [cloneYearOpen, setCloneYearOpen] = useState(false);
   const [batchAddOpen, setBatchAddOpen] = useState(false);
+  const [rolloverOpen, setRolloverOpen] = useState(false);
 
   useEffect(() => {
     void loadGrades();
@@ -311,6 +313,21 @@ export function GradeClassManage(): JSX.Element {
     setPendingDelete(null);
   };
 
+  /** 换届执行完成后的收尾：刷新目录、切到新学年、汇总 toast。 */
+  const handleRolloverDone = async (report: RolloverReport): Promise<void> => {
+    await loadGrades();
+    await loadSchoolYears();
+    selectSchoolYear(report.newSchoolYearId);
+    if (selectedGradeId) await loadClasses(selectedGradeId);
+    pushToast({
+      kind: 'success',
+      title: '换届完成',
+      description:
+        `新学年「${report.newSchoolYearName}」：升级 ${report.promoteCount} 人 · 毕业 ${report.graduateCount} 人 · ` +
+        `新建班级 ${report.classesCreated} 个 · 教室重绑 ${report.rebindCount} 间`,
+    });
+  };
+
   /** 批量创建成功后的统一收尾：刷新目录 stores、切到新学年、汇总 toast。 */
   const handleBatchDone = async (report: DirectoryBatchCreateReport): Promise<void> => {
     await loadGrades();
@@ -378,6 +395,16 @@ export function GradeClassManage(): JSX.Element {
         >
           克隆学年结构
         </Button>
+        {selectedYear && (
+          <Button
+            variant="secondary"
+            size="md"
+            icon={<ArrowRightLeft className="h-4 w-4" />}
+            onClick={() => setRolloverOpen(true)}
+          >
+            换届
+          </Button>
+        )}
         {selectedYear && (
           <Button
             variant="ghost"
@@ -870,6 +897,14 @@ export function GradeClassManage(): JSX.Element {
         existingClasses={classes}
         onClose={() => setBatchAddOpen(false)}
         onDone={handleBatchDone}
+      />
+      <RolloverWizardModal
+        open={rolloverOpen}
+        schoolYears={schoolYears}
+        grades={grades}
+        defaultSourceYearId={selectedSchoolYearId}
+        onClose={() => setRolloverOpen(false)}
+        onDone={handleRolloverDone}
       />
     </div>
   );

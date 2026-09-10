@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Copy, ListPlus, Plus, School, Trash2 } from 'lucide-react';
+import { ArrowRightLeft, Copy, ListPlus, Plus, School, Trash2 } from 'lucide-react';
 import { Modal } from '@shared/components/ui/Modal';
 import { Button } from '@shared/components/ui/Button';
 import { Input } from '@shared/components/ui/Input';
@@ -7,9 +7,12 @@ import { SearchableSelect } from '@shared/components/ui/SearchableSelect';
 import {
   classList,
   directoryBatchCreate,
+  schoolYearRollover,
   type DirectoryBatchCreateReport,
   type DirectoryBatchClassInput,
   type DirectoryBatchGradeInput,
+  type RolloverReport,
+  type RolloverRequest,
 } from '@shared/lib/db';
 import type { Class, Grade, SchoolYear } from '@shared/types/models';
 
@@ -493,5 +496,259 @@ export function BatchAddClassesModal({
         )}
       </div>
     </Modal>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* 换届向导：干跑预览（逐行可调留级）→ 确认单事务执行                             */
+/* -------------------------------------------------------------------------- */
+
+const ACTION_LABELS: Record<string, string> = {
+  promote: '升级',
+  graduate: '毕业',
+  retain: '留级',
+};
+
+export interface RolloverWizardModalProps {
+  open: boolean;
+  schoolYears: SchoolYear[];
+  grades: Grade[];
+  /** 默认源学年（当前选中学年） */
+  defaultSourceYearId: string | null;
+  onClose: () => void;
+  onDone: (report: RolloverReport) => Promise<void> | void;
+}
+
+export function RolloverWizardModal({
+  open,
+  schoolYears,
+  grades,
+  defaultSourceYearId,
+  onClose,
+  onDone,
+}: RolloverWizardModalProps): JSX.Element {
+  const [sourceYearId, setSourceYearId] = useState(defaultSourceYearId ?? '');
+  const [newYearName, setNewYearName] = useState('');
+  const [graduatingIds, setGraduatingIds] = useState<string[]>([]);
+  const [retainedIds, setRetainedIds] = useState<Set<string>>(new Set());
+  const [step, setStep] = useState<'form' | 'preview'>('form');
+  const [preview, setPreview] = useState<RolloverReport | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setSourceYearId(defaultSourceYearId ?? '');
+    setNewYearName(String(new Date().getFullYear() + 1) + '届');
+    setGraduatingIds(grades.length > 0 ? [grades[grades.length - 1].id] : []);
+    setRetainedIds(new Set());
+    setPreview(null);
+    setStep('form');
+  }, [open, defaultSourceYearId, grades]);
+
+  const canPreview = sourceYearId !== '' && newYearName.trim() !== '' && !busy;
+
+  const buildRequest = (): RolloverRequest => ({
+    sourceSchoolYearId: sourceYearId,
+    newSchoolYearName: newYearName.trim(),
+    newSchoolYearNo: null,
+    newStartDate: null,
+    newEndDate: null,
+    graduatingGradeIds: graduatingIds,
+    retainedStudentIds: [...retainedIds],
+  });
+
+  const runPreview = async (): Promise<void> => {
+    if (!canPreview) return;
+    setBusy(true);
+    try {
+      const report = await schoolYearRollover(buildRequest(), true);
+      setPreview(report);
+      setStep('preview');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const executeRollover = async (): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const report = await schoolYearRollover(buildRequest(), false);
+      await onDone(report);
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleRetain = (studentId: string): void => {
+    setRetainedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(studentId)) next.delete(studentId);
+      else next.add(studentId);
+      return next;
+    });
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="学年换届向导"
+      description="克隆班级目录到新学年、学生整体升一级、毕业年级原地保留、教室重绑到新班级。预览确认后单事务执行。"
+      widthClass="max-w-3xl"
+      footer={
+        step === 'form' ? (
+          <>
+            <Button variant="secondary" onClick={onClose}>取消</Button>
+            <Button icon={<ArrowRightLeft className="h-4 w-4" />} onClick={() => void runPreview()} disabled={!canPreview}>
+              {busy ? '计算中…' : '生成换届预览'}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="secondary" onClick={() => setStep('form')} disabled={busy}>返回调整</Button>
+            <Button onClick={() => void executeRollover()} disabled={busy}>
+              {busy ? '执行中…' : '确认换届（单事务执行）'}
+            </Button>
+          </>
+        )
+      }
+    >
+      {step === 'form' && (
+        <div className="space-y-4">
+          <SearchableSelect
+            label="源学年"
+            options={schoolYears.map((y) => ({ value: y.id, label: y.schoolYearName }))}
+            value={sourceYearId}
+            onChange={(value) => setSourceYearId(value)}
+            placeholder="— 选择要换届的学年 —"
+          />
+          <Input
+            label="新学年名称（必填）"
+            value={newYearName}
+            onChange={(e) => setNewYearName(e.target.value)}
+            placeholder="如：2028届"
+          />
+          <div>
+            <p className="mb-2 text-sm font-semibold text-ink">毕业年级（可多选）</p>
+            <div className="flex flex-wrap gap-2">
+              {grades.map((g, i) => {
+                const isLast = i === grades.length - 1;
+                const checked = graduatingIds.includes(g.id);
+                return (
+                  <label
+                    key={g.id}
+                    className={[
+                      'flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm',
+                      checked ? 'border-brand-500 bg-brand-50 text-ink' : 'border-surface-border text-ink-muted',
+                    ].join(' ')}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        setGraduatingIds((prev) =>
+                          prev.includes(g.id) ? prev.filter((id) => id !== g.id) : [...prev, g.id],
+                        )
+                      }
+                    />
+                    {g.gradeName}
+                    {isLast && <span className="text-ink-muted">（最高年级）</span>}
+                  </label>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-sm text-ink-muted">
+              毕业年级的学生原地保留在原学年班级，不出现在新学年名册中。
+            </p>
+          </div>
+        </div>
+      )}
+
+      {step === 'preview' && preview && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+            <StatCard label="升级学生" value={preview.promoteCount} />
+            <StatCard label="毕业学生" value={preview.graduateCount} />
+            <StatCard label="留级学生" value={preview.retainCount} />
+            <StatCard label="新建班级" value={preview.classesCreated} />
+            <StatCard label="教室重绑" value={preview.rebindCount} />
+          </div>
+          {preview.warnings.length > 0 && (
+            <ul className="list-disc space-y-1 rounded-lg border border-amber-400 bg-amber-50 px-6 py-3 text-sm text-amber-900">
+              {preview.warnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          )}
+          {preview.rebindPlans.length > 0 && (
+            <div className="rounded-lg border border-surface-border bg-surface-muted p-3">
+              <p className="text-sm font-semibold text-ink">教室重绑</p>
+              <ul className="mt-1 max-h-24 space-y-1 overflow-y-auto text-sm text-ink-muted">
+                {preview.rebindPlans.map((r) => (
+                  <li key={r.classroomId}>
+                    教室「{r.roomName}」：{r.fromClass} → {r.toClass}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="rounded-lg border border-surface-border p-3">
+            <p className="mb-2 text-sm font-semibold text-ink">
+              学生名单（{preview.studentPlans.length} 人）— 勾选「留级」可逐行调整，该生保持不动
+            </p>
+            <div className="max-h-64 overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-surface-raised text-left text-ink-muted">
+                  <tr>
+                    <th className="px-2 py-1.5">学号</th>
+                    <th className="px-2 py-1.5">姓名</th>
+                    <th className="px-2 py-1.5">原班级</th>
+                    <th className="px-2 py-1.5">动作</th>
+                    <th className="px-2 py-1.5">去向</th>
+                    <th className="px-2 py-1.5">留级</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.studentPlans.map((p) => {
+                    const retained = retainedIds.has(p.studentId);
+                    const action = retained ? 'retain' : p.action;
+                    return (
+                      <tr key={p.studentId} className="border-t border-surface-border text-ink">
+                        <td className="px-2 py-1.5">{p.studentNo}</td>
+                        <td className="px-2 py-1.5">{p.name}</td>
+                        <td className="px-2 py-1.5">{p.fromGrade} · {p.fromClass}</td>
+                        <td className="px-2 py-1.5">{ACTION_LABELS[action] ?? action}</td>
+                        <td className="px-2 py-1.5 text-ink-muted">
+                          {action === 'promote' ? `${p.toGrade} · ${p.toClass}` : '—'}
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <input
+                            type="checkbox"
+                            checked={retained}
+                            onChange={() => toggleRetain(p.studentId)}
+                            aria-label={'留级：' + p.name}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: number }): JSX.Element {
+  return (
+    <div className="rounded-lg border border-surface-border bg-surface-muted p-3">
+      <p className="text-sm text-ink-muted">{label}</p>
+      <p className="text-2xl font-bold text-ink">{value}</p>
+    </div>
   );
 }

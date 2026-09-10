@@ -8,6 +8,7 @@ pub mod device_cmd;
 pub mod directory_cmd;
 pub mod grade_cmd;
 pub mod package_cmd;
+pub mod rollover_cmd;
 pub mod school_year_cmd;
 pub mod settings_cmd;
 pub mod student_cmd;

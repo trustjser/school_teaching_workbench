@@ -560,6 +560,12 @@ pub async fn matrix(pool: &SqlitePool, task_id: &str) -> AppResult<TaskMatrix> {
 }
 
 /// 返回任务矩阵，可选按班级名称过滤学生。
+///
+/// 视图口径按任务生命周期区分（见优化方案 5.1 节）：
+/// - 进行中（draft/active）：学生集合 = 当前班级在册学生（含无记录者）；
+/// - 已结束（closed/archived）：学生集合 = 实际参与（有 task_records）的学生，
+///   忽略当前 class_name / grade / status 过滤——换届改写学生冗余字段后，
+///   历史任务矩阵仍与当时名单一致（含已毕业、已转出学生）。
 pub async fn matrix_for_class(
     pool: &SqlitePool,
     task_id: &str,
@@ -569,17 +575,34 @@ pub async fn matrix_for_class(
     let nodes = node_list(pool, task_id).await?;
     let task_class_name = task.as_ref().and_then(|t| t.class_name.as_deref());
     let filter_class = class_name.or(task_class_name);
+    let ended = task
+        .as_ref()
+        .map(|t| t.status == "closed" || t.status == "archived")
+        .unwrap_or(false);
 
-    let students = sqlx::query_as::<_, (String, String, String, Option<i64>, String)>(
-        "SELECT id, name, student_no, seat_no, status FROM students
-         WHERE deleted_at IS NULL AND status <> 'transferred'
-           AND (? IS NULL OR class_name = ?)
-         ORDER BY COALESCE(seat_no, 999999), student_no",
-    )
-    .bind(filter_class)
-    .bind(filter_class)
-    .fetch_all(pool)
-    .await?
+    let students = if ended {
+        sqlx::query_as::<_, (String, String, String, Option<i64>, String)>(
+            "SELECT DISTINCT s.id, s.name, s.student_no, s.seat_no, s.status
+             FROM students s
+             JOIN task_records tr ON tr.student_id = s.id AND tr.task_id = ? AND tr.deleted_at IS NULL
+             WHERE s.deleted_at IS NULL
+             ORDER BY COALESCE(s.seat_no, 999999), s.student_no",
+        )
+        .bind(task_id)
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query_as::<_, (String, String, String, Option<i64>, String)>(
+            "SELECT id, name, student_no, seat_no, status FROM students
+             WHERE deleted_at IS NULL AND status <> 'transferred'
+               AND (? IS NULL OR class_name = ?)
+             ORDER BY COALESCE(seat_no, 999999), student_no",
+        )
+        .bind(filter_class)
+        .bind(filter_class)
+        .fetch_all(pool)
+        .await?
+    }
     .into_iter()
     .map(
         |(id, name, student_no, seat_no, status)| TaskMatrixStudent {
@@ -640,12 +663,64 @@ pub async fn matrix_for_class(
 /// 查询任务按班级聚合的处理进度。
 ///
 /// 该查询放在仓储层，供教务端看板和回归测试共用，避免命令层重复维护聚合口径。
+///
+/// 口径按任务生命周期区分（见优化方案 5.1 节）：进行中任务按「当前班级学生」
+/// 聚合；已结束（closed/archived）任务改从 `task_records` 反推——聚合基数 =
+/// 实际参与学生，分组标签用任务自身的 grade/class_name（换届改写学生冗余
+/// 字段后历史进度不失真）。
 pub async fn progress_list(
     pool: &SqlitePool,
     task_id: &str,
     grade: Option<&str>,
     class_name: Option<&str>,
 ) -> AppResult<Vec<TaskProgressRow>> {
+    let task_status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM custom_tasks WHERE id = ? AND deleted_at IS NULL")
+            .bind(task_id)
+            .fetch_optional(pool)
+            .await?;
+    let ended = task_status
+        .as_deref()
+        .map(|s| s == "closed" || s == "archived")
+        .unwrap_or(false);
+
+    if ended {
+        let rows = sqlx::query_as::<_, TaskProgressRow>(
+            "SELECT
+                t.id AS task_id,
+                t.title AS title,
+                COALESCE(t.class_name, '未分班') AS class_name,
+                COALESCE(t.grade, '全校') AS grade,
+                NULL AS device_id,
+                NULL AS device_name,
+                NULL AS device_status,
+                COUNT(s.id) AS total,
+                COALESCE(SUM(CASE WHEN COALESCE(n.is_final, 0) = 1 THEN 1 ELSE 0 END), 0) AS final_count,
+                COALESCE(SUM(CASE WHEN COALESCE(n.is_final, 0) = 0 AND COALESCE(n.is_default, 0) = 0 AND n.id IS NOT NULL THEN 1 ELSE 0 END), 0) AS processing_count,
+                COALESCE(SUM(CASE WHEN n.id IS NULL OR n.node_key = 'todo' OR n.is_default = 1 THEN 1 ELSE 0 END), 0) AS pending_count,
+                CASE WHEN COUNT(s.id) = 0 THEN 0.0 ELSE CAST(SUM(CASE WHEN COALESCE(n.is_final, 0) = 1 THEN 1 ELSE 0 END) AS REAL) / COUNT(s.id) END AS completion_rate,
+                AVG(tr.score) AS avg_score,
+                MAX(tr.updated_at) AS last_updated_at
+             FROM custom_tasks t
+             JOIN task_records tr ON tr.task_id = t.id AND tr.deleted_at IS NULL
+             JOIN students s ON s.id = tr.student_id AND s.deleted_at IS NULL
+             LEFT JOIN task_status_nodes n ON n.id = tr.node_id AND n.deleted_at IS NULL
+             WHERE t.id = ? AND t.deleted_at IS NULL
+               AND (? IS NULL OR COALESCE(t.grade, '') = ?)
+               AND (? IS NULL OR COALESCE(t.class_name, '') = ?)
+             GROUP BY t.id, t.title, COALESCE(t.class_name, '未分班'), COALESCE(t.grade, '全校')
+             ORDER BY completion_rate ASC",
+        )
+        .bind(task_id)
+        .bind(grade)
+        .bind(grade)
+        .bind(class_name)
+        .bind(class_name)
+        .fetch_all(pool)
+        .await?;
+        return Ok(rows);
+    }
+
     let rows = sqlx::query_as::<_, TaskProgressRow>(
         "SELECT
             t.id AS task_id,
@@ -1039,4 +1114,51 @@ mod tests {
         drop(pool);
         std::fs::remove_dir_all(&dir).ok();
     }
+}
+
+/// 换届后历史任务不失真：closed 任务的矩阵/进度按 task_records 反查，
+/// 学生冗余字段（grade/class_name）被换届改写后，名单与进度仍一致。
+#[tokio::test]
+async fn ended_task_views_survive_rollover_grade_rewrites() {
+    use crate::db::create_pool;
+    let dir = std::env::temp_dir().join(format!("lanwb_task_ended_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).expect("建临时目录");
+    let pool = create_pool(&dir.join("test.db")).await.expect("建池");
+
+    for ddl in [
+        "CREATE TABLE custom_tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, task_type TEXT, scope TEXT NOT NULL, class_name TEXT, grade TEXT, due_at INTEGER, status TEXT, view_mode TEXT, score_enabled INTEGER, note_enabled INTEGER, default_node_id TEXT, owner_device_id TEXT, broadcast_task_id TEXT, source TEXT, sort_order INTEGER, created_at INTEGER, updated_at INTEGER, deleted_at INTEGER, sync_state TEXT, dirty INTEGER)",
+        "CREATE TABLE students (id TEXT PRIMARY KEY, student_no TEXT, name TEXT, seat_no INTEGER, class_name TEXT, grade TEXT, class_id TEXT, status TEXT NOT NULL, deleted_at INTEGER)",
+        "CREATE TABLE task_status_nodes (id TEXT PRIMARY KEY, task_id TEXT, node_key TEXT, label TEXT, color_token TEXT, icon_name TEXT, node_order INTEGER, is_final INTEGER, is_default INTEGER, created_at INTEGER, updated_at INTEGER, deleted_at INTEGER, sync_state TEXT, dirty INTEGER)",
+        "CREATE TABLE task_records (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, student_id TEXT NOT NULL, node_id TEXT, node_key TEXT NOT NULL, score INTEGER, note TEXT, completed_at INTEGER, evaluated_by TEXT, updated_at INTEGER NOT NULL, deleted_at INTEGER)",
+        "CREATE TABLE devices (device_id TEXT PRIMARY KEY, device_name TEXT, txt_class_name TEXT, status TEXT, deleted_at INTEGER)",
+        "CREATE TABLE classrooms (id TEXT PRIMARY KEY, device_id TEXT, deleted_at INTEGER)",
+        "CREATE TABLE classroom_assignments (id TEXT PRIMARY KEY, classroom_id TEXT, class_id TEXT, updated_at INTEGER, deleted_at INTEGER)",
+        "CREATE TABLE classes (id TEXT PRIMARY KEY, class_name TEXT, deleted_at INTEGER)",
+    ] {
+        sqlx::query(ddl).execute(&pool).await.expect("建测试表");
+    }
+
+    sqlx::query("INSERT INTO custom_tasks (id, title, task_type, scope, class_name, grade, status, view_mode, score_enabled, note_enabled, sort_order, created_at, updated_at, deleted_at, sync_state, dirty) VALUES ('task-h', '历史任务', 'custom', 'class', '一(1)班', '一年级', 'closed', 'grid', 0, 0, 0, 1, 1, NULL, 'local', 0)")
+        .execute(&pool).await.expect("插入任务");
+    sqlx::query("INSERT INTO task_status_nodes (id, task_id, node_key, label, is_final, is_default, deleted_at) VALUES ('node-done', 'task-h', 'done', '完成', 1, 0, NULL)")
+        .execute(&pool).await.expect("插入节点");
+    sqlx::query("INSERT INTO students (id, student_no, name, seat_no, class_name, grade, class_id, status, deleted_at) VALUES ('stu-1', 'S1', '张三', 1, '二(1)班', '二年级', 'cls-new', 'active', NULL), ('stu-2', 'S2', '李四', 2, '二(1)班', '二年级', 'cls-new', 'transferred', NULL), ('stu-x', 'SX', '王五', 3, '二(1)班', '二年级', 'cls-new', 'active', NULL)")
+        .execute(&pool).await.expect("插入学生");
+    // 记录：张三完成、李四待办（已转出）；王五无记录（换届后进来的新学生，不属于历史名单）
+    sqlx::query("INSERT INTO task_records (id, task_id, student_id, node_id, node_key, score, updated_at, deleted_at) VALUES ('r1', 'task-h', 'stu-1', 'node-done', 'done', 95, 10, NULL), ('r2', 'task-h', 'stu-2', NULL, 'todo', NULL, 20, NULL)")
+        .execute(&pool).await.expect("插入记录");
+
+    let matrix = matrix_for_class(&pool, "task-h", None).await.expect("矩阵");
+    let ids: Vec<&str> = matrix.students.iter().map(|s| s.student_id.as_str()).collect();
+    assert_eq!(ids, vec!["stu-1", "stu-2"], "已结束任务名单 = 有记录的学生（含已转出），排除无记录的新学生");
+
+    let rows = progress_list(&pool, "task-h", None, None).await.expect("进度");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].class_name, "一(1)班", "分组标签用任务自身的班级（历史口径）");
+    assert_eq!(rows[0].total, 2);
+    assert_eq!(rows[0].final_count, 1);
+    assert_eq!(rows[0].pending_count, 1);
+
+    pool.close().await;
+    std::fs::remove_dir_all(dir).ok();
 }

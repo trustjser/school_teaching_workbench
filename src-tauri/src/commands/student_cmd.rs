@@ -10,7 +10,8 @@ use tauri::State;
 
 use crate::config::constants::Events;
 use crate::db::models::{ImportReport, Student, StudentImportRow};
-use crate::db::repo::{class_repo, grade_repo, settings_repo, student_repo};
+use crate::db::repo::settings_repo;
+use crate::db::repo::student_repo;
 use crate::error::AppResult;
 use crate::state::AppState;
 use crate::sync::outbox;
