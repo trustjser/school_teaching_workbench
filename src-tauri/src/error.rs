@@ -109,6 +109,20 @@ impl ErrorCode {
             _ => ErrorCode::Unknown,
         }
     }
+
+    /// 是否为「等一等可能就好了」的瞬时错误。
+    ///
+    /// 这类错误**不消耗重试预算**（见 `queue_repo::mark_failed`）：网络不可达、对端
+    /// 暂时 5xx/DB 故障、未知异常都属于「世界还没准备好」，用指数退避一直等下去
+    /// （封顶 `BACKOFF_CAP_MS`）比 30 秒后就判死更符合离线队列的设计意图 ——
+    /// 教务端是一台会休眠、重启、换网的 PC。
+    ///
+    /// 反之 `ERR_VALIDATION` / `ERR_SIGN` / `ERR_CRYPTO` / `ERR_NOT_FOUND` /
+    /// `ERR_MODE` / `ERR_PERMISSION` / `ERR_IMPORT` / `ERR_NONCE_REPLAY` /
+    /// `ERR_TS_WINDOW` 是报文或数据本身的问题，重试不会变好，仍按预算进死信。
+    pub fn is_transient(&self) -> bool {
+        matches!(self, ErrorCode::Net | ErrorCode::Db | ErrorCode::Unknown)
+    }
 }
 
 impl fmt::Display for ErrorCode {
@@ -312,5 +326,54 @@ impl ErrorBody {
             message: err.message.clone(),
             trace_id,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ErrorCode;
+
+    /// 瞬时错误不消耗重试预算，永久错误按预算进死信 —— 这个分类直接决定
+    /// 「对端离线时任务会不会被判死」，所以逐项锁住。
+    #[test]
+    fn transient_classification_matches_retry_semantics() {
+        for code in [ErrorCode::Net, ErrorCode::Db, ErrorCode::Unknown] {
+            assert!(code.is_transient(), "{} 应为瞬时错误", code.as_str());
+        }
+        for code in [
+            ErrorCode::Sign,
+            ErrorCode::Crypto,
+            ErrorCode::TsWindow,
+            ErrorCode::NonceReplay,
+            ErrorCode::Validation,
+            ErrorCode::NotFound,
+            ErrorCode::Mode,
+            ErrorCode::Permission,
+            ErrorCode::Import,
+        ] {
+            assert!(!code.is_transient(), "{} 应为永久错误", code.as_str());
+        }
+    }
+
+    /// `parse` 与 `as_str` 必须互逆，否则 sync_log 里的错误码会退化成 Unknown
+    /// 并被误判为瞬时错误。
+    #[test]
+    fn parse_round_trips_as_str() {
+        for code in [
+            ErrorCode::Db,
+            ErrorCode::Net,
+            ErrorCode::Sign,
+            ErrorCode::Crypto,
+            ErrorCode::TsWindow,
+            ErrorCode::NonceReplay,
+            ErrorCode::Validation,
+            ErrorCode::NotFound,
+            ErrorCode::Mode,
+            ErrorCode::Permission,
+            ErrorCode::Import,
+        ] {
+            assert_eq!(ErrorCode::parse(code.as_str()), code);
+        }
+        assert_eq!(ErrorCode::parse("ERR_NOT_A_REAL_CODE"), ErrorCode::Unknown);
     }
 }

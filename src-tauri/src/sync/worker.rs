@@ -138,6 +138,7 @@ async fn run_once(state: &Arc<AppState>) {
                     &item.id,
                     &code.as_str(),
                     backoff::next_retry_at(item.attempt_count + 1),
+                    code.is_transient(),
                 )
                 .await
                 .unwrap_or(false);
@@ -473,6 +474,7 @@ pub async fn flush(
                         &item.id,
                         &code.as_str(),
                         backoff::next_retry_at(item.attempt_count + 1),
+                        code.is_transient(),
                     )
                     .await
                     .ok();

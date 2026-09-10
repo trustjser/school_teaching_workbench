@@ -298,25 +298,36 @@ pub async fn mark_done(pool: &SqlitePool, id: &str) -> AppResult<()> {
     Ok(())
 }
 
-/// 发送失败：按退避时间重置为 `pending`；超过最大次数置 `dead`。
+/// 发送失败：按退避时间重置为 `pending`；非瞬时错误超过最大次数才置 `dead`。
+///
+/// `transient` 为真表示这次失败属于「等一等就好」（网络不可达、对端暂时故障），
+/// 此时**不消耗重试预算**，永远回到 `pending` 等下一次退避重试 —— 教室 PC 会休眠、
+/// 重启、换网，30 秒就判死会丢掉数据。永久错误（报文校验失败等）重试不会变好，
+/// 仍按 `max_attempts` 收敛，避免毒消息无限重试。
 pub async fn mark_failed(
     pool: &SqlitePool,
     id: &str,
     error_code: &str,
     next_retry_at: i64,
+    transient: bool,
 ) -> AppResult<bool> {
     let now = now_ms();
-    let dead = sqlx::query(
-        "UPDATE pending_queue SET status = 'dead', last_error = ?, updated_at = ?
-         WHERE id = ? AND attempt_count >= max_attempts",
-    )
-    .bind(error_code)
-    .bind(now)
-    .bind(id)
-    .execute(pool)
-    .await?
-    .rows_affected()
-        > 0;
+
+    let dead = if transient {
+        false
+    } else {
+        sqlx::query(
+            "UPDATE pending_queue SET status = 'dead', last_error = ?, updated_at = ?
+             WHERE id = ? AND attempt_count >= max_attempts",
+        )
+        .bind(error_code)
+        .bind(now)
+        .bind(id)
+        .execute(pool)
+        .await?
+        .rows_affected()
+            > 0
+    };
 
     if dead {
         return Ok(true);
@@ -384,9 +395,97 @@ pub async fn purge_finished(pool: &SqlitePool, keep_ms: i64) -> AppResult<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::revive_dead_for_online_devices;
+    use super::{mark_failed, revive_dead_for_online_devices};
     use crate::db::{create_pool, run_migrations};
     use sqlx::SqlitePool;
+
+    /// 插一条已把重试预算耗尽的待发条目（用于验证判死条件）。
+    async fn insert_exhausted(pool: &SqlitePool, id: &str) {
+        sqlx::query(
+            "INSERT INTO pending_queue (id, op_type, entity_type, entity_id, payload,
+                                        attempt_count, max_attempts, next_retry_at, status,
+                                        created_at, updated_at)
+             VALUES (?, 'upsert', 'custom_task', 'task-1', '{}', 5, 5, 0, 'sending', 1, 1)",
+        )
+        .bind(id)
+        .execute(pool)
+        .await
+        .expect("插入耗尽预算的条目");
+    }
+
+    /// 对端离线属于「等一等就好」的瞬时错误，不得消耗重试预算。
+    ///
+    /// 老行为是 5 次尝试（约 30 秒）后就置死信 —— 对一台会休眠/重启的教室 PC 来说太快，
+    /// 与「离线队列一直重试到对端在线」的设计意图相反。
+    #[tokio::test]
+    async fn mark_failed_keeps_transient_errors_retryable_forever() {
+        let (pool, dir) = temp_pool().await;
+        insert_exhausted(&pool, "q-1").await;
+
+        let dead = mark_failed(&pool, "q-1", "ERR_NET", 123_456, true)
+            .await
+            .expect("标记瞬时失败");
+
+        assert!(!dead, "瞬时错误即便已用满预算也不应判死");
+        let (status, retry, last_error): (String, i64, Option<String>) = sqlx::query_as(
+            "SELECT status, next_retry_at, last_error FROM pending_queue WHERE id = 'q-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("读回条目");
+        assert_eq!(status, "pending", "应回到待发，等待下一次退避重试");
+        assert_eq!(retry, 123_456, "应写入退避时间");
+        assert_eq!(last_error.as_deref(), Some("ERR_NET"));
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// 报文/数据本身的问题重试不会变好，仍然按预算进死信，避免毒消息无限重试。
+    #[tokio::test]
+    async fn mark_failed_sends_permanent_errors_to_dead_at_budget() {
+        let (pool, dir) = temp_pool().await;
+        insert_exhausted(&pool, "q-1").await;
+
+        let dead = mark_failed(&pool, "q-1", "ERR_VALIDATION", 123_456, false)
+            .await
+            .expect("标记永久失败");
+
+        assert!(dead, "永久错误用满预算后应判死");
+        let (status, last_error): (String, Option<String>) =
+            sqlx::query_as("SELECT status, last_error FROM pending_queue WHERE id = 'q-1'")
+                .fetch_one(&pool)
+                .await
+                .expect("读回条目");
+        assert_eq!(status, "dead");
+        assert_eq!(last_error.as_deref(), Some("ERR_VALIDATION"));
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// 预算未用满时，永久错误也只是继续重试。
+    #[tokio::test]
+    async fn mark_failed_retries_permanent_errors_until_budget_is_used() {
+        let (pool, dir) = temp_pool().await;
+        sqlx::query(
+            "INSERT INTO pending_queue (id, op_type, entity_type, entity_id, payload,
+                                        attempt_count, max_attempts, next_retry_at, status,
+                                        created_at, updated_at)
+             VALUES ('q-1', 'upsert', 'custom_task', 'task-1', '{}', 2, 5, 0, 'sending', 1, 1)",
+        )
+        .execute(&pool)
+        .await
+        .expect("插入条目");
+
+        let dead = mark_failed(&pool, "q-1", "ERR_VALIDATION", 999, false)
+            .await
+            .expect("标记失败");
+        assert!(!dead, "预算未用满不应判死");
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
 
     async fn temp_pool() -> (SqlitePool, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("lanwb_queue_{}", uuid::Uuid::new_v4()));

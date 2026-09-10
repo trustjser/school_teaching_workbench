@@ -496,7 +496,27 @@ lan-workbench/
 
 **旧版综合 app 数据**：**不迁移**。新 identifier 对应全新应用数据目录；旧数据库保留在原位置，不读取、不删除、不转换。重复创建 `app_mode` 写入逻辑会按 app target 强制覆盖篡改值。
 
-### 4.9 任务状态语义（自定义任务）
+### 4.9 离线队列的重试与死信判定
+
+**瞬时错误不消耗重试预算**（`ErrorCode::is_transient()`）：
+
+| 分类 | 错误码 | 行为 |
+|---|---|---|
+| 瞬时 | `ERR_NET`、`ERR_DB`、`ERR_UNKNOWN` | 永远回到 `pending`，指数退避重试，封顶 `BACKOFF_CAP_MS`（5 分钟） |
+| 永久 | `ERR_VALIDATION`、`ERR_SIGN`、`ERR_CRYPTO`、`ERR_TS_WINDOW`、`ERR_NONCE_REPLAY`、`ERR_NOT_FOUND`、`ERR_MODE`、`ERR_PERMISSION`、`ERR_IMPORT` | 按 `max_attempts`（5）收敛进 `dead` |
+
+理由：教务端是一台会休眠、重启、换网的 PC。原来的实现在约 30 秒内烧完 5 次尝试就把条目判死，与「离线队列一直重试到对端在线」的设计意图相反；而报文校验类错误重试不会变好，必须收敛，否则毒消息会无限重试。
+
+**死信自愈**：`queue_repo::revive_dead_for_online_devices` 在 worker 每轮开头调用，目标（或任一教务处端）上线时把死信恢复为 `pending` 并清零重试次数。
+
+实现要点（踩过坑）：
+
+1. `ux_queue_dedup` 是**部分唯一索引**，只在 `status IN ('pending','sending')` 时生效。条目进入 `dead` 就离开索引作用域，同键新条目可以再次入队并同样变 `dead` —— 于是同键会出现多条 dead。
+2. 唤醒必须**先去重再逐条唤醒**：批量 `UPDATE` 把同键多条一起改回 `pending` 会撞唯一索引，**整条语句回滚**，导致所有死信都无法自愈（一条坏数据毒死一整批）。
+3. 存活名单必须在**独立的读语句**里定好。把 `NOT EXISTS` 写进 `UPDATE ... WHERE` 会被逐行求值，而前面的行已被改成 `pending`，判断结果会随更新漂移。
+4. 这类自愈函数的错误**不得用 `let _ =` 吞掉** —— 正是它让上述索引冲突静默了半小时。
+
+### 4.10 任务状态语义（自定义任务）
 
 | 取值 | 含义 | 是否可手动写入 |
 |---|---|---|
