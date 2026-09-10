@@ -4,9 +4,12 @@ import { SyncIndicator } from './SyncIndicator';
 import { Input } from '@shared/components/ui/Input';
 import { ThemeSwitcher } from '@shared/components/motion/ThemeSwitcher';
 import { useAppStore } from '@shared/store/useAppStore';
+import { APP_TARGET_LABEL, appModeForTarget, type AppTarget } from '@shared/app-target';
 import { formatDateCN, toDateKey } from '@shared/lib/format';
 
 export interface TopBarProps {
+  /** 固定 app target：决定端名称与组织名展示 */
+  appTarget: AppTarget;
   /** 全局搜索值 */
   search?: string;
   onSearchChange?: (value: string) => void;
@@ -14,22 +17,22 @@ export interface TopBarProps {
   showSearch?: boolean;
 }
 
-/** 顶栏：模式徽标 + 班级/学校名 + 日期 + 同步指示器 + 搜索 + 主题切换 */
-export function TopBar({ search = '', onSearchChange, showSearch = false }: TopBarProps): JSX.Element {
+/** 顶栏：端徽标 + 班级/学校名 + 日期 + 同步指示器 + 搜索 + 主题切换 */
+export function TopBar({ appTarget, search = '', onSearchChange, showSearch = false }: TopBarProps): JSX.Element {
   const settings = useAppStore((s) => s.settings);
-  const isMaster = settings.appMode === 'master';
+  const isMaster = appModeForTarget(appTarget) === 'master';
   const orgName = isMaster
     ? settings.schoolName || '未命名学校'
     : `${settings.grade ?? ''}${settings.className ?? '未设置班级'}`.trim() || '未设置班级';
 
   return (
     <header className="glass sticky top-0 z-50 flex min-h-[4.5rem] flex-wrap items-center gap-4 border-b border-surface-border px-6 py-3">
-      <ModeBadge mode={settings.appMode} size="md" />
+      <ModeBadge appTarget={appTarget} size="md" />
 
       <div className="min-w-0">
         <p className="truncate text-xl font-bold text-ink">{orgName}</p>
         <p className="truncate text-sm text-ink-muted">
-          {settings.deviceName || '本机'} · {isMaster ? '教务处端' : '班级端'}
+          {settings.deviceName || '本机'} · {APP_TARGET_LABEL[appTarget]}
         </p>
       </div>
 

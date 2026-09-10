@@ -67,7 +67,6 @@ export async function settingsSetSharedSecret(secret: string, kid: string): Prom
 }
 
 export interface CompleteSetupArgs {
-  mode: AppMode;
   deviceName: string;
   /** 班级端固定教室名称，首次配置时用于绑定本机设备 */
   roomName?: string | null;
@@ -85,8 +84,8 @@ export interface CompleteSetupArgs {
 }
 
 export async function settingsCompleteSetup(args: CompleteSetupArgs): Promise<void> {
+  // 运行模式不再由前端传入：Rust 侧直接使用 app target 的固定角色。
   await invokeCmd<void>('settings_complete_setup', {
-    mode: args.mode,
     deviceName: args.deviceName,
     grade: args.grade,
     className: args.className,

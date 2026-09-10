@@ -30,6 +30,6 @@
     },
     "types": ["vite/client"]
   },
-  "include": ["src", "packages/shared/src", "apps/affairs/src", "apps/classroom/src"],
+  "include": ["packages/shared/src", "apps/affairs/src", "apps/classroom/src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

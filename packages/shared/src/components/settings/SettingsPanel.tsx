@@ -1,20 +1,38 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '@shared/store/useAppStore';
-import { classroomList, classroomRelease, directorySync, settingsGetAll, settingsKeyInfo, settingsSet, settingsSetSharedSecret, settingsResetClient } from '@shared/lib/db';
+import {
+  classroomList,
+  classroomRelease,
+  directorySync,
+  settingsGetAll,
+  settingsKeyInfo,
+  settingsResetClient,
+  settingsSetSharedSecret,
+} from '@shared/lib/db';
 import { Card } from '@shared/components/ui/Card';
 import { Button } from '@shared/components/ui/Button';
 import { Select } from '@shared/components/ui/Select';
 import { ConfirmDialog } from '@shared/components/ui/ConfirmDialog';
 import { ThemeSwitcher } from '@shared/components/motion/ThemeSwitcher';
 import { UI_SCALE_OPTIONS } from '@shared/constants/ui';
-import { formatFingerprint } from '@shared/lib/crypto';
-import { keyFingerprint } from '@shared/lib/crypto';
+import { formatFingerprint, keyFingerprint } from '@shared/lib/crypto';
 import { Input } from '@shared/components/ui/Input';
+import type { AppTarget } from '@shared/app-target';
 import type { KeyInfo } from '@shared/types/api';
 import type { Classroom } from '@shared/types/models';
 
-/** 设置页：UI 缩放、主题、共享密钥与班级端重置 */
-export function Settings(): JSX.Element {
+export interface SettingsPanelProps {
+  /** 固定 app target：决定展示哪些端专属操作，面板本身不提供切换能力 */
+  appTarget: AppTarget;
+}
+
+/**
+ * 共享设置面板：外观、共享密钥、端口与端专属维护操作。
+ *
+ * 面板只消费固定 target，**不渲染运行模式选择器**——教务端与班级端是两个
+ * 独立安装包，角色由构建期 identifier 决定，运行期不可切换。
+ */
+export function SettingsPanel({ appTarget }: SettingsPanelProps): JSX.Element {
   const settings = useAppStore((s) => s.settings);
   const setUiScale = useAppStore((s) => s.setUiScale);
   const [keyInfo, setKeyInfo] = useState<KeyInfo | null>(null);
@@ -27,6 +45,8 @@ export function Settings(): JSX.Element {
   const [resetting, setResetting] = useState(false);
   const pushToast = useAppStore((s) => s.pushToast);
 
+  const isClassroom = appTarget === 'classroom';
+
   useEffect(() => {
     settingsKeyInfo()
       .then(setKeyInfo)
@@ -34,7 +54,7 @@ export function Settings(): JSX.Element {
   }, []);
 
   const loadDirectory = useCallback(async (showResult = false): Promise<void> => {
-    if (settings.appMode !== 'client') return;
+    if (!isClassroom) return;
     setBindingError(null);
     try {
       const report = await directorySync();
@@ -47,7 +67,7 @@ export function Settings(): JSX.Element {
     await classroomList().then((nextRooms) => {
       setRooms(nextRooms);
     });
-  }, [settings.appMode, pushToast]);
+  }, [isClassroom, pushToast]);
 
   useEffect(() => {
     void loadDirectory().catch(() => undefined);
@@ -64,7 +84,7 @@ export function Settings(): JSX.Element {
       setKeyInfo(await settingsKeyInfo());
       await loadDirectory(true);
       setSecret('');
-      pushToast({ kind: 'success', title: '共享密钥已保存', description: '已尝试连接教务端并刷新目录' });
+      pushToast({ kind: 'success', title: '共享密钥已保存', description: isClassroom ? '已尝试连接教务端并刷新目录' : '班级端需使用同一密钥才能同步' });
     } catch (err) {
       setSecretError((err as Error).message || '共享密钥格式无效');
     } finally { setSavingSecret(false); }
@@ -107,7 +127,14 @@ export function Settings(): JSX.Element {
 
       <Card title="共享密钥">
         <div className="mb-4 space-y-2 rounded-lg bg-surface-muted p-3">
-          <Input label="录入教务处提供的密钥" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="base64，32 字节" error={secretError ?? undefined} />
+          <Input
+            label={isClassroom ? '录入教务处提供的密钥' : '录入共享密钥'}
+            type="password"
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            placeholder="base64，32 字节"
+            error={secretError ?? undefined}
+          />
           <Button onClick={() => void saveSecret()} loading={savingSecret} disabled={!secret.trim()}>保存并连接</Button>
         </div>
         {keyInfo?.configured ? (
@@ -123,11 +150,27 @@ export function Settings(): JSX.Element {
             </p>
           </div>
         ) : (
-          <p className="text-amber-700">尚未配置共享密钥。录入教务处提供的密钥后，班级端才能发现并同步教务处目录。</p>
+          <p className="text-amber-700">
+            {isClassroom
+              ? '尚未配置共享密钥。录入教务处提供的密钥后，班级端才能发现并同步教务处目录。'
+              : '尚未配置共享密钥。请录入或轮换出一枚密钥，并提供给所有班级端。'}
+          </p>
         )}
       </Card>
 
-      {settings.appMode === 'client' && (
+      <Card title="运行信息">
+        <p className="text-ink-soft">
+          本机设备 ID：<span className="font-mono text-ink">{settings.deviceId || '未初始化'}</span>
+        </p>
+        <p className="mt-1 text-ink-soft">
+          API 端口：<span className="font-mono text-ink">{settings.apiPort}</span>
+        </p>
+        <p className="mt-1 text-sm text-ink-muted">
+          端口由后端从 5178 起自动探测；同机同时运行两端时会自动错开，并通过 mDNS 发布实际端口。
+        </p>
+      </Card>
+
+      {isClassroom && (
         <Card title="班级端配置">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-ink-muted">班级和教室由教务端维护，班级端完成初始化后不能直接换绑。</p>
@@ -139,7 +182,9 @@ export function Settings(): JSX.Element {
           {bindingError && <p className="mt-2 text-sm text-red-600">{bindingError}</p>}
         </Card>
       )}
-      <ConfirmDialog open={resetOpen} title="重置班级端配置" message="确定要重置本机班级端配置吗？" detail="当前教室认领会先释放，完成后需要重新输入共享密钥并选择教室。" confirmText="确认重置" danger loading={resetting} onConfirm={() => void resetClient()} onCancel={() => setResetOpen(false)} />
+      {isClassroom && (
+        <ConfirmDialog open={resetOpen} title="重置班级端配置" message="确定要重置本机班级端配置吗？" detail="当前教室认领会先释放，完成后需要重新输入共享密钥并选择教室。" confirmText="确认重置" danger loading={resetting} onConfirm={() => void resetClient()} onCancel={() => setResetOpen(false)} />
+      )}
     </div>
   );
 }
