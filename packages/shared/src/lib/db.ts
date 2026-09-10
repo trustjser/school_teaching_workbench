@@ -490,9 +490,22 @@ export async function broadcastReceipts(broadcastTaskId: string): Promise<Broadc
   return invokeCmd<BroadcastReceipt[]>('broadcast_receipts', { broadcastTaskId });
 }
 
-/** 取消（撤回）尚未送达的下发；已送达时后端返回 ERR_MODE。 */
-export async function broadcastCancel(id: string): Promise<BroadcastTask> {
-  return invokeCmd<BroadcastTask>('broadcast_cancel', { id });
+/** 撤回预览：确认框用它展示影响范围。 */
+export interface RecallPreview {
+  /** 将收到撤回指令的班级端数量（尚未送达时为 0）。 */
+  deliveredCount: number;
+  /** 会被一并移除的已标记学生记录条数。 */
+  recordCount: number;
+}
+
+/** 撤回预览：校验可行性并返回影响范围。 */
+export async function broadcastRecallPreview(id: string): Promise<RecallPreview> {
+  return invokeCmd<RecallPreview>('broadcast_recall_preview', { id });
+}
+
+/** 撤回下发：向已送达的班级端发送撤回指令，并作废尚未投递的队列条目。 */
+export async function broadcastRecall(id: string): Promise<BroadcastTask> {
+  return invokeCmd<BroadcastTask>('broadcast_recall', { id });
 }
 
 /** 关闭已下发的任务（教务端宣布结束）。 */

@@ -145,6 +145,7 @@ pub async fn enqueue_broadcast(
 fn default_endpoint(op_type: &str) -> &'static str {
     match op_type {
         "broadcast" => "/api/v1/broadcast",
+        "recall" => "/api/v1/broadcast/recall",
         "ack" => "/api/v1/receipt",
         "heartbeat" => "/api/v1/ping",
         _ => "/api/v1/ingest",

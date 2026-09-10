@@ -65,6 +65,34 @@ pub async fn enqueue_broadcast_targets(
     queue_repo::enqueue_broadcast(pool, broadcast_task_id, payload, targets, &batch_id).await
 }
 
+/// 入队一条撤回指令（worker 直接投递 `recall`）。
+///
+/// 与 `enqueue_entity` 不同，这里存的是**裸请求体**而不是 `IngestItem` 包装 ——
+/// 与 `broadcast` 保持一致（该端点的 handler 直接反序列化 `BroadcastRecallRequest`）。
+pub async fn enqueue_recall(
+    pool: &SqlitePool,
+    broadcast_task_id: &str,
+    target_device_id: &str,
+    target_base_url: Option<&str>,
+) -> AppResult<()> {
+    let request = crate::db::models::BroadcastRecallRequest {
+        broadcast_task_id: broadcast_task_id.to_string(),
+    };
+    let payload = serde_json::to_value(request)?;
+    queue_repo::enqueue_to(
+        pool,
+        "broadcast_task",
+        broadcast_task_id,
+        "recall",
+        payload,
+        PRIORITY_BROADCAST,
+        Some(target_device_id),
+        target_base_url,
+    )
+    .await?;
+    Ok(())
+}
+
 /// 入队一条回执（worker 直接投递 `receipt`）。
 pub async fn enqueue_ack(
     pool: &SqlitePool,

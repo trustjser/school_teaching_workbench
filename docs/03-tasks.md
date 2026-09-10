@@ -525,16 +525,27 @@ lan-workbench/
 | `sent` | `worker::settle_broadcast_delivery` | **所有目标都已投递结束**（成功，或永久失败进死信）。语义是「投递流程结束」，逐班到达情况看回执 |
 | `partial` | 收到任一班级端回执（`net/handlers.rs`） | 已有班级回执；**收到 1 条即置位**，不区分比例 |
 | `closed` | `broadcast_close` 命令 | 教务端宣布结束（记 `closed_at`）。**不改动班级端已收到的本地任务** |
-| `cancelled` | `broadcast_cancel` 命令 | 撤回尚未送达的下发（记 `closed_at`，**不写 `sent_at`**） |
+| `cancelled` | `broadcast_recall` 命令 | 已撤回（记 `closed_at`，**不写 `sent_at`**） |
 
-**取消 vs 关闭的边界**（撤回不了已经送达的东西）：
+**撤回 vs 关闭**（两者都不改 `sent_at`/`closed_at` 之外的语义）：
 
-- **取消**只对「尚无任何班级接收」的下发开放。判定依据是 `BroadcastTask.delivered` ——
-  一个**派生字段**，由查询用 `EXISTS(... pending_queue.status='done')` 算出，不是表列。
-  取消时把该广播 `op_type='broadcast'` 的 `pending/sending` 队列条目软删
-  （`claim_batch` 只取 `deleted_at IS NULL`，因此即刻停止投递）。
-- 已送达时 `broadcast_cancel` 返回 `ERR_MODE` 并引导改用「关闭」。
-- 界面据 `delivered` 决定给哪一个按钮：`!delivered && !terminal` → 取消；`!terminal` → 关闭；终态 → 无操作。
+- **撤回**（`POST /api/v1/broadcast/recall` 的反向指令）把任务**收回来**：向每一个已送达的班级端
+  入队一条 `op_type='recall'` 的指令，班级端收到后移除本地下发副本、派生的 `custom_tasks`
+  及其节点与记录；尚未投递的队列条目直接作废。撤回**允许**已有班级接收 —— 那正是它的用途。
+- **关闭**只是状态收敛：教务端不再关注，班级端本地任务原封不动。
+- 撤回**不是瞬时生效**的：指令走同一套 outbox，班级端离线时排队、上线后自动送达。
+  命令先入队再改状态，`enqueue_to` 按 `(entity_type, entity_id, op_type, target)` 去重，
+  因此重试/重复调用不会产生重复指令。
+
+**派生字段 `BroadcastTask.delivered`**（`EXISTS(... pending_queue.status='done')`，非表列）：
+区分「发送中·全部在排队」与「发送中·已送达一部分」，并供撤回预览统计影响范围。
+
+**撤回预览** `broadcast_recall_preview` 返回 `deliveredCount`（将收到撤回指令的班级端数）与
+`recordCount`（会被一并移除的已标记记录数，班级端记录会同步回教务端），确认框据此告知影响范围。
+
+**班级端本地删除的守卫**：`task_repo::soft_delete` 对 `source='broadcast'` 返回
+`ERR_PERMISSION`（班级端界面不允许自行删除教务下发任务）。撤回走
+`task_repo::soft_delete_cascade`（无来源校验的级联），全部为软删，数据仍留在库里可恢复。
 
 **投递结算**：`worker` 在每次投递成功或永久失败后调用
 `broadcast_repo::mark_sent_when_delivered(broadcast_id)` —— 该广播不再有

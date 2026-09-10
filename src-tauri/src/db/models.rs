@@ -1077,6 +1077,18 @@ pub struct BroadcastPush {
     pub nodes: Vec<serde_json::Value>,
 }
 
+/// `/api/v1/broadcast/recall` 请求体（教务端撤回已送达的下发）。
+///
+/// 撤回是「收回来」：班级端本地已经生成了任务副本，只能由班级端自己删，
+/// 因此必须有一条教务端 → 班级端的反向消息，走与下发相同的 outbox 队列投递
+/// （班级端离线时排队，上线后自动送达）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BroadcastRecallRequest {
+    /// 被撤回的广播任务 ID。
+    pub broadcast_task_id: String,
+}
+
 /// `/api/v1/receipt` 请求体。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

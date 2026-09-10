@@ -45,6 +45,7 @@ pub async fn start(state: Arc<AppState>) -> AppResult<()> {
         )
         .route("/api/v1/ingest", post(handlers::ingest))
         .route("/api/v1/broadcast", post(handlers::broadcast))
+        .route("/api/v1/broadcast/recall", post(handlers::broadcast_recall))
         .route("/api/v1/receipt", post(handlers::receipt))
         .route("/api/v1/pull", get(handlers::pull))
         .route("/api/v1/package", post(handlers::package))

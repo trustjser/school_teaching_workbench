@@ -19,6 +19,8 @@ export const TAURI_EVENTS = {
   TASK_UPDATED: 'task://updated',
   BROADCAST_RECEIVED: 'broadcast://received',
   BROADCAST_RECEIPT: 'broadcast://receipt',
+  /** 教务端撤回已送达的下发（班级端收到撤回指令后发出） */
+  BROADCAST_RECALLED: 'broadcast://recalled',
   DATA_IMPORTED: 'data://imported',
   CLASS_CHANGED: 'class://changed',
   CLASSROOM_CHANGED: 'classroom://changed',
@@ -75,6 +77,14 @@ export interface BroadcastReceivedPayload extends BroadcastTask {}
 /** broadcast://receipt */
 export interface BroadcastReceiptPayload extends BroadcastReceipt {}
 
+/** broadcast://recalled */
+export interface BroadcastRecalledPayload {
+  /** 被撤回的广播任务 ID */
+  broadcastTaskId: string;
+  /** 被一并移除的本地任务 ID（该班此前未生成待办时为 null） */
+  taskId: string | null;
+}
+
 /** data://imported */
 export interface DataImportedPayload extends ImportReport {}
 export interface ClassChangedPayload { id?: string }
@@ -105,6 +115,7 @@ export interface TauriEventMap {
   [TAURI_EVENTS.TASK_UPDATED]: TaskUpdatedPayload;
   [TAURI_EVENTS.BROADCAST_RECEIVED]: BroadcastReceivedPayload;
   [TAURI_EVENTS.BROADCAST_RECEIPT]: BroadcastReceiptPayload;
+  [TAURI_EVENTS.BROADCAST_RECALLED]: BroadcastRecalledPayload;
   [TAURI_EVENTS.DATA_IMPORTED]: DataImportedPayload;
   [TAURI_EVENTS.CLASS_CHANGED]: ClassChangedPayload;
   [TAURI_EVENTS.CLASSROOM_CHANGED]: ClassroomChangedPayload;

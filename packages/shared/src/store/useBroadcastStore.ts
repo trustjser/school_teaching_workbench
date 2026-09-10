@@ -5,13 +5,15 @@ import type { Page } from '@shared/types/api';
 import { appModeForTarget, getAppTarget } from '@shared/app-target';
 import {
   broadcastAccept,
-  broadcastCancel,
   broadcastClose,
   broadcastCreate,
   broadcastList,
   broadcastPage,
+  broadcastRecall,
+  broadcastRecallPreview,
   broadcastReceipts,
   broadcastSend,
+  type RecallPreview,
 } from '@shared/lib/db';
 import { useAppStore } from './useAppStore';
 import { useTaskStore } from './useTaskStore';
@@ -36,8 +38,10 @@ interface BroadcastState {
   create: (task: Partial<BroadcastTask> & { title: string; payload: string }) => Promise<BroadcastTask>;
   /** `targetDeviceIds` 需为已展开的设备 ID 数组（见 resolveTargetDeviceIds） */
   send: (id: string, targetDeviceIds: string[]) => Promise<SendReport>;
-  /** 取消（撤回）尚未送达的下发 */
-  cancelOutbox: (id: string) => Promise<void>;
+  /** 撤回（收回已送达的下发） */
+  recallOutbox: (id: string) => Promise<void>;
+  /** 撤回影响范围预览（确认框用） */
+  previewRecall: (id: string) => Promise<RecallPreview>;
   /** 关闭已下发的任务 */
   closeOutbox: (id: string) => Promise<void>;
   accept: (broadcastTaskId: string) => Promise<CustomTask | null>;
@@ -83,24 +87,34 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
     }
   },
 
+  /** 撤回影响范围预览：同时承担「这次能不能撤回」的校验。 */
+  previewRecall: async (id) => {
+    return broadcastRecallPreview(id);
+  },
+
   /**
-   * 取消（撤回）尚未送达的下发：后端会撤回队列里待投递的条目。
+   * 撤回下发：把已经送到班级端的任务收回来。
    *
-   * 已送达时后端返回 `ERR_MODE`，这里原样 toast，由后端负责引导改用「关闭」。
+   * 后端会向每个已送达的班级端入队一条撤回指令（班级端离线时排队），
+   * 并作废尚未投递的队列条目。撤回不是瞬时生效的。
    */
-  cancelOutbox: async (id) => {
+  recallOutbox: async (id) => {
     const app = useAppStore.getState();
     try {
-      const saved = await broadcastCancel(id);
+      const saved = await broadcastRecall(id);
       set((s) => ({
         outbox: s.outbox.map((t) => (t.id === id ? saved : t)),
         outboxPage: s.outboxPage
           ? { ...s.outboxPage, items: s.outboxPage.items.map((t) => (t.id === id ? saved : t)) }
           : s.outboxPage,
       }));
-      app.pushToast({ kind: 'success', title: '已取消下发', description: '尚未投递的目标已撤回' });
+      app.pushToast({
+        kind: 'success',
+        title: '已发出撤回指令',
+        description: '班级端在线时会立即收回；离线则排队，上线后自动送达',
+      });
     } catch (err) {
-      app.toastError(err, '取消下发失败');
+      app.toastError(err, '撤回下发失败');
       throw err;
     }
   },
@@ -142,8 +156,7 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
     }
   },
 
-  loadReceipts: async (broadcastTaskId) => {
-    const app = useAppStore.getState();
+  loadReceipts: async (broadcastTaskId) => {    const app = useAppStore.getState();
     try {
       const list = await broadcastReceipts(broadcastTaskId);
       set((s) => ({ receipts: { ...s.receipts, [broadcastTaskId]: list } }));

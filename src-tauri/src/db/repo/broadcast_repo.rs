@@ -301,30 +301,62 @@ pub async fn upsert_receipt(
     .map_err(|err| AppError::db(format!("读取回执失败: {}", err)))
 }
 
-/// 取消（撤回）尚未送达的下发。
+/// 撤回可行性预览：给界面确认框用，同时校验这次撤回是否合法。
+#[derive(Debug, Clone, Default)]
+pub struct RecallPreview {
+    /// 已经收到过该下发的班级端设备 ID（需要给它们发撤回指令）。
+    /// 为空表示还没有任何班级接收 —— 这种情况撤回就是纯粹的「收回待投递队列」。
+    pub delivered_targets: Vec<String>,
+    /// 各班级端已经标记并同步回来的学生记录条数，撤回后会被一并移除（软删）。
+    pub record_count: i64,
+}
+
+/// 撤回预览：校验方向与状态，并给出「已送达目标」与「已标记记录数」。
 ///
-/// 只对「还没有任何班级接收」的下发开放：把队列里待投递的条目软删（`claim_batch`
-/// 只取 `deleted_at IS NULL` 的行，因此即刻停止投递），状态置 `cancelled`。
-///
-/// **不写 `sent_at`** —— 取消意味着从未真正送达，留下发送时间会让报表说谎。
-/// 一旦有班级收到过（`delivered`），撤回已无意义，只能走「关闭」。
-pub async fn withdraw(pool: &SqlitePool, id: &str) -> AppResult<BroadcastTask> {
+/// 与「取消」不同，撤回**允许**已有班级接收 —— 这正是它的用途：把已经
+/// 送到班级端的下发收回来。所以这里没有 `delivered` 守卫。
+pub async fn recall_preview(pool: &SqlitePool, id: &str) -> AppResult<RecallPreview> {
     let task = get(pool, id)
         .await?
         .ok_or_else(|| AppError::not_found("广播任务"))?;
 
     if task.direction != "out" {
-        return Err(AppError::mode("只能取消本机下发的任务"));
+        return Err(AppError::mode("只能撤回本机下发的任务"));
     }
-    if matches!(task.status.as_str(), "cancelled" | "closed") {
-        return Err(AppError::mode("该下发已结束，无需取消"));
-    }
-    if task.delivered {
-        return Err(AppError::mode(
-            "已有班级接收，无法取消；如需结束请使用「关闭」",
-        ));
+    if matches!(task.status.as_str(), "closed" | "cancelled") {
+        return Err(AppError::mode("该下发已结束，无需撤回"));
     }
 
+    // `mark_done` 会软删投递成功的条目，所以这里**不能**过滤 deleted_at。
+    let delivered_targets: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT target_device_id FROM pending_queue
+         WHERE op_type = 'broadcast' AND entity_type = 'broadcast_task' AND entity_id = ?
+           AND status = 'done' AND target_device_id IS NOT NULL",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+
+    let record_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM task_records r
+         JOIN custom_tasks t ON t.id = r.task_id
+         WHERE t.broadcast_task_id = ? AND t.deleted_at IS NULL AND r.deleted_at IS NULL",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(RecallPreview {
+        delivered_targets,
+        record_count,
+    })
+}
+
+/// 撤回落地：撤掉尚未投递的队列条目并置 `cancelled`。
+///
+/// **不写 `sent_at`** —— 撤回意味着这次下发作废，留下发送时间会让报表说谎。
+/// 已经发出去的撤回指令（`op_type='recall'`）不受影响，它们在队列里继续投递。
+pub async fn mark_recalled(pool: &SqlitePool, id: &str) -> AppResult<BroadcastTask> {
     let now = now_ms();
     sqlx::query(
         "UPDATE pending_queue SET deleted_at = ?, updated_at = ?
@@ -351,9 +383,41 @@ pub async fn withdraw(pool: &SqlitePool, id: &str) -> AppResult<BroadcastTask> {
         .ok_or_else(|| AppError::not_found("广播任务"))
 }
 
+/// 班级端应用撤回指令：移除本地下发副本、派生任务及其节点与记录。
+///
+/// 返回被移除的本地任务 ID（该班此前未生成待办时为 `None`）。
+/// 全部为软删，数据仍留在库里，必要时可从数据库恢复。
+pub async fn apply_recall(pool: &SqlitePool, broadcast_task_id: &str) -> AppResult<Option<String>> {
+    let task_id: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM custom_tasks WHERE broadcast_task_id = ? AND deleted_at IS NULL LIMIT 1",
+    )
+    .bind(broadcast_task_id)
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(id) = &task_id {
+        // 走无来源校验的级联：班级端界面禁止删除教务下发任务，但撤回指令必须能删。
+        crate::db::repo::task_repo::soft_delete_cascade(pool, id).await?;
+    }
+
+    let now = now_ms();
+    sqlx::query(
+        "UPDATE broadcast_tasks SET deleted_at = ?, updated_at = ?, dirty = 1, sync_state = 'pending'
+         WHERE id = ? AND deleted_at IS NULL",
+    )
+    .bind(now)
+    .bind(now)
+    .bind(broadcast_task_id)
+    .execute(pool)
+    .await?;
+
+    Ok(task_id)
+}
+
 /// 关闭下发：教务端宣布结束，记录 `closed_at`。
 ///
 /// 只是状态收敛，不会改动班级端的本地任务（班级端是否继续执行由班级端自行决定）。
+/// 与「撤回」的区别：关闭是「别再管它了」，撤回是「把它收回来」。
 pub async fn close(pool: &SqlitePool, id: &str) -> AppResult<BroadcastTask> {
     let task = get(pool, id)
         .await?
@@ -428,7 +492,7 @@ pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{close, get, mark_sent_when_delivered, withdraw};
+    use super::{apply_recall, close, get, mark_recalled, mark_sent_when_delivered, recall_preview};
     use crate::db::{create_pool, run_migrations};
     use sqlx::SqlitePool;
 
@@ -473,56 +537,177 @@ mod tests {
         .expect("插入队列条目");
     }
 
-    /// 未送达的下发可以取消：撤回队列里待投递的条目，状态置 cancelled。
+    /// 还没送达时撤回 = 纯收回队列：待投递条目全部作废，状态置 cancelled。
     ///
-    /// `sent_at` 必须保持 NULL —— 取消意味着从未真正送达，不能留下发送时间。
+    /// `sent_at` 必须保持 NULL —— 撤回意味着这次下发作废，不能留下发送时间。
     #[tokio::test]
-    async fn withdraw_retracts_pending_queue_and_marks_cancelled() {
+    async fn recall_without_delivery_only_retracts_queue() {
         let (pool, dir) = temp_pool().await;
         insert_task(&pool, "bc-1", "sending").await;
         insert_queue_row(&pool, "q-1", "bc-1", "pending").await;
         insert_queue_row(&pool, "q-2", "bc-1", "pending").await;
 
-        let after = withdraw(&pool, "bc-1").await.expect("取消下发");
+        let preview = recall_preview(&pool, "bc-1").await.expect("撤回预览");
+        assert!(preview.delivered_targets.is_empty(), "尚未送达时没有撤回目标");
+
+        let after = mark_recalled(&pool, "bc-1").await.expect("撤回");
         assert_eq!(after.status, "cancelled");
-        assert_eq!(after.sent_at, None, "取消不应写发送时间");
-        assert!(after.closed_at.is_some(), "取消应记录结束时间");
+        assert_eq!(after.sent_at, None, "撤回不应写发送时间");
+        assert!(after.closed_at.is_some(), "撤回应记录结束时间");
 
-        let alive: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM pending_queue
-             WHERE entity_id = 'bc-1' AND deleted_at IS NULL",
-        )
-        .fetch_one(&pool)
-        .await
-        .expect("查剩余队列");
-        assert_eq!(alive, 0, "待投递条目应全部撤回");
-
-        pool.close().await;
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    /// 已有班级接收的下发不能取消 —— 撤回不了已经送达的东西。
-    #[tokio::test]
-    async fn withdraw_is_rejected_once_any_class_has_received() {
-        let (pool, dir) = temp_pool().await;
-        insert_task(&pool, "bc-1", "sending").await;
-        insert_queue_row(&pool, "q-done", "bc-1", "done").await;
-        insert_queue_row(&pool, "q-pending", "bc-1", "pending").await;
-
-        let err = withdraw(&pool, "bc-1").await.expect_err("已送达应拒绝取消");
-        assert_eq!(err.code, crate::error::ErrorCode::Mode);
-        assert!(err.message.contains("关闭"), "应引导用户改用关闭：{}", err.message);
-
-        // 被拒绝的调用不能留下副作用。
-        let task = get(&pool, "bc-1").await.expect("读回任务").expect("存在");
-        assert_eq!(task.status, "sending");
         let alive: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM pending_queue WHERE entity_id = 'bc-1' AND deleted_at IS NULL",
         )
         .fetch_one(&pool)
         .await
         .expect("查剩余队列");
-        assert_eq!(alive, 1, "拒绝时不得撤回任何条目");
+        assert_eq!(alive, 0, "待投递条目应全部作废");
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// 已送达也能撤回（这正是撤回的用途），并给出需要通知的设备与已标记记录数。
+    ///
+    /// 与「关闭」的区别在这里：关闭不碰班级端，撤回要发反向消息把任务收回来。
+    #[tokio::test]
+    async fn recall_reports_delivered_targets_and_record_count() {
+        let (pool, dir) = temp_pool().await;
+        insert_task(&pool, "bc-1", "sending").await;
+        insert_queue_row(&pool, "q-done", "bc-1", "done").await;
+        // 班级端生成的本地任务 + 已标记记录（会同步回教务端）。
+        sqlx::query(
+            "INSERT INTO custom_tasks (id, title, description, task_type, scope, grade, class_name,
+                                       due_at, status, view_mode, score_enabled, note_enabled,
+                                       default_node_id, owner_device_id, broadcast_task_id, source,
+                                       sort_order, created_at, updated_at, deleted_at, sync_state, dirty)
+             VALUES ('local-1', '朗读课文', NULL, 'custom', 'class', NULL, '一年级1班', NULL,
+                     'active', 'grid', 0, 0, NULL, NULL, 'bc-1', 'broadcast', 0, 1, 1, NULL, 'pending', 1)",
+        )
+        .execute(&pool)
+        .await
+        .expect("插入班级端本地任务");
+        sqlx::query(
+            "INSERT INTO students (id, student_no, name, class_name, status, created_at, updated_at)
+             VALUES ('stu-1', '001', '张三', '一年级1班', 'active', 1, 1),
+                    ('stu-2', '002', '李四', '一年级1班', 'active', 1, 1)",
+        )
+        .execute(&pool)
+        .await
+        .expect("插入学生");
+        sqlx::query(
+            "INSERT INTO task_records (id, task_id, student_id, node_id, node_key, score,
+                                       created_at, updated_at, deleted_at)
+             VALUES ('r-1', 'local-1', 'stu-1', NULL, 'done', NULL, 1, 1, NULL),
+                    ('r-2', 'local-1', 'stu-2', NULL, 'done', NULL, 1, 1, NULL)",
+        )
+        .execute(&pool)
+        .await
+        .expect("插入学生记录");
+
+        let preview = recall_preview(&pool, "bc-1").await.expect("撤回预览");
+        assert_eq!(preview.delivered_targets, vec!["dev-q-done".to_string()]);
+        assert_eq!(preview.record_count, 2, "应报出会被一并移除的标记条数");
+
+        let after = mark_recalled(&pool, "bc-1").await.expect("撤回");
+        assert_eq!(after.status, "cancelled");
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// 终态（已关闭 / 已撤回）不再允许撤回。
+    #[tokio::test]
+    async fn recall_is_rejected_for_terminal_states() {
+        let (pool, dir) = temp_pool().await;
+        insert_task(&pool, "bc-1", "closed").await;
+
+        let err = recall_preview(&pool, "bc-1").await.expect_err("终态应拒绝撤回");
+        assert_eq!(err.code, crate::error::ErrorCode::Mode);
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// 班级端应用撤回指令：本地副本、派生任务及其节点与记录一并移除（软删）。
+    #[tokio::test]
+    async fn apply_recall_removes_local_copy_and_derived_task() {
+        let (pool, dir) = temp_pool().await;
+        sqlx::query(
+            "INSERT INTO broadcast_tasks (id, title, payload, publisher_device_id, direction,
+                                          status, expect_count, ack_count, created_at, updated_at)
+             VALUES ('bc-1', '朗读课文', '{}', 'dev-master', 'in', 'sent', 1, 0, 1, 1)",
+        )
+        .execute(&pool)
+        .await
+        .expect("插入班级端副本");
+        sqlx::query(
+            "INSERT INTO custom_tasks (id, title, description, task_type, scope, grade, class_name,
+                                       due_at, status, view_mode, score_enabled, note_enabled,
+                                       default_node_id, owner_device_id, broadcast_task_id, source,
+                                       sort_order, created_at, updated_at, deleted_at, sync_state, dirty)
+             VALUES ('local-1', '朗读课文', NULL, 'custom', 'class', NULL, '一年级1班', NULL,
+                     'active', 'grid', 0, 0, NULL, NULL, 'bc-1', 'broadcast', 0, 1, 1, NULL, 'pending', 1)",
+        )
+        .execute(&pool)
+        .await
+        .expect("插入本地任务");
+        sqlx::query(
+            "INSERT INTO task_status_nodes (id, task_id, node_key, label, color_token, node_order,
+                                           is_final, is_default, created_at, updated_at, deleted_at)
+             VALUES ('node-1', 'local-1', 'todo', '未开始', 'slate', 0, 0, 1, 1, 1, NULL)",
+        )
+        .execute(&pool)
+        .await
+        .expect("插入节点");
+        sqlx::query(
+            "INSERT INTO students (id, student_no, name, class_name, status, created_at, updated_at)
+             VALUES ('stu-1', '001', '张三', '一年级1班', 'active', 1, 1),
+                    ('stu-2', '002', '李四', '一年级1班', 'active', 1, 1)",
+        )
+        .execute(&pool)
+        .await
+        .expect("插入学生");
+        sqlx::query(
+            "INSERT INTO task_records (id, task_id, student_id, node_id, node_key, score,
+                                       created_at, updated_at, deleted_at)
+             VALUES ('r-1', 'local-1', 'stu-1', NULL, 'todo', NULL, 1, 1, NULL)",
+        )
+        .execute(&pool)
+        .await
+        .expect("插入记录");
+
+        let removed = apply_recall(&pool, "bc-1").await.expect("应用撤回");
+        assert_eq!(removed.as_deref(), Some("local-1"));
+
+        for (table, id) in [
+            ("broadcast_tasks", "bc-1"),
+            ("custom_tasks", "local-1"),
+            ("task_status_nodes", "node-1"),
+            ("task_records", "r-1"),
+        ] {
+            let alive: i64 = sqlx::query_scalar(&format!(
+                "SELECT COUNT(*) FROM {} WHERE id = ? AND deleted_at IS NULL",
+                table
+            ))
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("查存活行");
+            assert_eq!(alive, 0, "{} 应被软删", table);
+        }
+
+        // 数据仍在库里（软删而非物理删除），必要时可恢复。
+        let kept: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM custom_tasks WHERE id = 'local-1'")
+                .fetch_one(&pool)
+                .await
+                .expect("查物理行");
+        assert_eq!(kept, 1, "撤回是软删，行仍保留");
+
+        // 幂等：重复应用不报错。
+        let again = apply_recall(&pool, "bc-1").await.expect("重复撤回");
+        assert_eq!(again, None);
 
         pool.close().await;
         std::fs::remove_dir_all(dir).ok();

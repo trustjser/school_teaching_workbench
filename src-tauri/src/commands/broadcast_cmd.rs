@@ -153,13 +153,63 @@ pub async fn broadcast_receipts(
     broadcast_repo::receipts(&state.pool, &broadcast_task_id).await
 }
 
-/// 取消（撤回）尚未送达的下发。已有班级接收时返回 `ERR_MODE`，引导改用关闭。
+/// 撤回预览（前端确认框用）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecallPreviewDto {
+    /// 将收到撤回指令的班级端数量（尚未送达时为 0）。
+    pub delivered_count: i64,
+    /// 会被一并移除的已标记学生记录条数。
+    pub record_count: i64,
+}
+
+/// 撤回预览：确认框用它展示「将通知几个班、涉及多少条已标记记录」。
 #[tauri::command]
-pub async fn broadcast_cancel(
+pub async fn broadcast_recall_preview(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> AppResult<RecallPreviewDto> {
+    let preview = broadcast_repo::recall_preview(&state.pool, &id).await?;
+    Ok(RecallPreviewDto {
+        delivered_count: preview.delivered_targets.len() as i64,
+        record_count: preview.record_count,
+    })
+}
+
+/// 撤回下发：把已经送到班级端的任务收回来。
+///
+/// 对**每一个已送达的目标**入队一条撤回指令（`op_type='recall'`，走同一套 outbox），
+/// 班级端收到后移除本地副本；尚未投递的队列条目直接作废。班级端离线时撤回指令会
+/// 排队，上线后自动送达 —— 这是撤回无法瞬间完成的原因。
+///
+/// 先入队再改状态：中途失败时可重试，`enqueue_to` 按
+/// `(entity_type, entity_id, op_type, target)` 去重，重复调用不会产生重复指令。
+#[tauri::command]
+pub async fn broadcast_recall(
     state: State<'_, Arc<AppState>>,
     id: String,
 ) -> AppResult<BroadcastTask> {
-    broadcast_repo::withdraw(&state.pool, &id).await
+    let preview = broadcast_repo::recall_preview(&state.pool, &id).await?;
+
+    for device_id in &preview.delivered_targets {
+        // 目标记录必须持久化：设备当前离线也要入队，worker 重试时会重新解析地址。
+        let base_url = match device_repo::get_by_device_id(&state.pool, device_id).await? {
+            Some(dev) => match (dev.ip_address, dev.port) {
+                (Some(ip), Some(port)) if port > 0 => Some(format!("http://{}:{}", ip, port)),
+                _ => None,
+            },
+            None => None,
+        };
+        outbox::enqueue_recall(&state.pool, &id, device_id, base_url.as_deref()).await?;
+    }
+
+    let task = broadcast_repo::mark_recalled(&state.pool, &id).await?;
+
+    let _ = state.app.emit(
+        Events::SYNC_QUEUE_CHANGED,
+        serde_json::json!({ "recall": id, "targets": preview.delivered_targets.len() }),
+    );
+    Ok(task)
 }
 
 /// 关闭已下发的任务（教务端宣布结束）。

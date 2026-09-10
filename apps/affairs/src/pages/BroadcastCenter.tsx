@@ -28,6 +28,7 @@ import {
 } from '@shared/types/broadcast';
 import type { BroadcastReceipt } from '@shared/types/broadcast';
 import { formatDateTime } from '@shared/lib/format';
+import type { RecallPreview } from '@shared/lib/db';
 
 /** 任务下发中心（教务处端）：创建广播任务 → 选择目标 → 下发 */
 export function BroadcastCenter(): JSX.Element {
@@ -48,23 +49,39 @@ export function BroadcastCenter(): JSX.Element {
   const [statusFilter, setStatusFilter] = useState('');
   /** 是否处于筛选态：决定空状态是「没有数据」还是「没有匹配」 */
   const hasFilter = keyword.trim() !== '' || statusFilter !== '';
-  /** 待执行的取消 / 关闭操作：非空即弹出二次确认 */
-  const [actionTarget, setActionTarget] = useState<{ task: BroadcastTask; kind: 'cancel' | 'close' } | null>(null);
+  /** 待执行的撤回 / 关闭操作：非空即弹出二次确认 */
+  const [actionTarget, setActionTarget] = useState<{ task: BroadcastTask; kind: 'recall' | 'close' } | null>(null);
   const [actionSaving, setActionSaving] = useState(false);
-  const cancelOutbox = useBroadcastStore((s) => s.cancelOutbox);
+  /** 撤回影响范围（弹框时异步取，取到前按钮不可点） */
+  const [recallPreview, setRecallPreview] = useState<RecallPreview | null>(null);
+  const recallOutbox = useBroadcastStore((s) => s.recallOutbox);
+  const previewRecall = useBroadcastStore((s) => s.previewRecall);
   const closeOutbox = useBroadcastStore((s) => s.closeOutbox);
+
+  const openRecall = async (task: BroadcastTask): Promise<void> => {
+    setActionTarget({ task, kind: 'recall' });
+    setRecallPreview(null);
+    try {
+      setRecallPreview(await previewRecall(task.id));
+    } catch (err) {
+      // 校验失败（例如已结束）：关掉弹框，错误由 toast 说明原因。
+      useAppStore.getState().toastError(err, '无法撤回');
+      setActionTarget(null);
+    }
+  };
 
   const applyAction = async (): Promise<void> => {
     if (!actionTarget) return;
     setActionSaving(true);
     try {
-      if (actionTarget.kind === 'cancel') await cancelOutbox(actionTarget.task.id);
+      if (actionTarget.kind === 'recall') await recallOutbox(actionTarget.task.id);
       else await closeOutbox(actionTarget.task.id);
     } catch {
-      // store 已 toast 后端返回的原因（例如「已有班级接收，请改用关闭」）。
+      // store 已 toast 后端返回的原因。
     } finally {
       setActionSaving(false);
       setActionTarget(null);
+      setRecallPreview(null);
     }
   };
   const [page, setPage] = useState(1);
@@ -128,7 +145,20 @@ export function BroadcastCenter(): JSX.Element {
     {
       key: 'status',
       header: '状态',
-      render: (t) => <Badge tone={t.status === 'sent' ? 'success' : 'neutral'}>{BROADCAST_STATUS_OPTIONS.find((o) => o.value === t.status)?.label ?? t.status}</Badge>,
+      render: (t) => {
+        // 「发送中」有两种截然不同的处境：目标全在排队，还是已经送出去一部分、
+        // 剩下的仍在重试。`delivered` 派生字段把它们区分开。
+        const hint =
+          t.status === 'sending' ? (t.delivered ? '部分已送达' : '排队等待投递') : null;
+        return (
+          <span className="inline-flex flex-col items-start gap-0.5">
+            <Badge tone={t.status === 'sent' ? 'success' : t.status === 'partial' ? 'warning' : 'neutral'}>
+              {BROADCAST_STATUS_OPTIONS.find((o) => o.value === t.status)?.label ?? t.status}
+            </Badge>
+            {hint && <span className="text-xs text-ink-muted">{hint}</span>}
+          </span>
+        );
+      },
     },
     {
       key: 'sentAt',
@@ -163,22 +193,20 @@ export function BroadcastCenter(): JSX.Element {
       render: (t) => {
         // 终态不再提供操作。
         const terminal = t.status === 'closed' || t.status === 'cancelled';
-        // 已有班级接收就撤回不了，只能「关闭」；否则给「取消」。
-        const canCancel = !terminal && !t.delivered;
         return (
           <div className="flex justify-end gap-2">
             <Button size="md" variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={() => void loadReceipts(t.id)}>
               回执
             </Button>
-            {canCancel && (
-              <Button size="md" variant="ghost" onClick={() => setActionTarget({ task: t, kind: 'cancel' })}>
-                取消
-              </Button>
-            )}
             {!terminal && (
-              <Button size="md" variant="secondary" onClick={() => setActionTarget({ task: t, kind: 'close' })}>
-                关闭
-              </Button>
+              <>
+                <Button size="md" variant="ghost" onClick={() => void openRecall(t)}>
+                  撤回
+                </Button>
+                <Button size="md" variant="secondary" onClick={() => setActionTarget({ task: t, kind: 'close' })}>
+                  关闭
+                </Button>
+              </>
             )}
             {terminal && <span className="px-2 py-2 text-sm font-semibold text-ink-muted">已结束</span>}
           </div>
@@ -256,23 +284,34 @@ export function BroadcastCenter(): JSX.Element {
 
       <ConfirmDialog
         open={actionTarget !== null}
-        title={actionTarget?.kind === 'cancel' ? '取消下发' : '关闭下发'}
+        title={actionTarget?.kind === 'recall' ? '撤回下发' : '关闭下发'}
         message={
-          actionTarget?.kind === 'cancel'
-            ? `确定要取消「${actionTarget?.task.title ?? ''}」吗？`
+          actionTarget?.kind === 'recall'
+            ? `确定要撤回「${actionTarget?.task.title ?? ''}」吗？`
             : `确定要关闭「${actionTarget?.task.title ?? ''}」吗？`
         }
         detail={
-          actionTarget?.kind === 'cancel'
-            ? '尚未投递的目标会被撤回，不会再送达班级端；已经收到的班级不受影响。取消不会记录发送时间。'
+          actionTarget?.kind === 'recall'
+            ? recallPreview === null
+              ? '正在统计影响范围…'
+              : recallPreview.deliveredCount > 0
+                ? `将通知 ${recallPreview.deliveredCount} 个已接收的班级端收回该任务${
+                    recallPreview.recordCount > 0
+                      ? `，其中 ${recallPreview.recordCount} 条已标记的学生记录会一并移除（数据仍保留在数据库，可恢复）`
+                      : ''
+                  }；尚未送达的目标会直接作废。班级端离线时会排队，上线后自动送达，因此不是瞬间生效。`
+                : '该下发还没有班级接收，撤回会直接作废待投递的队列条目，不会送达任何班级。'
             : '关闭后该下发不再出现在待处理列表里。这不会改动班级端已经收到的任务，班级端仍可继续标记。'
         }
-        confirmText={actionTarget?.kind === 'cancel' ? '取消下发' : '关闭下发'}
-        cancelText={actionTarget?.kind === 'cancel' ? '再想想' : '取消'}
-        danger={actionTarget?.kind === 'cancel'}
+        confirmText={actionTarget?.kind === 'recall' ? '确认撤回' : '关闭下发'}
+        cancelText={actionTarget?.kind === 'recall' ? '再想想' : '取消'}
+        danger={actionTarget?.kind === 'recall'}
         loading={actionSaving}
         onConfirm={() => void applyAction()}
-        onCancel={() => setActionTarget(null)}
+        onCancel={() => {
+          setActionTarget(null);
+          setRecallPreview(null);
+        }}
       />
     </div>
   );

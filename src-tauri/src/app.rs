@@ -191,7 +191,8 @@ pub fn run() {
             crate::commands::broadcast_cmd::broadcast_page,
             crate::commands::broadcast_cmd::broadcast_receipts,
             crate::commands::broadcast_cmd::broadcast_accept,
-            crate::commands::broadcast_cmd::broadcast_cancel,
+            crate::commands::broadcast_cmd::broadcast_recall,
+            crate::commands::broadcast_cmd::broadcast_recall_preview,
             crate::commands::broadcast_cmd::broadcast_close,
             // ---- 考勤 ----
             crate::commands::checkin_cmd::checkin_list,

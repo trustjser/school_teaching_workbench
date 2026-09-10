@@ -300,6 +300,43 @@ pub async fn broadcast(
     }))
 }
 
+/// 接收教务处撤回指令（班级端）：收回本地下发副本、派生任务及其节点与记录。
+pub async fn broadcast_recall(
+    State(state): State<Arc<AppState>>,
+    Extension(vr): Extension<VerifiedRequest>,
+) -> Result<Json<AckResponse>, ApiErr> {
+    let req: crate::db::models::BroadcastRecallRequest = serde_json::from_value(vr.inner)
+        .map_err(|e| api_err(AppError::validation(format!("recall 请求体非法: {}", e))))?;
+    if req.broadcast_task_id.is_empty() {
+        return Err(api_err(AppError::validation("撤回缺少广播任务 ID")));
+    }
+    if !matches!(state.mode(), crate::db::models::AppMode::Client) {
+        return Err(api_err(AppError::mode("只有班级端接受撤回指令")));
+    }
+
+    let removed_task_id = broadcast_repo::apply_recall(&state.pool, &req.broadcast_task_id)
+        .await
+        .map_err(api_err)?;
+
+    // 前端据此刷新任务列表并提示用户；被撤回的任务已从本端消失。
+    state
+        .app
+        .emit(
+            Events::BROADCAST_RECALLED,
+            serde_json::json!({
+                "broadcastTaskId": req.broadcast_task_id,
+                "taskId": removed_task_id,
+            }),
+        )
+        .ok();
+
+    Ok(Json(AckResponse {
+        accepted: true,
+        trace_id: new_id(),
+        message: None,
+    }))
+}
+
 /// 接收回执（教务处端登记）。
 pub async fn receipt(
     State(state): State<Arc<AppState>>,

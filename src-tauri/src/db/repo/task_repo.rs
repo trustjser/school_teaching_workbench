@@ -221,6 +221,17 @@ pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
             return Err(AppError::permission("教务下发任务不可删除"));
         }
     }
+    soft_delete_cascade(pool, id).await
+}
+
+/// 级联软删任务本体、状态节点与记录，**不做来源校验**。
+///
+/// 供内部路径复用（目前是教务端撤回下发）：撤回需要移除班级端本地已生成的
+/// 广播任务，而 `soft_delete` 会因 `source='broadcast'` 拒绝 —— 那个守卫是给
+/// 班级端用户界面用的，不适用于教务端的撤回指令。
+///
+/// 全部为软删（仅写 `deleted_at`），数据仍留在库里。
+pub async fn soft_delete_cascade(pool: &SqlitePool, id: &str) -> AppResult<()> {
     let now = now_ms();
     sqlx::query("UPDATE task_status_nodes SET deleted_at = ?, updated_at = ? WHERE task_id = ? AND deleted_at IS NULL")
         .bind(now)

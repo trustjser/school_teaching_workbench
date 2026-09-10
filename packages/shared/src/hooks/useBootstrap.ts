@@ -133,6 +133,17 @@ export function useBootstrap(): void {
         [TAURI_EVENTS.BROADCAST_RECEIPT]: (receipt) => {
           useBroadcastStore.getState().upsertReceipt(receipt);
         },
+        // 教务端撤回已送达的下发：本地任务及其节点、记录已被后端移除，刷新列表并提示。
+        [TAURI_EVENTS.BROADCAST_RECALLED]: () => {
+          void useTaskStore.getState().loadTasks();
+          void useBroadcastStore.getState().loadInbox();
+          useAppStore.getState().pushToast({
+            kind: 'warning',
+            title: '教务处撤回了任务',
+            description: '该任务及其已标记的记录已从本机移除',
+            duration: 8000,
+          });
+        },
         [TAURI_EVENTS.DATA_IMPORTED]: (report) => {
           useAppStore.getState().pushToast({
             kind: report.failedRows > 0 ? 'warning' : 'success',

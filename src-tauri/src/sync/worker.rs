@@ -282,17 +282,17 @@ async fn deliver_item(
             .map_err(|e| (e.code, e.message))?;
             Ok(status)
         }
-        "ack" => {
+        "ack" | "recall" => {
             let to = item
                 .target_device_id
                 .clone()
-                .ok_or((ErrorCode::Validation, "回执缺少目标设备".into()))?;
+                .ok_or((ErrorCode::Validation, format!("{} 缺少目标设备", item.op_type)))?;
             let base_url = item
                 .target_base_url
                 .clone()
-                .ok_or((ErrorCode::Net, "回执缺少目标地址".into()))?;
+                .ok_or((ErrorCode::Net, format!("{} 缺少目标地址", item.op_type)))?;
             let payload: Value = serde_json::from_str(&item.payload)
-                .map_err(|e| (ErrorCode::Validation, format!("回执载荷非法: {}", e)))?;
+                .map_err(|e| (ErrorCode::Validation, format!("{} 载荷非法: {}", item.op_type, e)))?;
             let status = client::deliver(
                 state,
                 &to,

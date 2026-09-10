@@ -113,6 +113,8 @@ impl Events {
     pub const BROADCAST_RECEIVED: &'static str = "broadcast://received";
     /// 回执到达。
     pub const BROADCAST_RECEIPT: &'static str = "broadcast://receipt";
+    /// 教务端撤回已送达的下发（班级端收到撤回指令后发出）。
+    pub const BROADCAST_RECALLED: &'static str = "broadcast://recalled";
     /// 名册或 `.sch` 导入完成。
     pub const DATA_IMPORTED: &'static str = "data://imported";
     /// 年级目录变更（新增/修改/软删）。
