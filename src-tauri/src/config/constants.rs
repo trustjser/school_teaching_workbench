@@ -119,6 +119,10 @@ impl Events {
     pub const GRADE_CHANGED: &'static str = "grade://changed";
     /// 班级目录变更（新增/修改/软删）。
     pub const CLASS_CHANGED: &'static str = "class://changed";
+    /// 教室认领或解除认领。
+    pub const CLASSROOM_CHANGED: &'static str = "classroom://changed";
+    /// 学生目录变更。
+    pub const STUDENT_CHANGED: &'static str = "student://changed";
     /// 学年目录变更（新增/修改/软删）。
     pub const SCHOOL_YEAR_CHANGED: &'static str = "school_year://changed";
     /// 模式热切换。

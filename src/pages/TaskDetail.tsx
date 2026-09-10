@@ -10,6 +10,8 @@ import { ProgressBar } from '@/components/ui/ProgressBar';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { TaskMatrixView } from '@/components/task/TaskMatrixView';
 import { formatDateTime, formatPercent } from '@/lib/format';
+import { useTauriEventHandler } from '@/hooks/useTauriEvent';
+import { TAURI_EVENTS } from '@/types/events';
 
 /** 教务端单班级任务详情：学生状态矩阵 + 评分/备注编辑。 */
 export function TaskDetail(): JSX.Element {
@@ -39,6 +41,14 @@ export function TaskDetail(): JSX.Element {
     void loadProgress(taskId, null, className);
     void loadClassMatrix(taskId, className);
   }, [className, loadClassMatrix, loadProgress, taskId]);
+
+  // 班级端状态回传到达教务端后，详情页直接刷新学生矩阵，避免必须手动 reload 页面。
+  useTauriEventHandler(TAURI_EVENTS.TASK_UPDATED, (payload) => {
+    if (payload.taskId === taskId && className) {
+      void loadProgress(taskId, null, className);
+      void loadClassMatrix(taskId, className);
+    }
+  });
 
   if (!task || !className) {
     return <EmptyState title="找不到任务班级" description="请从任务看板选择一个班级进入详情。" action={<Button onClick={() => navigate(returnTo)}>返回任务看板</Button>} />;

@@ -14,6 +14,9 @@ import { StudentImportDialog } from '@/components/student/StudentImportDialog';
 import { useDirectoryStore } from '@/store/useDirectoryStore';
 import { useStudentStore } from '@/store/useStudentStore';
 import { useDeviceStore } from '@/store/useDeviceStore';
+import { useAppStore } from '@/store/useAppStore';
+import { useTauriEventHandler } from '@/hooks/useTauriEvent';
+import { TAURI_EVENTS } from '@/types/events';
 import { classroomAssign, classroomAssignments, classroomDelete, classroomList, classroomUpsert } from '@/lib/db';
 import type { Class, Classroom, ClassroomAssignment, SchoolYear, Student } from '@/types/models';
 
@@ -103,6 +106,7 @@ export function GradeClassManage(): JSX.Element {
   } = useDirectoryStore();
 
   const loadStudents = useStudentStore((s) => s.load);
+  const pushToast = useAppStore((s) => s.pushToast);
   const devices = useDeviceStore((s) => s.devices);
   const loadDevices = useDeviceStore((s) => s.load);
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
@@ -113,6 +117,7 @@ export function GradeClassManage(): JSX.Element {
   const [classDraft, setClassDraft] = useState<ClassDraft | null>(null);
   const [yearDraft, setYearDraft] = useState<SchoolYearDraft | null>(null);
   const [classroomDraft, setClassroomDraft] = useState<ClassroomDraft | null>(null);
+  const [pendingUnclaim, setPendingUnclaim] = useState<Classroom | null>(null);
   const [pendingDelete, setPendingDelete] = useState<
     { kind: 'grade' | 'class' | 'year' | 'classroom'; id: string; name: string } | null
   >(null);
@@ -140,6 +145,10 @@ export function GradeClassManage(): JSX.Element {
     setAssignments(current);
   };
 
+  useTauriEventHandler(TAURI_EVENTS.CLASSROOM_CHANGED, () => {
+    void refreshClassrooms().catch(() => undefined);
+  });
+
   const addClassroom = async (): Promise<void> => {
     if (!roomName.trim()) return;
     await classroomUpsert({ roomName: roomName.trim(), deviceId: null, remark: null });
@@ -160,19 +169,25 @@ export function GradeClassManage(): JSX.Element {
     await refreshClassrooms();
   };
 
-  const bindSelectedClass = async (room: Classroom): Promise<void> => {
-    if (!selectedSchoolYearId || !selectedClass) return;
-    await classroomAssign(room.id, selectedSchoolYearId, selectedClass.id);
+  const unclaimClassroom = async (): Promise<void> => {
+    if (!pendingUnclaim) return;
+    await classroomUpsert({
+      id: pendingUnclaim.id,
+      roomName: pendingUnclaim.roomName,
+      deviceId: null,
+      remark: pendingUnclaim.remark ?? null,
+    });
+    setPendingUnclaim(null);
     await refreshClassrooms();
   };
 
-  const bindDevice = async (room: Classroom, deviceId: string): Promise<void> => {
-    await classroomUpsert({
-      id: room.id,
-      roomName: room.roomName,
-      deviceId: deviceId || null,
-      remark: room.remark,
-    });
+  const bindSelectedClass = async (room: Classroom): Promise<void> => {
+    if (!selectedClass) return;
+    // 新建/切换学年时状态可能尚未完成联动，优先使用页面选中的学年，
+    // 否则回退到班级自身的学年，避免“绑定当前班级”被无故禁用。
+    const schoolYearId = selectedSchoolYearId ?? selectedClass.schoolYearId;
+    if (!schoolYearId) return;
+    await classroomAssign(room.id, schoolYearId, selectedClass.id);
     await refreshClassrooms();
   };
 
@@ -194,7 +209,7 @@ export function GradeClassManage(): JSX.Element {
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClassId]);
+  }, [selectedClassId, selectedClass?.className]);
 
   const openGradeEdit = (grade?: GradeDraft & { id?: string }): void => {
     setGradeDraft(grade ?? EMPTY_GRADE);
@@ -229,6 +244,10 @@ export function GradeClassManage(): JSX.Element {
   const saveClass = async (): Promise<void> => {
     if (!classDraft || !selectedGradeId) return;
     if (!classDraft.className.trim()) return;
+    if (!classDraft.id && !classDraft.schoolYearId) {
+      pushToast({ kind: 'warning', title: '请选择所属学年', description: '新建班级必须归入一个学年' });
+      return;
+    }
     await upsertClass({
       id: classDraft.id,
       gradeId: selectedGradeId,
@@ -361,22 +380,19 @@ export function GradeClassManage(): JSX.Element {
               const assignedClass = classes.find((c) => c.id === assignment?.classId);
               return <div key={room.id} className="rounded-lg border border-surface-border p-3">
                 <div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2"><Monitor className="h-4 w-4 text-brand-600" /><span className="font-semibold text-ink">{room.roomName}</span></div><div className="flex gap-1"><Button variant="ghost" icon={<Pencil className="h-4 w-4" />} onClick={() => setClassroomDraft({ id: room.id, roomName: room.roomName, remark: room.remark ?? '' })}>编辑</Button><Button variant="ghost" icon={<Trash2 className="h-4 w-4" />} onClick={() => setPendingDelete({ kind: 'classroom', id: room.id, name: room.roomName })}>删除</Button></div></div>
-                <div className="mt-2">
-                  <SearchableSelect
-                    label="绑定设备"
-                    options={[
-                      { value: '', label: '未绑定设备' },
-                      ...devices
-                        .filter((d) => d.isSelf || d.deviceId === room.deviceId || !classrooms.some((other) => other.id !== room.id && other.deviceId === d.deviceId))
-                        .map((d) => ({ value: d.deviceId, label: d.deviceName })),
-                    ]}
-                    value={room.deviceId ?? ''}
-                    onChange={(value) => void bindDevice(room, value)}
-                  />
+                <div className="mt-2 rounded-lg bg-surface-muted px-3 py-2">
+                  <p className="text-sm font-medium text-ink">设备认领状态</p>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    {room.deviceId
+                      ? `${device?.deviceName ?? `设备-${room.deviceId.slice(0, 8)}`} · ${device?.status === 'online' ? '在线' : '离线'}`
+                      : '尚未被班级端认领'}
+                  </p>
                 </div>
-                <p className="mt-1 text-sm text-ink-muted">当前：{device?.deviceName ?? room.deviceId ?? '未绑定'}</p>
                 <p className="text-sm text-ink-muted">当前班级：{assignedClass?.className ?? '未分配'}</p>
-                <Button className="mt-2" size="md" variant="secondary" disabled={!selectedClass || !selectedSchoolYearId} onClick={() => void bindSelectedClass(room)}>绑定当前班级</Button>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button size="md" variant="secondary" disabled={!selectedClass || !(selectedSchoolYearId ?? selectedClass.schoolYearId)} onClick={() => void bindSelectedClass(room)}>绑定当前班级</Button>
+                  {room.deviceId && <Button size="md" variant="ghost" onClick={() => setPendingUnclaim(room)}>解除设备认领</Button>}
+                </div>
               </div>;
             })}
           </div>
@@ -599,7 +615,7 @@ export function GradeClassManage(): JSX.Element {
             <Button variant="secondary" onClick={() => setClassDraft(null)}>
               取消
             </Button>
-            <Button onClick={saveClass} disabled={!classDraft?.className.trim()}>
+            <Button onClick={saveClass} disabled={!classDraft?.className.trim() || (!classDraft?.id && !classDraft?.schoolYearId)}>
               保存
             </Button>
           </>
@@ -628,11 +644,11 @@ export function GradeClassManage(): JSX.Element {
               />
             </div>
             <SearchableSelect
-              label="所属学年"
+              label="所属学年（必填）"
               options={schoolYears.map((y) => ({ value: y.id, label: y.schoolYearName }))}
               value={classDraft.schoolYearId ?? ''}
               onChange={(value) => setClassDraft({ ...classDraft, schoolYearId: value || null })}
-              placeholder="— 未指定学年 —"
+              placeholder="— 请选择学年 —"
             />
             <Input
               label="班主任"
@@ -747,6 +763,16 @@ export function GradeClassManage(): JSX.Element {
         confirmText="删除"
         onCancel={() => setPendingDelete(null)}
         onConfirm={confirmDelete}
+      />
+
+      <ConfirmDialog
+        open={pendingUnclaim !== null}
+        title="解除设备认领"
+        message={`确定解除「${pendingUnclaim?.roomName ?? ''}」当前设备认领吗？`}
+        detail="解除后，新的班级端可以重新认领此教室；原设备不会被删除。"
+        confirmText="解除认领"
+        onCancel={() => setPendingUnclaim(null)}
+        onConfirm={() => void unclaimClassroom()}
       />
 
       {/* 班级名册：编辑 / 导入（作用域为该班级） */}

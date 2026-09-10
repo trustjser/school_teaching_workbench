@@ -194,6 +194,25 @@ pub async fn claim_batch(pool: &SqlitePool, limit: i32) -> AppResult<Vec<Pending
     Ok(rows)
 }
 
+/// 网络恢复后自动唤醒广播死信，允许重新发现地址并继续投递。
+pub async fn revive_dead_for_online_devices(pool: &SqlitePool) -> AppResult<u64> {
+    let result = sqlx::query(
+        "UPDATE pending_queue SET status='pending', attempt_count=0, next_retry_at=0,
+                last_error=NULL, updated_at=?
+         WHERE deleted_at IS NULL AND status='dead'
+           AND (
+             target_device_id IN (SELECT device_id FROM devices WHERE status='online')
+             OR (target_device_id IS NULL AND EXISTS (
+               SELECT 1 FROM devices WHERE device_role='master' AND status='online' AND deleted_at IS NULL
+             ))
+           )",
+    )
+    .bind(now_ms())
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 /// 标记为发送中并累加尝试次数。
 pub async fn mark_sending(pool: &SqlitePool, id: &str) -> AppResult<()> {
     sqlx::query(

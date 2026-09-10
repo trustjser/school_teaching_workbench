@@ -65,6 +65,7 @@ subtle = "2"
 
 # ---------- 基础工具 ----------
 uuid = { version = "1", features = ["v4", "serde"] }
+machine-uid = "0.5.4"
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 once_cell = "1"

@@ -1,34 +1,30 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { classList, classroomAssign, classroomList, classroomUpsert, directorySync, settingsGetAll, settingsKeyInfo, settingsSet, settingsSetSharedSecret } from '@/lib/db';
+import { classroomList, classroomRelease, directorySync, settingsGetAll, settingsKeyInfo, settingsSet, settingsSetSharedSecret, settingsResetClient } from '@/lib/db';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
-import { SearchableSelect } from '@/components/ui/SearchableSelect';
-import { ModeBadge } from '@/components/layout/ModeBadge';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ThemeSwitcher } from '@/components/motion/ThemeSwitcher';
 import { UI_SCALE_OPTIONS } from '@/constants/ui';
 import { formatFingerprint } from '@/lib/crypto';
 import { keyFingerprint } from '@/lib/crypto';
 import { Input } from '@/components/ui/Input';
 import type { KeyInfo } from '@/types/api';
-import type { Class, Classroom } from '@/types/models';
+import type { Classroom } from '@/types/models';
 
-/** 设置页：运行模式切换、UI 缩放、主题、共享密钥与班级教室绑定 */
+/** 设置页：UI 缩放、主题、共享密钥与班级端重置 */
 export function Settings(): JSX.Element {
   const settings = useAppStore((s) => s.settings);
   const setUiScale = useAppStore((s) => s.setUiScale);
-  const switchMode = useAppStore((s) => s.switchMode);
   const [keyInfo, setKeyInfo] = useState<KeyInfo | null>(null);
   const [secret, setSecret] = useState('');
   const [savingSecret, setSavingSecret] = useState(false);
   const [secretError, setSecretError] = useState<string | null>(null);
-  const [classes, setClasses] = useState<Class[]>([]);
   const [rooms, setRooms] = useState<Classroom[]>([]);
-  const [classId, setClassId] = useState('');
-  const [roomId, setRoomId] = useState('');
-  const [savingBinding, setSavingBinding] = useState(false);
   const [bindingError, setBindingError] = useState<string | null>(null);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const pushToast = useAppStore((s) => s.pushToast);
 
   useEffect(() => {
@@ -48,14 +44,10 @@ export function Settings(): JSX.Element {
     } catch (err) {
       if (showResult) setBindingError((err as Error).message || '未能连接教务端');
     }
-    await Promise.all([classList(), classroomList()]).then(([nextClasses, nextRooms]) => {
-      setClasses(nextClasses);
+    await classroomList().then((nextRooms) => {
       setRooms(nextRooms);
-      setClassId(settings.classId ?? '');
-      const boundRoom = nextRooms.find((room) => room.deviceId === settings.deviceId);
-      setRoomId(boundRoom?.id ?? '');
     });
-  }, [settings.appMode, settings.classId, pushToast]);
+  }, [settings.appMode, pushToast]);
 
   useEffect(() => {
     void loadDirectory().catch(() => undefined);
@@ -78,50 +70,24 @@ export function Settings(): JSX.Element {
     } finally { setSavingSecret(false); }
   };
 
-  const saveBinding = async (): Promise<void> => {
-    const selectedClass = classes.find((item) => item.id === classId);
-    const selectedRoom = rooms.find((item) => item.id === roomId);
-    if (!selectedClass || !selectedRoom || !selectedClass.schoolYearId) {
-      setBindingError('所选班级缺少学年信息，无法绑定');
-      return;
-    }
-    setSavingBinding(true);
-    setBindingError(null);
+  const resetClient = async (): Promise<void> => {
+    setResetting(true); setBindingError(null);
     try {
-      await classroomUpsert({ id: selectedRoom.id, roomName: selectedRoom.roomName, deviceId: settings.deviceId, remark: selectedRoom.remark });
-      await classroomAssign(selectedRoom.id, selectedClass.schoolYearId, selectedClass.id);
-      await Promise.all([
-        settingsSet('class_id', selectedClass.id),
-        settingsSet('grade', selectedClass.gradeName ?? ''),
-        settingsSet('class_name', selectedClass.className),
-        settingsSet('school_year_id', selectedClass.schoolYearId),
-        settingsSet('bound_class_id', selectedClass.id),
-      ]);
+      const boundRoom = rooms.find((room) => room.deviceId === settings.deviceId);
+      if (boundRoom) await classroomRelease(boundRoom.id);
+      await settingsResetClient();
       useAppStore.getState().applySettings(await settingsGetAll());
-      pushToast({ kind: 'success', title: '班级与教室已绑定' });
+      useAppStore.getState().setPhase('need-setup');
+      setResetOpen(false);
+      pushToast({ kind: 'success', title: '已重置班级端配置', description: '请重新录入共享密钥并认领教室' });
     } catch (err) {
-      setBindingError((err as Error).message || '绑定失败');
-    } finally { setSavingBinding(false); }
+      setBindingError((err as Error).message || '重置失败');
+    } finally { setResetting(false); }
   };
 
   return (
     <div className="max-w-2xl space-y-4">
       <h1 className="text-3xl font-bold text-ink">设置</h1>
-
-      <Card title="运行模式">
-        <div className="flex flex-wrap items-center gap-3">
-          <ModeBadge mode={settings.appMode} />
-          <Button
-            variant="secondary"
-            onClick={() => void switchMode(settings.appMode === 'master' ? 'client' : 'master')}
-          >
-            切换到{settings.appMode === 'master' ? '班级端' : '教务处端'}
-          </Button>
-        </div>
-        <p className="mt-3 text-sm text-ink-muted">
-          切换模式会刷新本地运行配置并重新发现局域网节点。
-        </p>
-      </Card>
 
       <Card title="外观">
         <Select
@@ -162,20 +128,18 @@ export function Settings(): JSX.Element {
       </Card>
 
       {settings.appMode === 'client' && (
-        <Card title="工作身份绑定（班级 + 教室）">
+        <Card title="班级端配置">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm text-ink-muted">教室是教务端维护的物理位置；此处只选择本机服务的班级和教室，可随时更换。</p>
+            <p className="text-sm text-ink-muted">班级和教室由教务端维护，班级端完成初始化后不能直接换绑。</p>
             <Button variant="secondary" size="md" onClick={() => void loadDirectory(true).catch(() => undefined)}>刷新目录</Button>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <SearchableSelect label="班级" options={classes.map((item) => ({ value: item.id, label: `${item.gradeName} · ${item.className}` }))} value={classId} onChange={setClassId} placeholder="— 请选择班级 —" />
-            <SearchableSelect label="教室" options={rooms.map((item) => ({ value: item.id, label: item.roomName }))} value={roomId} onChange={setRoomId} placeholder="— 请选择教室 —" />
-          </div>
-          <Button className="mt-4" onClick={() => void saveBinding()} loading={savingBinding} disabled={!classId || !roomId || savingBinding}>保存绑定</Button>
+          <p className="text-ink">当前班级：{settings.grade && settings.className ? `${settings.grade} · ${settings.className}` : '未配置'}</p>
+          <p className="mt-1 text-ink">当前教室：{rooms.find((room) => room.deviceId === settings.deviceId)?.roomName ?? '未认领'}</p>
+          <Button className="mt-4" variant="danger" onClick={() => setResetOpen(true)}>重置班级端配置</Button>
           {bindingError && <p className="mt-2 text-sm text-red-600">{bindingError}</p>}
-          {classes.length === 0 && <p className="mt-3 text-sm text-ink-muted">尚未同步到教务处目录，请先录入共享密钥并等待节点上线。</p>}
         </Card>
       )}
+      <ConfirmDialog open={resetOpen} title="重置班级端配置" message="确定要重置本机班级端配置吗？" detail="当前教室认领会先释放，完成后需要重新输入共享密钥并选择教室。" confirmText="确认重置" danger loading={resetting} onConfirm={() => void resetClient()} onCancel={() => setResetOpen(false)} />
     </div>
   );
 }

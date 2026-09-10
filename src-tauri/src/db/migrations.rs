@@ -14,6 +14,8 @@ pub const DIRECTORY_SQL: &str = include_str!("../../migrations/002_directory.sql
 /// 学年 / 届维度迁移 SQL 原文（编译期内嵌）。
 pub const SCHOOL_YEAR_SQL: &str = include_str!("../../migrations/003_school_year.sql");
 pub const CLASSROOM_SQL: &str = include_str!("../../migrations/004_classroom_binding.sql");
+pub const SCHOOL_YEAR_REPAIR_SQL: &str =
+    include_str!("../../migrations/005_repair_school_year_unique.sql");
 
 /// 迁移版本号。
 pub const INIT_VERSION: i64 = 1;
@@ -108,6 +110,7 @@ pub fn all_statements() -> Vec<String> {
     out.extend(split_sql(DIRECTORY_SQL));
     out.extend(split_sql(SCHOOL_YEAR_SQL));
     out.extend(split_sql(CLASSROOM_SQL));
+    out.extend(split_sql(SCHOOL_YEAR_REPAIR_SQL));
     out
 }
 

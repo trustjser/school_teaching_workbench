@@ -133,6 +133,38 @@ pub async fn settings_complete_setup(
     Ok(())
 }
 
+/// 班级端重新进入初始化向导。教务端不提供此能力，且保留设备 ID 与共享密钥。
+#[tauri::command]
+pub async fn settings_reset_client(state: State<'_, Arc<AppState>>) -> AppResult<()> {
+    if state.mode() != AppMode::Client {
+        return Err(AppError::mode("教务端不支持重置配置"));
+    }
+    for key in [
+        "completed_setup",
+        "first_run_done",
+        "class_id",
+        "bound_class_id",
+        "grade",
+        "class_name",
+        "school_year_id",
+        "school_name",
+    ] {
+        let value = if matches!(key, "completed_setup" | "first_run_done") {
+            Some("false")
+        } else {
+            None
+        };
+        settings_repo::set_raw(
+            &state.pool,
+            key,
+            value,
+            if value.is_some() { "boolean" } else { "string" },
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,6 +186,11 @@ pub async fn settings_switch_mode(
     state: State<'_, Arc<AppState>>,
     mode: String,
 ) -> AppResult<AppMode> {
+    if settings_repo::get_bool(&state.pool, "completed_setup", false).await? {
+        return Err(AppError::mode(
+            "已完成初始化，不能切换运行模式；班级端请使用重置配置",
+        ));
+    }
     let mode = AppMode::parse(&mode);
     settings_repo::set_raw(&state.pool, "app_mode", Some(mode.as_str()), "string").await?;
     state.set_mode(mode);

@@ -1,14 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
-import { classList, classroomAssign, classroomList, classroomUpsert, directorySync, settingsCompleteSetup, settingsGetAll, settingsSetSharedSecret, toRuntimeSettings } from '@/lib/db';
+import { classroomAssignments, classroomClaim, classroomList, classList, directorySync, settingsCompleteSetup, settingsGetAll, settingsSetSharedSecret, schoolYearList } from '@/lib/db';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { Textarea } from '@/components/ui/Textarea';
 import type { AppMode } from '@/types/enums';
-import type { Class, Classroom } from '@/types/models';
+import type { Class, Classroom, ClassroomAssignment, SchoolYear } from '@/types/models';
 import { keyFingerprint } from '@/lib/crypto';
 
 /** 共享密钥必须是 base64 编码的 32 字节 */
@@ -32,7 +32,7 @@ function randomSecret(): string {
 
 /**
  * 首次运行配置向导。
- * 收集运行模式、学校/年级/班级、设备名与共享密钥，提交到
+ * 收集运行模式、学校信息、班级端教室认领与共享密钥，提交到
  * `settingsCompleteSetup`；成功后重载运行期配置并进入主框架。
  *
  * 注意：Rust 侧把「已完成」写入 `completed_setup`，而前端 `firstRunDone`
@@ -47,38 +47,30 @@ export function SetupWizard(): JSX.Element {
 
   const [mode, setMode] = useState<AppMode>('client');
   const [schoolName, setSchoolName] = useState('');
-  const [deviceName, setDeviceName] = useState('');
   const [secret, setSecret] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [loadingDirectory, setLoadingDirectory] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 班级端：从教务端目录选择绑定班级（目录为空时回退手动填写）
+  // 班级端：从教务端目录选择绑定班级。向导打开时不读取本地空目录，
+  // 避免与“连接并加载目录”的异步请求竞态而把刚拉到的数据覆盖为空。
   const [dirClasses, setDirClasses] = useState<Class[]>([]);
-  const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [dirRooms, setDirRooms] = useState<Classroom[]>([]);
+  const [dirAssignments, setDirAssignments] = useState<ClassroomAssignment[]>([]);
+  const [dirYears, setDirYears] = useState<SchoolYear[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (mode === 'client') {
-      classList()
-        .then(setDirClasses)
-        .catch(() => setDirClasses([]));
-      classroomList()
-        .then(setDirRooms)
-        .catch(() => setDirRooms([]));
-    }
-  }, [mode]);
-
-  const boundClass = dirClasses.find((c) => c.id === selectedClassId) ?? null;
+  const activeYear = dirYears[0] ?? null;
+  const selectedAssignment = dirAssignments.find((item) => item.classroomId === selectedRoomId) ?? null;
+  const selectedYear = dirYears.find((year) => year.id === selectedAssignment?.schoolYearId) ?? activeYear;
+  const boundClass = dirClasses.find((c) => c.id === selectedAssignment?.classId) ?? null;
   const secretBad = secret.trim() !== '' && !isBase64Secret(secret.trim());
   const secretMissing = secret.trim() === '';
   const secretRequired = true;
   const canSubmit =
-    deviceName.trim().length > 0 &&
     !secretMissing &&
     !secretBad &&
-    (mode === 'master' || Boolean(selectedClassId && selectedRoomId)) &&
+    (mode === 'master' || Boolean(selectedRoomId && boundClass?.schoolYearId)) &&
     !submitting;
 
   const loadRemoteDirectory = async (): Promise<void> => {
@@ -93,10 +85,11 @@ export function SetupWizard(): JSX.Element {
       const fingerprint = await keyFingerprint(value);
       await settingsSetSharedSecret(value, fingerprint.slice(0, 8));
       const report = await directorySync();
-      const [nextClasses, nextRooms] = await Promise.all([classList(), classroomList()]);
+      const [nextClasses, nextRooms, nextAssignments, nextYears] = await Promise.all([classList(), classroomList(), classroomAssignments(), schoolYearList()]);
       setDirClasses(nextClasses);
       setDirRooms(nextRooms);
-      setSelectedClassId((current) => nextClasses.some((item) => item.id === current) ? current : null);
+      setDirAssignments(nextAssignments);
+      setDirYears(nextYears);
       setSelectedRoomId((current) => nextRooms.some((item) => item.id === current) ? current : null);
       if (report.classes === 0) {
         setError('已连接教务端，但教务端还没有可用班级');
@@ -114,9 +107,12 @@ export function SetupWizard(): JSX.Element {
     setSubmitting(true);
     setError(null);
     try {
+      if (mode === 'client' && selectedRoomId && boundClass?.schoolYearId) {
+        await classroomClaim(selectedRoomId, boundClass.schoolYearId);
+      }
       await settingsCompleteSetup({
         mode,
-        deviceName: deviceName.trim(),
+        deviceName: mode === 'master' ? '教务处端' : '班级端',
         grade: boundClass ? boundClass.gradeName : null,
         className: boundClass ? boundClass.className : null,
         classId: boundClass ? boundClass.id : null,
@@ -127,14 +123,6 @@ export function SetupWizard(): JSX.Element {
       });
       // 重载运行期配置（写入 completed_setup / app_mode / school_name 等），再进入主框架
       const raw = await settingsGetAll();
-      if (mode === 'client' && selectedRoomId) {
-        const runtime = toRuntimeSettings(raw);
-        const room = dirRooms.find((item) => item.id === selectedRoomId);
-        if (room) {
-          await classroomUpsert({ id: room.id, roomName: room.roomName, deviceId: runtime.deviceId, remark: room.remark });
-          if (boundClass?.schoolYearId) await classroomAssign(room.id, boundClass.schoolYearId, boundClass.id);
-        }
-      }
       applySettings(raw);
       setPhase('ready');
       pushToast({
@@ -193,58 +181,47 @@ export function SetupWizard(): JSX.Element {
         </div>
 
         {/* 基本信息 */}
-        <div className="mt-5 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
-          <Input
-            label="设备名"
-            value={deviceName}
-            onChange={(e) => setDeviceName(e.target.value)}
-            placeholder="如：三年二班-前台机"
-            error={deviceName.trim() === '' && submitting ? '必填' : undefined}
-          />
-          {mode === 'master' && (
+        {mode === 'master' && (
+          <div className="mt-5">
             <Input
               label="学校名（可选）"
               value={schoolName}
               onChange={(e) => setSchoolName(e.target.value)}
               placeholder="如：阳光小学"
             />
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* 班级端：绑定年级 / 班级 */}
+        {/* 班级端：认领教务端已维护的教室 */}
         {mode === 'client' && (
           <div className="mt-4 space-y-3 rounded-lg bg-surface-muted p-4">
             <div className="flex items-center justify-between">
-              <p className="text-base font-semibold text-ink">班级与教室（由教务处维护）</p>
-              {dirClasses.length === 0 && <span className="text-sm text-ink-muted">请先在下方连接教务端</span>}
+              <p className="text-base font-semibold text-ink">认领教室（由教务处维护）</p>
+              {dirRooms.length === 0 && <span className="text-sm text-ink-muted">请先在下方连接教务端</span>}
             </div>
 
-            {dirClasses.length > 0 ? (
-              <SearchableSelect
-                label="选择本机所属班级"
-                options={dirClasses.map((c) => ({
-                  value: c.id,
-                  label: c.gradeName ? `${c.gradeName} / ${c.className}` : c.className,
-                }))}
-                value={selectedClassId ?? ''}
-                onChange={(value) => setSelectedClassId(value || null)}
-                placeholder="— 请选择班级 —"
-              />
-            ) : null}
-
-            {dirClasses.length > 0 && (
+            {dirRooms.length > 0 && (
               <SearchableSelect
                 label="选择本机所在教室"
-                options={dirRooms.map((room) => ({ value: room.id, label: room.roomName }))}
+                options={dirRooms
+                  .map((room) => {
+                    const assignment = dirAssignments.find((item) => item.classroomId === room.id);
+                    const klass = dirClasses.find((item) => item.id === assignment?.classId);
+                    return assignment && klass ? { value: room.id, label: `${room.roomName} · ${klass.gradeName ?? ''}${klass.className}` } : null;
+                  })
+                  .filter((item): item is { value: string; label: string } => item !== null)}
                 value={selectedRoomId ?? ''}
                 onChange={(value) => setSelectedRoomId(value || null)}
                 placeholder="— 请选择教室 —"
               />
             )}
 
-            {dirClasses.length === 0 && (
+            {selectedRoomId && boundClass && (
+              <p className="text-sm text-ink-muted">将绑定：{selectedYear?.schoolYearName ?? ''} · {boundClass.gradeName} · {boundClass.className}</p>
+            )}
+            {dirRooms.length === 0 && (
               <p className="text-sm text-ink-muted">
-                输入教务端提供的共享密钥，再点击“连接并加载目录”。班级和教室都由教务端维护。
+                输入共享密钥，再点击“连接并加载目录”。只有教务端已绑定当前学年班级的教室才会出现在这里。
               </p>
             )}
           </div>

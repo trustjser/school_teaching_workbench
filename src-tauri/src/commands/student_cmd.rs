@@ -20,17 +20,20 @@ use crate::sync::outbox;
 pub async fn student_list(
     state: State<'_, Arc<AppState>>,
     class_name: Option<String>,
+    class_id: Option<String>,
     status: Option<String>,
     keyword: Option<String>,
     include_deleted: Option<bool>,
 ) -> AppResult<Vec<Student>> {
     let filter = student_repo::StudentFilter {
         class_name,
-        class_id: None,
+        class_id,
         status,
         keyword,
         include_deleted: include_deleted.unwrap_or(false),
-        exclude_transferred: None,
+        // 名册页面需要保留“已转出”记录用于展示与恢复；考勤、任务等业务层
+        // 会继续显式排除 transferred 学生。
+        exclude_transferred: Some(false),
     };
     student_repo::list(&state.pool, filter).await
 }

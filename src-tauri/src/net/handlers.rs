@@ -23,6 +23,7 @@ use crate::db::repo::{
 use crate::error::{AppError, AppResult, ErrorBody};
 use crate::net::middleware::VerifiedRequest;
 use crate::state::AppState;
+use crate::sync::directory::ClassroomClaimResponse;
 use crate::sync::directory::{self, DirectorySnapshot};
 use crate::sync::outbox;
 
@@ -98,6 +99,109 @@ pub async fn directory(
         .map_err(api_err)
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClassroomClaimRequest {
+    classroom_id: String,
+    school_year_id: Option<String>,
+}
+
+/// 教务端原子处理班级端的教室认领。
+pub async fn classroom_claim(
+    State(state): State<Arc<AppState>>,
+    Extension(vr): Extension<VerifiedRequest>,
+) -> Result<Json<ClassroomClaimResponse>, ApiErr> {
+    if !matches!(state.mode(), crate::db::models::AppMode::Master) {
+        return Err(api_err(AppError::mode("只有教务端可以处理教室认领")));
+    }
+    let req: ClassroomClaimRequest = serde_json::from_value(vr.inner)
+        .map_err(|e| api_err(AppError::validation(format!("认领请求体非法: {}", e))))?;
+    let room = classroom_repo::claim(
+        &state.pool,
+        &req.classroom_id,
+        &vr.from,
+        req.school_year_id.as_deref().unwrap_or_default(),
+    )
+    .await
+    .map_err(api_err)?;
+    let _ = state.app.emit(
+        Events::CLASSROOM_CHANGED,
+        serde_json::json!({ "id": room.id, "deviceId": vr.from }),
+    );
+    let school_year_id = req.school_year_id.as_deref().unwrap_or_default();
+    let assignment = classroom_repo::list_assignments(&state.pool, Some(school_year_id))
+        .await
+        .map_err(api_err)?
+        .into_iter()
+        .find(|item| item.classroom_id == room.id)
+        .ok_or_else(|| api_err(AppError::validation("教室绑定关系不存在")))?;
+    outbox::enqueue_entity(
+        &state.pool,
+        "classroom",
+        &room.id,
+        "upsert",
+        &room,
+        Some(&vr.from),
+        None,
+    )
+    .await
+    .map_err(api_err)?;
+    let item = IngestItem {
+        entity_type: "classroom_assignment".into(),
+        op_type: "upsert".into(),
+        entity: serde_json::to_value(&assignment).map_err(|e| api_err(AppError::db(e)))?,
+    };
+    resend_students_for_assignment(&state, &item, Some(&vr.from))
+        .await
+        .map_err(api_err)?;
+    Ok(Json(ClassroomClaimResponse {
+        classroom: room,
+        assignment,
+    }))
+}
+
+/// 教务端处理班级端的教室解除认领。
+pub async fn classroom_release(
+    State(state): State<Arc<AppState>>,
+    Extension(vr): Extension<VerifiedRequest>,
+) -> Result<Json<AckResponse>, ApiErr> {
+    if !matches!(state.mode(), crate::db::models::AppMode::Master) {
+        return Err(api_err(AppError::mode("只有教务端可以处理教室解除认领")));
+    }
+    let req: ClassroomClaimRequest = serde_json::from_value(vr.inner)
+        .map_err(|e| api_err(AppError::validation(format!("解除认领请求体非法: {}", e))))?;
+    classroom_repo::release(&state.pool, &req.classroom_id, &vr.from)
+        .await
+        .map_err(api_err)?;
+    let _ = state.app.emit(
+        Events::CLASSROOM_CHANGED,
+        serde_json::json!({ "id": req.classroom_id }),
+    );
+    if let Some(room) = classroom_repo::list(&state.pool)
+        .await
+        .map_err(api_err)?
+        .into_iter()
+        .find(|r| r.id == req.classroom_id)
+    {
+        outbox::enqueue_entity(
+            &state.pool,
+            "classroom",
+            &room.id,
+            "upsert",
+            &room,
+            Some(&vr.from),
+            None,
+        )
+        .await
+        .map_err(api_err)?;
+    }
+    Ok(Json(AckResponse {
+        accepted: true,
+        trace_id: new_id(),
+        message: None,
+    }))
+}
+
 /// 接收增量并合并入库。
 pub async fn ingest(
     State(state): State<Arc<AppState>>,
@@ -166,14 +270,10 @@ pub async fn broadcast(
         .await
         .map_err(api_err)?;
 
-    for node in push.nodes {
-        let mut n: TaskStatusNode = serde_json::from_value(node)
-            .map_err(|e| api_err(AppError::validation(format!("节点解析失败: {}", e))))?;
-        n.task_id = task.id.clone();
-        task_repo::merge_remote_node(&state.pool, &n)
-            .await
-            .map_err(api_err)?;
-    }
+    // 广播中的 nodes 是状态模板，task_status_nodes 的外键则指向班级端生成的
+    // custom_tasks。不能把模板用 broadcast_task 的 ID 写进节点表，否则会触发
+    // 外键约束失败，让已入库的广播被发送端误判为网络错误。
+    // accept_broadcast_task 会从 task.payload 读取相同模板，为本地任务生成节点。
 
     // 班级端收到广播后立即生成待办；helper 按广播 ID 幂等，重复投递不会产生重复任务。
     if matches!(state.mode(), crate::db::models::AppMode::Client) {
@@ -187,10 +287,10 @@ pub async fn broadcast(
 
     state
         .app
-        .emit(
-            Events::BROADCAST_RECEIVED,
-            serde_json::json!({"broadcastTaskId": task.id}),
-        )
+        // 前端收到事件后会直接生成待办并展示通知；必须发送完整任务，
+        // 仅发送 broadcastTaskId 会让前端拿到 undefined 标题并调用
+        // broadcast_accept(undefined)，表现为“收到任务但生成待办失败”。
+        .emit(Events::BROADCAST_RECEIVED, &task)
         .ok();
 
     Ok(Json(AckResponse {
@@ -315,10 +415,34 @@ async fn apply_items(
             Ok(MergeOutcome::Conflict) => {
                 accepted += 1;
                 conflicts += 1;
+                if item.entity_type == "class" {
+                    let _ = state.app.emit(
+                        Events::CLASS_CHANGED,
+                        serde_json::json!({ "id": item.entity.get("id") }),
+                    );
+                }
+                if item.entity_type == "student" {
+                    let _ = state.app.emit(
+                        Events::STUDENT_CHANGED,
+                        serde_json::json!({ "id": item.entity.get("id") }),
+                    );
+                }
                 resend_students_for_assignment(state, item, reply_device_id).await?;
             }
             Ok(_) => {
                 accepted += 1;
+                if item.entity_type == "class" {
+                    let _ = state.app.emit(
+                        Events::CLASS_CHANGED,
+                        serde_json::json!({ "id": item.entity.get("id") }),
+                    );
+                }
+                if item.entity_type == "student" {
+                    let _ = state.app.emit(
+                        Events::STUDENT_CHANGED,
+                        serde_json::json!({ "id": item.entity.get("id") }),
+                    );
+                }
                 resend_students_for_assignment(state, item, reply_device_id).await?;
             }
             Err(e) => {
@@ -467,5 +591,18 @@ mod tests {
         };
         assert_eq!(task_id_from_ingest_item(&task).as_deref(), Some("task-1"));
         assert_eq!(task_id_from_ingest_item(&record).as_deref(), Some("task-1"));
+    }
+
+    #[test]
+    fn broadcast_received_payload_contains_task_id_and_title() {
+        let task = BroadcastTask {
+            id: "broadcast-1".into(),
+            title: "上访".into(),
+            direction: "in".into(),
+            ..Default::default()
+        };
+        let payload = serde_json::to_value(&task).expect("广播事件负载可序列化");
+        assert_eq!(payload.get("id").and_then(|v| v.as_str()), Some("broadcast-1"));
+        assert_eq!(payload.get("title").and_then(|v| v.as_str()), Some("上访"));
     }
 }

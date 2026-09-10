@@ -14,6 +14,8 @@ import { Stagger } from '@/components/motion/Reveal';
 import { checkinSchoolSummary, checkinClassAttendance, checkinExceptionStudents } from '@/lib/db';
 import { toDateKey, formatPercent } from '@/lib/format';
 import type { SchoolSummary, ClassAttendanceRow, ExceptionStudentRow } from '@/types/api';
+import { useTauriEventHandler } from '@/hooks/useTauriEvent';
+import { TAURI_EVENTS } from '@/types/events';
 
 /** 考勤大屏（教务处端）：全校汇总 + 按班级明细 + 异常学生名单 */
 export function AttendanceBoard(): JSX.Element {
@@ -47,6 +49,11 @@ export function AttendanceBoard(): JSX.Element {
     void loadDevices();
     void refresh();
   }, [loadDevices, refresh]);
+
+  // 班级端通过同步队列提交考勤后，教务端实时刷新当前日期的大屏数据。
+  useTauriEventHandler(TAURI_EVENTS.CHECKIN_UPDATED, () => {
+    void refresh();
+  });
 
   const classColumns: TableColumn<ClassAttendanceRow>[] = [
     { key: 'className', header: '班级', accessor: (c) => c.className },

@@ -93,6 +93,7 @@ pub async fn find_by_name(pool: &SqlitePool, class_name: &str) -> AppResult<Opti
 /// `grade_id` 关联年级；`school_year_id` 归入学年（年隔离维度）；
 /// `grade_no` / `grade_name` 冗余存储，便于免 join 查询。
 pub async fn upsert(pool: &SqlitePool, mut class: Class) -> AppResult<Class> {
+    let is_new = class.id.trim().is_empty();
     let now = now_ms();
     if class.id.is_empty() {
         class.id = new_id();
@@ -107,6 +108,16 @@ pub async fn upsert(pool: &SqlitePool, mut class: Class) -> AppResult<Class> {
     }
     if class.class_name.trim().is_empty() {
         return Err(AppError::validation("班级名称不能为空"));
+    }
+    if is_new
+        && class
+            .school_year_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+    {
+        return Err(AppError::validation("新建班级必须指定所属学年"));
     }
     // 冗余年级信息：优先使用传入 grade_id 关联出的年级，其次用传入 grade_name。
     if let Some(grade_id) = &class.grade_id {
@@ -199,6 +210,25 @@ pub async fn merge_remote(pool: &SqlitePool, remote: &Class) -> AppResult<MergeO
     merged.sync_state = state.to_string();
     merged.dirty = false;
     upsert(pool, merged).await?;
+    // 班级端运行配置保存了班级名称用于界面和兼容旧名册查询；目录改名后同步更新，
+    // 但只更新当前绑定的 class_id，避免影响其他班级。
+    let bound_id = crate::db::repo::settings_repo::get_string(pool, "class_id", "").await?;
+    if bound_id == remote.id {
+        crate::db::repo::settings_repo::set_raw(
+            pool,
+            "class_name",
+            Some(&remote.class_name),
+            "string",
+        )
+        .await?;
+        crate::db::repo::settings_repo::set_raw(
+            pool,
+            "grade",
+            remote.grade_name.as_deref(),
+            "string",
+        )
+        .await?;
+    }
     Ok(outcome)
 }
 

@@ -73,6 +73,35 @@ pub async fn list(pool: &SqlitePool, filter: StudentFilter) -> AppResult<Vec<Stu
     Ok(rows)
 }
 
+/// 班级改名时同步更新学生表中的冗余展示字段，保持考勤统计与导出名称一致。
+pub async fn rename_class_students(
+    pool: &SqlitePool,
+    class_id: &str,
+    grade: Option<&str>,
+    class_name: &str,
+) -> AppResult<Vec<Student>> {
+    let now = now_ms();
+    sqlx::query(
+        "UPDATE students SET grade = ?, class_name = ?, updated_at = ?, sync_state = 'pending', dirty = 1
+         WHERE class_id = ? AND deleted_at IS NULL",
+    )
+    .bind(grade)
+    .bind(class_name)
+    .bind(now)
+    .bind(class_id)
+    .execute(pool)
+    .await?;
+    list(
+        pool,
+        StudentFilter {
+            class_id: Some(class_id.to_string()),
+            class_name: None,
+            ..Default::default()
+        },
+    )
+    .await
+}
+
 /// 按主键查询（含已软删，便于恢复/合并判断）。
 pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<Option<Student>> {
     let row = sqlx::query_as::<_, Student>(

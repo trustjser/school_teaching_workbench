@@ -20,6 +20,9 @@ export const TAURI_EVENTS = {
   BROADCAST_RECEIVED: 'broadcast://received',
   BROADCAST_RECEIPT: 'broadcast://receipt',
   DATA_IMPORTED: 'data://imported',
+  CLASS_CHANGED: 'class://changed',
+  CLASSROOM_CHANGED: 'classroom://changed',
+  STUDENT_CHANGED: 'student://changed',
   MODE_CHANGED: 'mode://changed',
   PACKAGE_PROGRESS: 'package://progress',
 } as const;
@@ -74,6 +77,9 @@ export interface BroadcastReceiptPayload extends BroadcastReceipt {}
 
 /** data://imported */
 export interface DataImportedPayload extends ImportReport {}
+export interface ClassChangedPayload { id?: string }
+export interface ClassroomChangedPayload { id?: string }
+export interface StudentChangedPayload { id?: string }
 
 /** mode://changed */
 export interface ModeChangedPayload {
@@ -100,6 +106,9 @@ export interface TauriEventMap {
   [TAURI_EVENTS.BROADCAST_RECEIVED]: BroadcastReceivedPayload;
   [TAURI_EVENTS.BROADCAST_RECEIPT]: BroadcastReceiptPayload;
   [TAURI_EVENTS.DATA_IMPORTED]: DataImportedPayload;
+  [TAURI_EVENTS.CLASS_CHANGED]: ClassChangedPayload;
+  [TAURI_EVENTS.CLASSROOM_CHANGED]: ClassroomChangedPayload;
+  [TAURI_EVENTS.STUDENT_CHANGED]: StudentChangedPayload;
   [TAURI_EVENTS.MODE_CHANGED]: ModeChangedPayload;
   [TAURI_EVENTS.PACKAGE_PROGRESS]: PackageProgressPayload;
 }

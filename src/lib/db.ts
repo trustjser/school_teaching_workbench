@@ -269,6 +269,18 @@ export async function classroomAssign(classroomId: string, schoolYearId: string,
   return invokeCmd<ClassroomAssignment>('classroom_assign', { classroomId, schoolYearId, classId });
 }
 
+export async function classroomClaim(classroomId: string, schoolYearId: string): Promise<Classroom> {
+  return invokeCmd<Classroom>('classroom_claim', { classroomId, schoolYearId });
+}
+
+export async function classroomRelease(classroomId: string): Promise<void> {
+  await invokeCmd<void>('classroom_release', { classroomId });
+}
+
+export async function settingsResetClient(): Promise<void> {
+  await invokeCmd<void>('settings_reset_client');
+}
+
 /* -------------------------------------------------------------------------- */
 /* school year（学年 / 届）                                                      */
 /* -------------------------------------------------------------------------- */

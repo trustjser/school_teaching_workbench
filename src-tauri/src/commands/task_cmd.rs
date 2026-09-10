@@ -275,7 +275,9 @@ async fn should_sync_task(state: &AppState, task: &CustomTask) -> bool {
     let app_mode = crate::db::repo::settings_repo::get_string(&state.pool, "app_mode", "client")
         .await
         .unwrap_or_else(|_| "client".to_string());
-    should_enqueue_task_entity(&app_mode, &task.source)
+    // 兼容早期已接收的教务任务：部分旧记录 source 仍是 local，
+    // 但带有 broadcast_task_id，必须继续把班级端处理结果回传教务端。
+    should_enqueue_task_entity(&app_mode, &task.source) || task.broadcast_task_id.is_some()
 }
 
 async fn should_sync_task_id(state: &AppState, task_id: &str) -> bool {

@@ -744,6 +744,50 @@ pub async fn mark_synced(pool: &SqlitePool, task_id: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// 查询尚未确认同步的教务下发任务记录，用于恢复历史误丢弃的队列条目。
+pub async fn unsynced_broadcast_records(pool: &SqlitePool) -> AppResult<Vec<TaskRecord>> {
+    Ok(sqlx::query_as::<_, TaskRecord>(
+        "SELECT r.id, r.task_id, r.student_id, r.node_id, r.node_key, r.score, r.note,
+                r.completed_at, r.evaluated_by, r.created_at, r.updated_at, r.deleted_at,
+                r.sync_state, r.dirty
+         FROM task_records r JOIN custom_tasks t ON t.id = r.task_id
+         WHERE r.deleted_at IS NULL AND r.dirty = 1
+           AND (t.source = 'broadcast' OR t.broadcast_task_id IS NOT NULL)",
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+/// 查询尚未确认同步的教务下发任务节点，用于恢复旧版本误丢弃的节点队列。
+pub async fn unsynced_broadcast_nodes(pool: &SqlitePool) -> AppResult<Vec<TaskStatusNode>> {
+    Ok(sqlx::query_as::<_, TaskStatusNode>(
+        "SELECT n.id, n.task_id, n.node_key, n.label, n.color_token, n.icon_name,
+                n.node_order, n.is_final, n.is_default, n.created_at, n.updated_at,
+                n.deleted_at, n.sync_state, n.dirty
+         FROM task_status_nodes n JOIN custom_tasks t ON t.id = n.task_id
+         WHERE n.deleted_at IS NULL AND n.dirty = 1
+           AND (t.source = 'broadcast' OR t.broadcast_task_id IS NOT NULL)",
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn mark_node_synced(pool: &SqlitePool, node_id: &str) -> AppResult<()> {
+    sqlx::query("UPDATE task_status_nodes SET sync_state='synced', dirty=0 WHERE id=?")
+        .bind(node_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn mark_record_synced(pool: &SqlitePool, record_id: &str) -> AppResult<()> {
+    sqlx::query("UPDATE task_records SET sync_state='synced', dirty=0 WHERE id=?")
+        .bind(record_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{page, progress_list};

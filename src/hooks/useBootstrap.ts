@@ -104,6 +104,18 @@ export function useBootstrap(): void {
           void taskId;
         },
         [TAURI_EVENTS.BROADCAST_RECEIVED]: (task) => {
+          // 兼容旧版后端仅发送 `{ broadcastTaskId }` 的事件负载：先重新
+          // 拉取收件箱，避免把 undefined 当成任务对象传给 broadcast_accept。
+          if (!task.id || !task.title) {
+            void useBroadcastStore.getState().loadInbox();
+            useAppStore.getState().pushToast({
+              kind: 'info',
+              title: '收到新任务',
+              description: '正在加载任务详情…',
+              duration: 5000,
+            });
+            return;
+          }
           useBroadcastStore.getState().pushIncoming(task);
           void useBroadcastStore.getState().accept(task.id).then(() => {
             void useTaskStore.getState().loadTasks();
@@ -124,6 +136,15 @@ export function useBootstrap(): void {
             title: `导入完成：成功 ${report.successRows} 行`,
             description: report.failedRows > 0 ? `失败 ${report.failedRows} 行` : undefined,
           });
+          void useStudentStore.getState().load();
+        },
+        [TAURI_EVENTS.CLASS_CHANGED]: () => {
+          void settingsGetAll().then((raw) => {
+            useAppStore.getState().applySettings(raw);
+            void useStudentStore.getState().load();
+          });
+        },
+        [TAURI_EVENTS.STUDENT_CHANGED]: () => {
           void useStudentStore.getState().load();
         },
         [TAURI_EVENTS.MODE_CHANGED]: ({ mode }) => {

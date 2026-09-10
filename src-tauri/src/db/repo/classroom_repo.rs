@@ -63,6 +63,96 @@ pub async fn assign(
         .bind(id).fetch_one(pool).await.map_err(Into::into)
 }
 
+/// 原子认领教室：只有已经配置了当前学年班级的教室才可被设备认领。
+/// 同一设备重复认领同一教室是幂等操作，教室或设备被其他对象占用时返回冲突。
+pub async fn claim(
+    pool: &SqlitePool,
+    classroom_id: &str,
+    device_id: &str,
+    school_year_id: &str,
+) -> AppResult<Classroom> {
+    if classroom_id.trim().is_empty()
+        || device_id.trim().is_empty()
+        || school_year_id.trim().is_empty()
+    {
+        return Err(AppError::validation("教室、设备和学年不能为空"));
+    }
+    let mut tx = pool.begin().await?;
+    let room: Option<Classroom> = sqlx::query_as(
+        "SELECT id, room_name, device_id, remark, created_at, updated_at, deleted_at, sync_state, dirty
+         FROM classrooms WHERE id=? AND deleted_at IS NULL",
+    )
+    .bind(classroom_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(room) = room else {
+        return Err(AppError::not_found("教室"));
+    };
+    let assignment_exists: Option<(String,)> = sqlx::query_as(
+        "SELECT id FROM classroom_assignments WHERE classroom_id=? AND school_year_id=? AND deleted_at IS NULL LIMIT 1",
+    )
+    .bind(classroom_id)
+    .bind(school_year_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if assignment_exists.is_none() {
+        return Err(AppError::validation("该教室尚未绑定当前学年班级"));
+    }
+    if let Some(existing) = room.device_id.as_deref().filter(|id| !id.is_empty()) {
+        if existing != device_id {
+            return Err(AppError::validation("该教室已被其他设备绑定"));
+        }
+    }
+    let other_room: Option<(String, String)> = sqlx::query_as(
+        "SELECT id, room_name FROM classrooms WHERE device_id=? AND id<>? AND deleted_at IS NULL LIMIT 1",
+    )
+    .bind(device_id)
+    .bind(classroom_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some((_, room_name)) = other_room {
+        return Err(AppError::validation(format!(
+            "本设备已绑定教室：{}",
+            room_name
+        )));
+    }
+    let now = now_ms();
+    sqlx::query(
+        "UPDATE classrooms SET device_id=?, updated_at=?, sync_state='pending', dirty=1 WHERE id=?",
+    )
+    .bind(device_id)
+    .bind(now)
+    .bind(classroom_id)
+    .execute(&mut *tx)
+    .await?;
+    let saved = sqlx::query_as::<_, Classroom>(
+        "SELECT id, room_name, device_id, remark, created_at, updated_at, deleted_at, sync_state, dirty
+         FROM classrooms WHERE id=?",
+    )
+    .bind(classroom_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(saved)
+}
+
+/// 解除本设备的教室认领；若该教室已被其他设备认领则拒绝操作。
+pub async fn release(pool: &SqlitePool, classroom_id: &str, device_id: &str) -> AppResult<()> {
+    let result = sqlx::query(
+        "UPDATE classrooms SET device_id=NULL, updated_at=?, sync_state='pending', dirty=1
+         WHERE id=? AND deleted_at IS NULL AND (device_id IS NULL OR device_id=?)",
+    )
+    .bind(now_ms())
+    .bind(classroom_id)
+    .bind(device_id)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::validation("教室不存在或已被其他设备绑定"));
+    }
+    Ok(())
+}
+
 /// 软删教室及其全部学年绑定。
 pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
     let now = now_ms();
@@ -134,4 +224,79 @@ pub async fn merge_remote_assignment(
     sqlx::query("INSERT INTO classroom_assignments (id,classroom_id,school_year_id,class_id,created_at,updated_at,deleted_at,sync_state,dirty) VALUES (?,?,?,?,?,?,?,'clean',0)")
         .bind(&assignment.id).bind(&assignment.classroom_id).bind(&assignment.school_year_id).bind(&assignment.class_id).bind(assignment.created_at).bind(assignment.updated_at).bind(assignment.deleted_at).execute(pool).await?;
     Ok(MergeOutcome::Inserted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::models::{Class, Grade, SchoolYear};
+    use crate::db::repo::{class_repo, grade_repo, school_year_repo};
+    use crate::db::{create_pool, run_migrations};
+
+    async fn fixture() -> (sqlx::SqlitePool, String, String) {
+        let dir = std::env::temp_dir().join(format!("lanwb_claim_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pool = create_pool(&dir.join("test.db")).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let year = school_year_repo::upsert(
+            &pool,
+            SchoolYear {
+                school_year_name: "2026学年".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let grade = grade_repo::upsert(
+            &pool,
+            Grade {
+                grade_name: "一年级".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let class = class_repo::upsert(
+            &pool,
+            Class {
+                grade_id: Some(grade.id),
+                school_year_id: Some(year.id.clone()),
+                class_name: "一年级1班".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let room = upsert(
+            &pool,
+            Classroom {
+                id: String::new(),
+                room_name: "101".into(),
+                device_id: None,
+                remark: None,
+                created_at: 0,
+                updated_at: 0,
+                deleted_at: None,
+                sync_state: "pending".into(),
+                dirty: true,
+            },
+        )
+        .await
+        .unwrap();
+        assign(&pool, &room.id, &year.id, &class.id).await.unwrap();
+        (pool, room.id, year.id)
+    }
+
+    #[tokio::test]
+    async fn claim_is_idempotent_for_same_device_and_rejects_other_device() {
+        let (pool, room_id, year_id) = fixture().await;
+        let first = claim(&pool, &room_id, "device-a", &year_id).await.unwrap();
+        let again = claim(&pool, &room_id, "device-a", &year_id).await.unwrap();
+        assert_eq!(first.id, again.id);
+        let err = claim(&pool, &room_id, "device-b", &year_id)
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("已被其他设备绑定"));
+        pool.close().await;
+    }
 }

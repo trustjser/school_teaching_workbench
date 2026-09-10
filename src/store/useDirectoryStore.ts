@@ -120,6 +120,8 @@ export const useDirectoryStore = create<DirectoryState>((set, get) => ({
         schoolYears: sorted,
         selectedSchoolYearId: get().selectedSchoolYearId ?? sorted[0]?.id ?? null,
       });
+      // 学年列表和年级列表并行加载时，补一次联动加载，避免班级仍停留在“全部学年”或空列表。
+      await get().loadClasses(get().selectedGradeId);
     } catch (err) {
       app.toastError(err, '加载学年失败');
     } finally {

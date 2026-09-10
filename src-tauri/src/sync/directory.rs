@@ -27,6 +27,13 @@ pub struct DirectorySyncReport {
     pub assignments: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassroomClaimResponse {
+    pub classroom: Classroom,
+    pub assignment: ClassroomAssignment,
+}
+
 pub async fn build_snapshot(pool: &SqlitePool) -> AppResult<DirectorySnapshot> {
     Ok(DirectorySnapshot {
         school_years: school_year_repo::list(pool).await?,

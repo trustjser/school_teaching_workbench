@@ -63,7 +63,7 @@ async fn bootstrap(app: tauri::AppHandle) -> Result<AppState, AppError> {
     };
 
     // 3) 播种默认配置（降级）
-    match settings::ensure_defaults(&pool).await {
+    match settings::ensure_defaults(&pool, app.config().identifier.as_str()).await {
         Ok(()) => step!("ensure_defaults OK"),
         Err(e) => step!("WARN ensure_defaults 失败: {} (使用空默认值继续)", e),
     }
@@ -172,6 +172,7 @@ pub fn run() {
             crate::commands::settings_cmd::settings_get_all,
             crate::commands::settings_cmd::settings_set,
             crate::commands::settings_cmd::settings_complete_setup,
+            crate::commands::settings_cmd::settings_reset_client,
             crate::commands::settings_cmd::settings_switch_mode,
             crate::commands::settings_cmd::settings_rotate_key,
             crate::commands::settings_cmd::settings_key_info,
@@ -213,6 +214,8 @@ pub fn run() {
             crate::commands::classroom_cmd::classroom_upsert,
             crate::commands::classroom_cmd::classroom_delete,
             crate::commands::classroom_cmd::classroom_assign,
+            crate::commands::classroom_cmd::classroom_claim,
+            crate::commands::classroom_cmd::classroom_release,
             // ---- 学年 ----
             crate::commands::school_year_cmd::school_year_list,
             crate::commands::school_year_cmd::school_year_upsert,

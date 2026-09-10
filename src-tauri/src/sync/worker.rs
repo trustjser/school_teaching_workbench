@@ -11,7 +11,7 @@ use crate::config::constants::{
     Events, QUEUE_BATCH_SIZE, SYNC_IDLE_INTERVAL_MS, SYNC_POLL_INTERVAL_MS,
 };
 use crate::db::models::{IngestItem, IngestRequest};
-use crate::db::repo::{device_repo, queue_repo, settings_repo, sync_repo};
+use crate::db::repo::{device_repo, queue_repo, settings_repo, sync_repo, task_repo};
 use crate::error::ErrorCode;
 use crate::net::client;
 use crate::state::AppState;
@@ -34,6 +34,9 @@ pub fn start(state: Arc<AppState>) {
 
 /// 执行一轮补发。
 async fn run_once(state: &Arc<AppState>) {
+    // 设备重新上线时，之前因断网进入死信的广播自动恢复，不需要用户手动逐条重试。
+    let _ = queue_repo::revive_dead_for_online_devices(&state.pool).await;
+    recover_unsynced_broadcast_entities(state).await;
     let pending = match queue_repo::claim_batch(&state.pool, QUEUE_BATCH_SIZE).await {
         Ok(items) => items,
         Err(e) => {
@@ -61,16 +64,7 @@ async fn run_once(state: &Arc<AppState>) {
                 "custom_task" | "task_node" | "task_record"
             )
         {
-            let is_broadcast = serde_json::from_str::<Value>(&item.payload)
-                .ok()
-                .map(|payload| {
-                    payload
-                        .get("entity")
-                        .and_then(|entity| entity.get("source"))
-                        .and_then(Value::as_str)
-                        == Some("broadcast")
-                })
-                .unwrap_or(false);
+            let is_broadcast = task_entity_is_broadcast(state, &item).await;
             if should_discard_client_task_entity(
                 &item.entity_type,
                 is_broadcast.then_some("broadcast"),
@@ -87,6 +81,33 @@ async fn run_once(state: &Arc<AppState>) {
             Ok(http_status) => {
                 let dur = started.elapsed().as_millis() as i64;
                 queue_repo::mark_done(&state.pool, &item.id).await.ok();
+                if matches!(
+                    item.entity_type.as_str(),
+                    "custom_task" | "task_node" | "task_record"
+                ) {
+                    if let Ok(value) = serde_json::from_str::<Value>(&item.payload) {
+                        if let Some(entity_id) = value
+                            .get("entity")
+                            .and_then(|entity| entity.get("id"))
+                            .and_then(Value::as_str)
+                        {
+                            match item.entity_type.as_str() {
+                                "custom_task" => {
+                                    let _ = task_repo::mark_synced(&state.pool, entity_id).await;
+                                }
+                                "task_node" => {
+                                    let _ =
+                                        task_repo::mark_node_synced(&state.pool, entity_id).await;
+                                }
+                                "task_record" => {
+                                    let _ =
+                                        task_repo::mark_record_synced(&state.pool, entity_id).await;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
                 sync_repo::insert(
                     &state.pool,
                     "out",
@@ -139,7 +160,8 @@ async fn run_once(state: &Arc<AppState>) {
                     let _ = state.app.emit(
                         Events::SYNC_ERROR,
                         serde_json::json!({
-                            "queueId": item.id, "entityType": item.entity_type, "error": msg
+                            "queueId": item.id, "entityType": item.entity_type,
+                            "code": code.as_str(), "error": msg
                         }),
                     );
                 }
@@ -158,6 +180,46 @@ async fn run_once(state: &Arc<AppState>) {
     }
 }
 
+async fn recover_unsynced_broadcast_entities(state: &Arc<AppState>) {
+    if settings_repo::get_string(&state.pool, "app_mode", "client")
+        .await
+        .ok()
+        .as_deref()
+        != Some("client")
+    {
+        return;
+    }
+    if let Ok(nodes) = task_repo::unsynced_broadcast_nodes(&state.pool).await {
+        for node in nodes {
+            let _ = crate::sync::outbox::enqueue_entity(
+                &state.pool,
+                "task_node",
+                &node.id,
+                "upsert",
+                &node,
+                None,
+                None,
+            )
+            .await;
+        }
+    }
+    let Ok(records) = task_repo::unsynced_broadcast_records(&state.pool).await else {
+        return;
+    };
+    for record in records {
+        let _ = crate::sync::outbox::enqueue_entity(
+            &state.pool,
+            "task_record",
+            &record.id,
+            "upsert",
+            &record,
+            None,
+            None,
+        )
+        .await;
+    }
+}
+
 /// 投递单条队列条目，返回成功时的 HTTP 状态码或错误（错误码 + 消息）。
 async fn deliver_item(
     state: &Arc<AppState>,
@@ -169,18 +231,17 @@ async fn deliver_item(
                 .target_device_id
                 .clone()
                 .ok_or((ErrorCode::Validation, "广播缺少目标设备".into()))?;
-            let base_url = match item.target_base_url.clone() {
-                Some(url) => url,
-                None => {
-                    let dev = device_repo::get_by_device_id(&state.pool, &to)
-                        .await
-                        .map_err(|e| (ErrorCode::Db, e.message))?
-                        .ok_or((ErrorCode::Net, "目标设备尚未发现".into()))?;
-                    match (dev.ip_address, dev.port) {
-                        (Some(ip), Some(port)) if port > 0 => format!("http://{}:{}", ip, port),
-                        _ => return Err((ErrorCode::Net, "目标设备尚未就绪".into())),
-                    }
-                }
+            // 每次发送都重新读取设备地址，避免切换网络后沿用失效 IP。
+            let dev = device_repo::get_by_device_id(&state.pool, &to)
+                .await
+                .map_err(|e| (ErrorCode::Db, e.message))?
+                .ok_or((ErrorCode::Net, "目标设备尚未发现".into()))?;
+            let base_url = match (dev.ip_address, dev.port) {
+                (Some(ip), Some(port)) if port > 0 => format!("http://{}:{}", ip, port),
+                _ => item
+                    .target_base_url
+                    .clone()
+                    .ok_or((ErrorCode::Net, "目标设备尚未就绪".into()))?,
             };
             let payload: Value = serde_json::from_str(&item.payload)
                 .map_err(|e| (ErrorCode::Validation, format!("广播载荷非法: {}", e)))?;
@@ -228,9 +289,38 @@ pub(crate) fn should_discard_client_task_entity(entity_type: &str, source: Optio
         && source != Some("broadcast")
 }
 
+/// 判断班级端待发任务实体是否来自教务端广播。
+/// `task_record` 本身没有 source 字段，必须通过 task_id 回查任务定义；
+/// 回查不到时保留队列，避免任务定义尚未先同步到本地就把状态记录丢弃。
+async fn task_entity_is_broadcast(
+    state: &Arc<AppState>,
+    item: &crate::db::models::PendingQueueItem,
+) -> bool {
+    let Some(entity) = serde_json::from_str::<Value>(&item.payload)
+        .ok()
+        .and_then(|payload| payload.get("entity").cloned())
+    else {
+        return false;
+    };
+    if let Some(task_id) = dependent_task_id(&item.entity_type, &entity) {
+        return match task_repo::get(&state.pool, task_id).await {
+            Ok(Some(task)) => task.source == "broadcast" || task.broadcast_task_id.is_some(),
+            _ => true,
+        };
+    }
+    entity.get("source").and_then(Value::as_str) == Some("broadcast")
+}
+
+/// 状态节点和学生记录本身都没有 `source`，来源必须沿 task_id 回查父任务。
+fn dependent_task_id<'a>(entity_type: &str, entity: &'a Value) -> Option<&'a str> {
+    matches!(entity_type, "task_node" | "task_record")
+        .then(|| entity.get("taskId").and_then(Value::as_str))
+        .flatten()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::should_discard_client_task_entity;
+    use super::{dependent_task_id, should_discard_client_task_entity};
 
     #[test]
     fn client_discards_local_task_queue_items_but_keeps_broadcast_items() {
@@ -245,6 +335,19 @@ mod tests {
         ));
         assert!(!should_discard_client_task_entity("student", Some("local")));
     }
+
+    #[test]
+    fn task_nodes_resolve_their_parent_task_for_source_classification() {
+        let entity = serde_json::json!({
+            "id": "node-1",
+            "taskId": "broadcast-task-copy-1",
+            "nodeKey": "done"
+        });
+        assert_eq!(
+            dependent_task_id("task_node", &entity),
+            Some("broadcast-task-copy-1")
+        );
+    }
 }
 
 /// 投递一条 ingest 条目（实体合并）。无显式目标时广播给全部在线 master。
@@ -256,12 +359,23 @@ async fn deliver_ingest(
         .map_err(|e| (ErrorCode::Validation, format!("ingest 载荷非法: {}", e)))?;
 
     // 显式目标：直接投递。
-    if let (Some(to), Some(base_url)) = (&item.target_device_id, &item.target_base_url) {
+    if let Some(to) = &item.target_device_id {
+        let base_url = match device_repo::get_by_device_id(&state.pool, to).await {
+            Ok(Some(dev)) => match (dev.ip_address, dev.port) {
+                (Some(ip), Some(port)) if port > 0 => format!("http://{}:{}", ip, port),
+                _ => item
+                    .target_base_url
+                    .clone()
+                    .ok_or((ErrorCode::Net, "目标设备尚未就绪".into()))?,
+            },
+            Ok(None) => return Err((ErrorCode::Net, "目标设备尚未发现".into())),
+            Err(e) => return Err((ErrorCode::Db, e.message)),
+        };
         let req = build_ingest_request(state, &ingest_item).await;
         let status = client::deliver(
             state,
             to,
-            base_url,
+            &base_url,
             &item.target_endpoint,
             "POST",
             &serde_json::to_value(&req).map_err(|e| (ErrorCode::Validation, e.to_string()))?,
