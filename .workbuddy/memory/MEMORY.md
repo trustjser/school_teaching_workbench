@@ -63,3 +63,14 @@ SQLite 不支持 `ALTER TABLE ... ALTER COLUMN` 改 CHECK，只能「改名旧�
 - 模式（master/client）、`completed_setup`、device_id 都持久化在 DB（`app_settings`）→ 不同 identifier 即独立数据库，两端可分别设为教务端/班级端。
 - 共享密钥（SetupWizard 可选）**两端必须完全一致**，否则能发现但解密失败不同步。班级端首次配置时目录未同步，年级/班级先手动填，待目录同步后再在设置里重绑。
 - mDNS（`_schworkbench._tcp.local.`，5353）靠回环组播，单机双实例通常可用；若班级端收不到目录，先查两端 DeviceMonitor 互见 + 密钥一致。当前无手动 IP:端口 添加对端兜底 UI（如需可加）。
+
+## 双 App 拆分（2026-09-10）
+- 教务端 `apps/affairs` / 班级端 `apps/classroom` 是两个独立入口，共享代码集中在 `packages/shared`。
+- 角色由 Tauri bundle identifier 决定：`AppTarget::from_identifier` 在 `src-tauri/src/config/target.rs`，未知 identifier 直接拒绝启动。
+- `AppState.target` 取代可变 `mode`，`state.mode()` 恒等于 `target.mode()`。`ensure_defaults(pool, identity_namespace, target_mode)` 会强制覆盖数据库里被篡改的 `app_mode`。
+- 前端 `mountApp(APP_TARGET, element)` 注入共享层；共享模块只能通过 `getAppTarget()` 读，禁止在缺 target 时回退默认值。
+- 路径别名：`@shared/*`、`@affairs/*`、`@classroom/*`；旧的 `@/*` 已彻底移除。
+- 默认 `src-tauri/tauri.conf.json` 保留为「等价于教务端」的占位配置——`tauri-build` 在裸 `cargo` 下必须能读到它，正式出包一律用 `tauri:build:affairs/classroom`（CLI 通过 `--config` 设 `TAURI_CONFIG` 覆盖）。
+- 端边界静态校验：`scripts/check-app-boundaries.mjs`（router 不引用另一端 + shared 不反向依赖 app）；构建目标校验：`scripts/check-build-targets.mjs`（8 个 npm 脚本 + 4 份 Tauri 配置）。
+- 共享 `AppRoot`（`packages/shared/src/components/layout/AppRoot.tsx`）用 `createAppRoutes({ appTarget, navItems, setup, routes })` 收敛入口骨架，两端 router 只声明 `navItems` 与 `routes`。
+- `settings_switch_mode` 命令与 `useAppStore.switchMode` 已删除。`settings_complete_setup` 不再接受 `mode` 参数，直接使用 `state.mode()`。
