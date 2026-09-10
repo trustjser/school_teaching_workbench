@@ -7,6 +7,7 @@ use tauri::Manager;
 
 use crate::config::constants::{NONCE_CACHE_CAPACITY, NONCE_TTL_SEC};
 use crate::config::settings;
+use crate::config::target::AppTarget;
 use crate::db::init_db;
 use crate::db::models::AppMode;
 use crate::db::repo::settings_repo;
@@ -62,13 +63,28 @@ async fn bootstrap(app: tauri::AppHandle) -> Result<AppState, AppError> {
         }
     };
 
-    // 3) 播种默认配置（降级）
+    // 3) 固定 app target：角色由构建期 identifier 决定，不读取数据库的可变配置。
+    //    未知 identifier 视为致命，不降级为班级端（否则会绕过依赖模式的权限校验）。
+    let target = match AppTarget::from_identifier(app.config().identifier.as_str()) {
+        Ok(target) => {
+            step!("app target = {} ({:?})", target.as_str(), target);
+            target
+        }
+        Err(e) => {
+            step!("FATAL app target: {}", e);
+            let _ = fs::write(&log_path, log.join(""));
+            return Err(e);
+        }
+    };
+    let mode = target.mode();
+
+    // 4) 播种默认配置（降级）
     match settings::ensure_defaults(&pool, app.config().identifier.as_str()).await {
         Ok(()) => step!("ensure_defaults OK"),
         Err(e) => step!("WARN ensure_defaults 失败: {} (使用空默认值继续)", e),
     }
 
-    // 4) 设备 ID（降级）
+    // 5) 设备 ID（降级）
     let device_id = match settings_repo::get_string(&pool, "device_id", "").await {
         Ok(v) => {
             step!("device_id len={}", v.len());
@@ -80,15 +96,7 @@ async fn bootstrap(app: tauri::AppHandle) -> Result<AppState, AppError> {
         }
     };
 
-    // 5) 运行模式（降级）
-    let mode_str = settings_repo::get_string(&pool, "app_mode", "client")
-        .await
-        .unwrap_or_else(|e| {
-            step!("WARN 读 app_mode 失败: {} (用 client)", e);
-            "client".to_string()
-        });
-    let mode = AppMode::parse(&mode_str);
-    step!("mode = {:?}", mode);
+    step!("mode = {:?} (由 app target 固定)", mode);
 
     // 6) 共享密钥：教务处端首次启动时自动准备；班级端允许暂未配置，
     // 待用户在设置页录入教务处提供的密钥后再刷新内存状态。
@@ -125,7 +133,7 @@ async fn bootstrap(app: tauri::AppHandle) -> Result<AppState, AppError> {
         device_id,
         secret: std::sync::RwLock::new(secret),
         kid: std::sync::RwLock::new(kid),
-        mode: Mutex::new(mode),
+        target,
         api_port: Mutex::new(0),
         daemon: tokio::sync::Mutex::new(None),
         shutdown: tokio_util::sync::CancellationToken::new(),

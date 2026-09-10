@@ -124,7 +124,7 @@ pub async fn settings_complete_setup(
         state.set_key(secret.to_string(), kid);
     }
 
-    state.set_mode(mode);
+    // 角色由 app target 固定，运行期不写入 AppState。
     crate::net::discovery::refresh_self_registration(&state).await?;
     let _ = state.app.emit(
         Events::MODE_CHANGED,
@@ -193,7 +193,6 @@ pub async fn settings_switch_mode(
     }
     let mode = AppMode::parse(&mode);
     settings_repo::set_raw(&state.pool, "app_mode", Some(mode.as_str()), "string").await?;
-    state.set_mode(mode);
     let _ = state.app.emit(
         Events::MODE_CHANGED,
         serde_json::json!({ "mode": mode.as_str() }),

@@ -7,6 +7,7 @@ use mdns_sd::ServiceDaemon;
 use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::config::target::AppTarget;
 use crate::db::models::AppMode;
 use crate::db::DbPool;
 use crate::security::nonce::NonceCache;
@@ -23,8 +24,9 @@ pub struct AppState {
     pub secret: RwLock<String>,
     /// 密钥标识。
     pub kid: RwLock<String>,
-    /// 当前运行模式（班级端 / 教务处端）。
-    pub mode: Mutex<AppMode>,
+    /// 固定的 app target（教务端 / 班级端）。角色由构建期 identifier 决定，
+    /// 运行期不可切换，因此不提供 setter——数据库里的 `app_mode` 只是它的镜像。
+    pub target: AppTarget,
     /// 监听端口（server 启动后回填）。
     pub api_port: Mutex<u16>,
     /// mDNS 守护进程句柄（发现/广播共用）。
@@ -36,14 +38,14 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// 读取当前模式（无锁竞争风险）。
+    /// 读取当前运行模式：恒等于固定 target 的角色，数据库无法覆盖。
     pub fn mode(&self) -> AppMode {
-        *self.mode.lock().unwrap()
+        self.target.mode()
     }
 
-    /// 切换模式。
-    pub fn set_mode(&self, mode: AppMode) {
-        *self.mode.lock().unwrap() = mode;
+    /// 读取固定 app target。
+    pub fn target(&self) -> AppTarget {
+        self.target
     }
 
     /// 读取当前共享密钥（Base64）。
