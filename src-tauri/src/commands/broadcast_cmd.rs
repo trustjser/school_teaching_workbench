@@ -280,7 +280,10 @@ pub async fn accept_broadcast_task(
         owner_device_id: Some(bt.publisher_device_id.clone()),
         broadcast_task_id: Some(bt.id.clone()),
         source: "broadcast".to_string(),
-        sort_order: crate::db::repo::now_ms(),
+        // 不要往 sort_order 里写时间戳：它曾导致 `ORDER BY sort_order` 把教务下发的
+        // 任务（巨大时间戳）全排到本地任务（0）之后，看起来毫无时间顺序。
+        // 排序现在只看 created_at，这里保持 0。
+        sort_order: 0,
         created_at: 0,
         updated_at: 0,
         deleted_at: None,

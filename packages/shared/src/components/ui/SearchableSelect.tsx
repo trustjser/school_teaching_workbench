@@ -94,13 +94,23 @@ export function SearchableSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((isOpen) => !isOpen)}
+        title={
+          selected
+            ? [selected.label, selected.description, selected.meta].filter(Boolean).join(' · ')
+            : undefined
+        }
         className={[
           'flex min-h-touch w-full items-center justify-between gap-3 rounded-lg border bg-surface-raised px-4 text-left text-base text-ink',
           'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-60',
           error ? 'border-red-600' : 'border-surface-border hover:border-brand-400',
         ].join(' ')}
       >
-        <span className={selected ? '' : 'text-ink-muted'}>{selected?.label ?? placeholder}</span>
+        <span className={['min-w-0 flex-1 truncate', selected ? '' : 'text-ink-muted'].join(' ')}>
+          {selected?.label ?? placeholder}
+        </span>
+        {selected?.meta && (
+          <span className="shrink-0 text-sm text-ink-muted">{selected.meta}</span>
+        )}
         <ChevronDown className={['h-5 w-5 shrink-0 text-ink-muted transition-transform', open ? 'rotate-180' : ''].join(' ')} aria-hidden />
       </button>
       {open && (
@@ -133,16 +143,26 @@ export function SearchableSelect({
                   role="option"
                   aria-selected={option.value === value}
                   disabled={option.disabled}
+                  // 备注在选项里被截断，完整内容走原生 title 提示。
+                  title={option.description ? `${option.label} · ${option.description}` : option.label}
                   onMouseEnter={() => setHighlighted(index)}
                   onClick={() => choose(option)}
                   className={[
-                    'flex min-h-touch w-full items-center justify-between gap-3 rounded-md px-3 text-left text-base',
+                    'flex min-h-touch w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-base',
                     index === highlighted ? 'bg-brand-50 text-brand-800' : 'text-ink hover:bg-surface-muted',
                     option.disabled ? 'cursor-not-allowed opacity-50' : '',
                   ].join(' ')}
                 >
-                  <span className="truncate">{option.label}</span>
-                  {option.value === value && <Check className="h-5 w-5 shrink-0 text-brand-600" aria-hidden />}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{option.label}</span>
+                    {option.description && (
+                      <span className="block truncate text-sm text-ink-muted">{option.description}</span>
+                    )}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    {option.meta && <span className="text-sm text-ink-muted">{option.meta}</span>}
+                    {option.value === value && <Check className="h-5 w-5 text-brand-600" aria-hidden />}
+                  </span>
                 </button>
               ))
             )}

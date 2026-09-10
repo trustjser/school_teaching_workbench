@@ -5,6 +5,14 @@ export interface SelectOption {
   value: string;
   label: string;
   disabled?: boolean;
+  /**
+   * 次要说明（例如任务备注）。在选项里以小字截断显示，
+   * 完整内容通过 `title` 悬浮提示查看（下拉面板是 overflow 容器，
+   * 绝对定位的气泡会被裁剪，因此这里用原生 title 而不是 Tooltip）。
+   */
+  description?: string;
+  /** 右侧补充信息（例如创建时间），不参与截断 */
+  meta?: string;
 }
 
 export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'children'> {

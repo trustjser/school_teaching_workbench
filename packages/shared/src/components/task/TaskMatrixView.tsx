@@ -10,6 +10,7 @@ import { Button } from '@shared/components/ui/Button';
 import { COLOR_TOKEN_HEX } from '@shared/constants/status';
 import { resolveIcon } from '@shared/components/ui/IconButton';
 import { TaskRecordEditor } from './TaskRecordEditor';
+import { taskSelectOptions } from './taskSelectOptions';
 
 export interface TaskMatrixViewProps {
   className?: string;
@@ -79,7 +80,7 @@ export function TaskMatrixView({ className, hideTaskSelect = false }: TaskMatrix
     );
   }
 
-  const taskOptions = tasks.map((t) => ({ value: t.id, label: t.title }));
+  const taskOptions = taskSelectOptions(tasks);
   const dist = nodeDistribution(currentTaskId ?? '', roster);
 
   // 表格视图的「评分 / 备注」列：任务启用了对应能力时展示；即便任务未勾选，

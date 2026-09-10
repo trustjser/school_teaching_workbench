@@ -12,7 +12,7 @@ use crate::error::{AppError, AppResult};
 /// 每个任务允许的状态节点上限（与 `trg_nodes_max4` 一致）。
 pub const MAX_NODES_PER_TASK: i64 = 4;
 
-/// 查询任务列表（默认排除已软删，按 sort_order / 创建时间排序）。
+/// 查询任务列表（默认排除已软删，按创建时间倒序：新任务在前）。
 pub async fn list(
     pool: &SqlitePool,
     status: Option<&str>,
@@ -31,7 +31,7 @@ pub async fn list(
     if class_name.is_some() {
         sql.push_str(" AND (class_name = ? OR class_name IS NULL)");
     }
-    sql.push_str(" ORDER BY sort_order, created_at DESC");
+    sql.push_str(" ORDER BY created_at DESC, id DESC");
 
     let mut query = sqlx::query_as::<_, CustomTask>(sql.as_str());
     if let Some(status) = status {
@@ -75,7 +75,7 @@ pub async fn page(
          FROM custom_tasks
          WHERE deleted_at IS NULL AND (? IS NULL OR title LIKE ?)
            AND (? IS NULL OR status = ?)
-         ORDER BY sort_order, created_at DESC LIMIT ? OFFSET ?",
+         ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
     )
     .bind(&pattern)
     .bind(&pattern)

@@ -9,6 +9,7 @@ import { Badge } from '@shared/components/ui/Badge';
 import { Button } from '@shared/components/ui/Button';
 import { ProgressBar } from '@shared/components/ui/ProgressBar';
 import { EmptyState } from '@shared/components/ui/EmptyState';
+import { taskSelectOptions } from '@shared/components/task/taskSelectOptions';
 import { formatDateTime, formatPercent } from '@shared/lib/format';
 import type { TaskProgressRow } from '@shared/types/api';
 
@@ -73,7 +74,7 @@ export function TaskDashboard(): JSX.Element {
     [progress],
   );
 
-  const taskOptions = tasks.map((task) => ({ value: task.id, label: task.title }));
+  const taskOptions = taskSelectOptions(tasks);
   const columns: TableColumn<TaskProgressRow>[] = [
     {
       key: 'class',

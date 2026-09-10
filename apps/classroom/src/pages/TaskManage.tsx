@@ -21,6 +21,7 @@ import { TASK_NODE_MIN, TASK_NODE_MAX } from '@shared/constants/app';
 import type { TaskScope, TaskType, ColorToken } from '@shared/types/enums';
 import type { CustomTask, TaskStatusNode } from '@shared/types/models';
 import { uuidV4 } from '@shared/lib/crypto';
+import { formatDateTime } from '@shared/lib/format';
 import { StatusNodeEditor, type EditableNode } from '@shared/components/task/StatusNodeEditor';
 import { useAppStore } from '@shared/store/useAppStore';
 
@@ -147,6 +148,12 @@ export function TaskManage(): JSX.Element {
       key: 'status',
       header: '状态',
       accessor: (t) => TASK_STATUS_OPTIONS.find((o) => o.value === t.status)?.label ?? t.status,
+    },
+    {
+      key: 'createdAt',
+      header: '创建时间',
+      accessor: (t) => formatDateTime(t.createdAt),
+      align: 'center',
     },
     {
       key: 'actions',
