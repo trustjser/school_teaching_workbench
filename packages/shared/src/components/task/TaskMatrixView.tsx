@@ -82,6 +82,11 @@ export function TaskMatrixView({ className, hideTaskSelect = false }: TaskMatrix
   const taskOptions = tasks.map((t) => ({ value: t.id, label: t.title }));
   const dist = nodeDistribution(currentTaskId ?? '', roster);
 
+  // 表格视图的「评分 / 备注」列：任务启用了对应能力时展示；即便任务未勾选，
+  // 只要已有记录带了值也一并展示，避免历史数据被隐藏。
+  const showScore = Boolean(task?.scoreEnabled) || roster.some((s) => records[s.id]?.score != null);
+  const showNote = Boolean(task?.noteEnabled) || roster.some((s) => records[s.id]?.note != null);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -172,11 +177,15 @@ export function TaskMatrixView({ className, hideTaskSelect = false }: TaskMatrix
                     {n.label}
                   </th>
                 ))}
+                {showScore && <th className="px-4 py-2 text-center text-ink">评分</th>}
+                {showNote && <th className="px-4 py-2 text-left text-ink">备注</th>}
               </tr>
             </thead>
             <tbody>
               {roster.map((student) => {
                 const key = effectiveNodeKey(currentTaskId ?? '', student.id);
+                const record = records[student.id] ?? null;
+                const note = record?.note?.trim() ?? '';
                 return (
                   <tr key={student.id} className="border-t border-surface-border">
                     <td className="px-4 py-2 font-semibold text-ink">
@@ -209,6 +218,22 @@ export function TaskMatrixView({ className, hideTaskSelect = false }: TaskMatrix
                         </td>
                       );
                     })}
+                    {showScore && (
+                      <td className="px-4 py-2 text-center font-semibold text-ink">
+                        {record?.score != null ? record.score : <span className="text-ink-muted">—</span>}
+                      </td>
+                    )}
+                    {showNote && (
+                      <td className="px-4 py-2 text-left text-ink-soft">
+                        {note ? (
+                          <span className="block max-w-[18rem] truncate" title={note}>
+                            {note}
+                          </span>
+                        ) : (
+                          <span className="text-ink-muted">—</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
