@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Modal } from '@shared/components/ui/Modal';
-import { cn } from '@shared/lib/cn';
 import { rolloverExecutionsList, rolloverRebind, classList, schoolYearList, type RolloverExecution } from '@shared/lib/db';
 import { useAppStore } from '@shared/store/useAppStore';
 

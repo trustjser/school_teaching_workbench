@@ -391,6 +391,14 @@ export function GradeClassManage(): JSX.Element {
         >
           克隆学年结构
         </Button>
+        <Button
+          variant="secondary"
+          size="md"
+          icon={<History className="h-4 w-4" />}
+          onClick={() => setRecordsOpen(true)}
+        >
+          执行记录
+        </Button>
         {selectedYear && (
           <Button
             variant="ghost"
