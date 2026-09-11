@@ -16,6 +16,7 @@ import {
   CloneYearModal,
 } from '@affairs/components/DirectoryBatchModals';
 import { RolloverWizardModal } from '@affairs/components/rollover/RolloverWizardModal';
+import { RolloverRecordsModal } from '@affairs/components/rollover/RolloverRecordsModal';
 import type { DirectoryBatchCreateReport } from '@shared/lib/db';
 import { useDirectoryStore } from '@shared/store/useDirectoryStore';
 import { useStudentStore } from '@shared/store/useStudentStore';
@@ -131,6 +132,7 @@ export function GradeClassManage(): JSX.Element {
   const [editTarget, setEditTarget] = useState<Student | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [recordsOpen, setRecordsOpen] = useState(false);
   const [cloneYearOpen, setCloneYearOpen] = useState(false);
   const [batchAddOpen, setBatchAddOpen] = useState(false);
 
@@ -869,6 +871,7 @@ export function GradeClassManage(): JSX.Element {
         onClose={() => setWizardOpen(false)}
         onDone={() => void handleWizardDone()}
       />
+      <RolloverRecordsModal open={recordsOpen} onClose={() => setRecordsOpen(false)} />
       <CloneYearModal
         open={cloneYearOpen}
         schoolYears={schoolYears}
