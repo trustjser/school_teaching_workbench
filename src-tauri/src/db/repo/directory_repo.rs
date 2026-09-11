@@ -401,13 +401,28 @@ pub struct EnsureClassesResult {
     pub created_class_ids: Vec<String>,
 }
 
-/// 按名字幂等地确保一批 (年级, 班级) 存在于指定学年下（单事务）。
+/// 薄包装：自开事务执行 [`ensure_classes_tx`] 并提交，签名与行为不变。
+pub async fn ensure_classes(
+    pool: &SqlitePool,
+    school_year_id: &str,
+    refs: &[EnsureClassRef],
+) -> AppResult<EnsureClassesResult> {
+    let mut tx = pool.begin().await?;
+    let res = ensure_classes_tx(&mut tx, school_year_id, refs).await?;
+    tx.commit().await?;
+    Ok(res)
+}
+
+/// 事务核心版 [`ensure_classes`]：在调用方提供的事务/连接上执行，
+/// 供换届执行事务等需要把目录预置纳入同一事务的场景复用。
+///
+/// 按名字幂等地确保一批 (年级, 班级) 存在于指定学年下。
 ///
 /// 与 [`batch_create`] 的区别：这里没有 `class_no`（Excel 名册只有名字），
 /// 去重只按 `(school_year_id, grade_id, class_name)`；年级按名复用，
 /// 不存在则创建（grade_no 暂用年级名填充，可在目录管理中修正）。
-pub async fn ensure_classes(
-    pool: &SqlitePool,
+pub async fn ensure_classes_tx(
+    conn: &mut sqlx::SqliteConnection,
     school_year_id: &str,
     refs: &[EnsureClassRef],
 ) -> AppResult<EnsureClassesResult> {
@@ -421,7 +436,6 @@ pub async fn ensure_classes(
         });
     }
 
-    let mut tx = pool.begin().await?;
     let mut grades_created = 0usize;
     let mut classes_created = 0usize;
     let mut class_map: Vec<(String, String, String)> = Vec::new();
@@ -448,7 +462,7 @@ pub async fn ensure_classes(
                     "SELECT id, grade_no FROM grades WHERE grade_name = ? AND deleted_at IS NULL LIMIT 1",
                 )
                 .bind(grade_name)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut *conn)
                 .await?;
                 match existing {
                     Some((id, _)) => {
@@ -468,7 +482,7 @@ pub async fn ensure_classes(
                         .bind(grade_name)
                         .bind(now)
                         .bind(now)
-                        .execute(&mut *tx)
+                        .execute(&mut *conn)
                         .await?;
                         grades_created += 1;
                         created_grade_ids.push(id.clone());
@@ -488,7 +502,7 @@ pub async fn ensure_classes(
         .bind(school_year_id)
         .bind(&grade_id)
         .bind(class_name)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut *conn)
         .await?;
         let class_id = match existing_class {
             Some(id) => id,
@@ -508,7 +522,7 @@ pub async fn ensure_classes(
                 .bind(class_name)
                 .bind(now)
                 .bind(now)
-                .execute(&mut *tx)
+                .execute(&mut *conn)
                 .await?;
                 classes_created += 1;
                 created_class_ids.push(id.clone());
@@ -518,7 +532,6 @@ pub async fn ensure_classes(
         class_map.push((grade_name.to_string(), class_name.to_string(), class_id));
     }
 
-    tx.commit().await?;
     Ok(EnsureClassesResult {
         grades_created,
         classes_created,
