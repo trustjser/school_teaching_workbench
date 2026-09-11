@@ -1,10 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 import type { SelectOption } from './Select';
+
+export interface SearchableSelectGroup {
+  label: string;
+  options: SelectOption[];
+}
 
 export interface SearchableSelectProps {
   label?: string;
   options: SelectOption[];
+  /** 分组选项（自定义 listbox 无原生 optgroup，以分组标题行渲染，置于顶层选项之后） */
+  groups?: SearchableSelectGroup[];
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
@@ -19,6 +26,7 @@ export interface SearchableSelectProps {
 export function SearchableSelect({
   label,
   options,
+  groups,
   value,
   onChange,
   placeholder = '请选择',
@@ -33,12 +41,22 @@ export function SearchableSelect({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [highlighted, setHighlighted] = useState(0);
-  const selected = options.find((option) => option.value === value);
+  const allOptions = useMemo(
+    () => [...options, ...(groups ?? []).flatMap((group) => group.options)],
+    [options, groups],
+  );
+  const selected = allOptions.find((option) => option.value === value);
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
-    if (!normalized) return options;
-    return options.filter((option) => option.label.toLocaleLowerCase().includes(normalized));
-  }, [options, query]);
+    const matches = (option: SelectOption): boolean =>
+      !normalized || option.label.toLocaleLowerCase().includes(normalized);
+    return [
+      ...options.filter(matches).map((option) => ({ option, group: null as string | null })),
+      ...(groups ?? []).flatMap((group) =>
+        group.options.filter(matches).map((option) => ({ option, group: group.label })),
+      ),
+    ];
+  }, [options, groups, query]);
 
   useEffect(() => {
     if (!open) return;
@@ -77,8 +95,8 @@ export function SearchableSelect({
       setHighlighted((index) => Math.max(index - 1, 0));
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      const option = filtered[highlighted];
-      if (option) choose(option);
+      const item = filtered[highlighted];
+      if (item) choose(item.option);
     } else if (event.key === 'Escape') {
       event.preventDefault();
       setOpen(false);
@@ -136,34 +154,43 @@ export function SearchableSelect({
             {filtered.length === 0 ? (
               <p className="px-3 py-4 text-center text-sm text-ink-muted">没有匹配项</p>
             ) : (
-              filtered.map((option, index) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="option"
-                  aria-selected={option.value === value}
-                  disabled={option.disabled}
-                  // 备注在选项里被截断，完整内容走原生 title 提示。
-                  title={option.description ? `${option.label} · ${option.description}` : option.label}
-                  onMouseEnter={() => setHighlighted(index)}
-                  onClick={() => choose(option)}
-                  className={[
-                    'flex min-h-touch w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-base',
-                    index === highlighted ? 'bg-brand-50 text-brand-800' : 'text-ink hover:bg-surface-muted',
-                    option.disabled ? 'cursor-not-allowed opacity-50' : '',
-                  ].join(' ')}
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">{option.label}</span>
-                    {option.description && (
-                      <span className="block truncate text-sm text-ink-muted">{option.description}</span>
-                    )}
-                  </span>
-                  <span className="flex shrink-0 items-center gap-2">
-                    {option.meta && <span className="text-sm text-ink-muted">{option.meta}</span>}
-                    {option.value === value && <Check className="h-5 w-5 text-brand-600" aria-hidden />}
-                  </span>
-                </button>
+              filtered.map(({ option, group }, index) => (
+                <Fragment key={option.value}>
+                  {group !== null && (index === 0 || filtered[index - 1].group !== group) && (
+                    <p
+                      className="px-3 pb-1 pt-2 text-xs font-semibold text-ink-muted"
+                      role="presentation"
+                    >
+                      {group}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={option.value === value}
+                    disabled={option.disabled}
+                    // 备注在选项里被截断，完整内容走原生 title 提示。
+                    title={option.description ? `${option.label} · ${option.description}` : option.label}
+                    onMouseEnter={() => setHighlighted(index)}
+                    onClick={() => choose(option)}
+                    className={[
+                      'flex min-h-touch w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-base',
+                      index === highlighted ? 'bg-brand-50 text-brand-800' : 'text-ink hover:bg-surface-muted',
+                      option.disabled ? 'cursor-not-allowed opacity-50' : '',
+                    ].join(' ')}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{option.label}</span>
+                      {option.description && (
+                        <span className="block truncate text-sm text-ink-muted">{option.description}</span>
+                      )}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      {option.meta && <span className="text-sm text-ink-muted">{option.meta}</span>}
+                      {option.value === value && <Check className="h-5 w-5 text-brand-600" aria-hidden />}
+                    </span>
+                  </button>
+                </Fragment>
               ))
             )}
           </div>

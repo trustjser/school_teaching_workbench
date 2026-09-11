@@ -1,13 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '@shared/store/useAppStore';
 import {
-  classList,
-  classroomAssignments,
   classroomList,
   classroomRelease,
-  clientSwitchBinding,
   directorySync,
-  schoolYearList,
   settingsGetAll,
   settingsKeyInfo,
   settingsResetClient,
@@ -23,16 +19,7 @@ import { formatFingerprint, keyFingerprint } from '@shared/lib/crypto';
 import { Input } from '@shared/components/ui/Input';
 import type { AppTarget } from '@shared/app-target';
 import type { KeyInfo } from '@shared/types/api';
-import type { Classroom, SchoolYear } from '@shared/types/models';
-
-/** 待换届候选：本教室在新学年（非当前绑定学年）的就绪绑定 */
-interface RolloverCandidate {
-  schoolYearId: string;
-  schoolYearName: string;
-  classId: string;
-  className: string;
-  gradeName: string | null;
-}
+import type { Classroom } from '@shared/types/models';
 
 export interface SettingsPanelProps {
   /** 固定 app target：决定展示哪些端专属操作，面板本身不提供切换能力 */
@@ -56,8 +43,6 @@ export function SettingsPanel({ appTarget }: SettingsPanelProps): JSX.Element {
   const [bindingError, setBindingError] = useState<string | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [rolloverCandidates, setRolloverCandidates] = useState<RolloverCandidate[]>([]);
-  const [switching, setSwitching] = useState(false);
   const pushToast = useAppStore((s) => s.pushToast);
 
   const isClassroom = appTarget === 'classroom';
@@ -73,44 +58,24 @@ export function SettingsPanel({ appTarget }: SettingsPanelProps): JSX.Element {
     setBindingError(null);
     try {
       const report = await directorySync();
+      if (report.autoSwitched) {
+        // 换届自动切换（Rust auto-switch guard）：弹出横幅 + 成功提示
+        const { showRolloverBanner } = await import('@shared/components/settings/RolloverBanner');
+        showRolloverBanner({
+          schoolYearName: report.autoSwitched.schoolYearName,
+          className: report.autoSwitched.className,
+          gradeName: report.autoSwitched.gradeName,
+        });
+        pushToast({ kind: 'success', title: '已自动切换到新学年', description: `${report.autoSwitched.schoolYearName} · ${report.autoSwitched.className}` });
+      }
       if (showResult) {
         pushToast({ kind: 'success', title: '目录已刷新', description: `已同步 ${report.classes} 个班级、${report.classrooms} 间教室` });
       }
     } catch (err) {
       if (showResult) setBindingError((err as Error).message || '未能连接教务端');
     }
-    const nextRooms = await classroomList().catch(() => [] as Classroom[]);
-    setRooms(nextRooms);
-    // 换届感知：本教室在新学年（非当前绑定学年）存在绑定 → 出现「待换届」候选。
-    try {
-      const [assignments, years, allClasses] = await Promise.all([
-        classroomAssignments(null),
-        schoolYearList(),
-        classList(null, null),
-      ]);
-      const boundRoom = nextRooms.find((room) => room.deviceId === settings.deviceId);
-      const yearName = new Map(years.map((y: SchoolYear) => [y.id, y.schoolYearName]));
-      const candidates: RolloverCandidate[] = [];
-      if (boundRoom) {
-        for (const a of assignments) {
-          if (a.classroomId !== boundRoom.id) continue;
-          if (a.schoolYearId === settings.schoolYearId) continue;
-          const klass = allClasses.find((c) => c.id === a.classId);
-          if (!klass) continue;
-          candidates.push({
-            schoolYearId: a.schoolYearId,
-            schoolYearName: yearName.get(a.schoolYearId) ?? a.schoolYearId,
-            classId: klass.id,
-            className: klass.className,
-            gradeName: klass.gradeName,
-          });
-        }
-      }
-      setRolloverCandidates(candidates);
-    } catch {
-      setRolloverCandidates([]);
-    }
-  }, [isClassroom, pushToast, settings.deviceId, settings.schoolYearId]);
+    setRooms(await classroomList().catch(() => [] as Classroom[]));
+  }, [isClassroom, pushToast]);
 
   useEffect(() => {
     void loadDirectory().catch(() => undefined);
@@ -131,27 +96,6 @@ export function SettingsPanel({ appTarget }: SettingsPanelProps): JSX.Element {
     } catch (err) {
       setSecretError((err as Error).message || '共享密钥格式无效');
     } finally { setSavingSecret(false); }
-  };
-
-  /** 换届切绑：只切绑定、不重装。成功后刷新本地 settings 与目录。 */
-  const switchBinding = async (candidate: RolloverCandidate): Promise<void> => {
-    setSwitching(true);
-    setBindingError(null);
-    try {
-      await clientSwitchBinding(candidate.schoolYearId, candidate.classId);
-      useAppStore.getState().applySettings(await settingsGetAll());
-      await loadDirectory(true);
-      setRolloverCandidates((prev) => prev.filter((c) => c !== candidate));
-      pushToast({
-        kind: 'success',
-        title: '已切换到新学年',
-        description: `${candidate.schoolYearName} · ${candidate.gradeName ?? ''} · ${candidate.className}`,
-      });
-    } catch (err) {
-      setBindingError((err as Error).message || '切换失败');
-    } finally {
-      setSwitching(false);
-    }
   };
 
   const resetClient = async (): Promise<void> => {
@@ -237,35 +181,11 @@ export function SettingsPanel({ appTarget }: SettingsPanelProps): JSX.Element {
       {isClassroom && (
         <Card title="班级端配置">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm text-ink-muted">班级和教室由教务端维护，班级端完成初始化后不能直接换绑。</p>
+            <p className="text-sm text-ink-muted">班级和教室由教务端维护；换届后本机在目录同步时自动切换绑定。</p>
             <Button variant="secondary" size="md" onClick={() => void loadDirectory(true).catch(() => undefined)}>刷新目录</Button>
           </div>
           <p className="text-ink">当前班级：{settings.grade && settings.className ? `${settings.grade} · ${settings.className}` : '未配置'}</p>
           <p className="mt-1 text-ink">当前教室：{rooms.find((room) => room.deviceId === settings.deviceId)?.roomName ?? '未认领'}</p>
-          {rolloverCandidates.length > 0 && (
-            <div className="mt-3 space-y-2">
-              {rolloverCandidates.map((candidate) => (
-                <div
-                  key={`${candidate.schoolYearId}-${candidate.classId}`}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-brand-400 bg-brand-50 px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-ink">待换届：{candidate.schoolYearName} 已就绪</p>
-                    <p className="text-sm text-ink-muted">
-                      {candidate.gradeName ? `${candidate.gradeName} · ` : ''}{candidate.className}（点击切换绑定，历史数据保留）
-                    </p>
-                  </div>
-                  <Button
-                    size="md"
-                    loading={switching}
-                    onClick={() => void switchBinding(candidate)}
-                  >
-                    切换到新学年
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
           <Button className="mt-4" variant="danger" onClick={() => setResetOpen(true)}>重置班级端配置</Button>
           {bindingError && <p className="mt-2 text-sm text-red-600">{bindingError}</p>}
         </Card>

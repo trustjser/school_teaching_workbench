@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@shared/store/useAppStore';
 import { settingsCompleteSetup, settingsGetAll } from '@shared/lib/db';
 import { isBase64Secret, randomSecret } from '@shared/lib/secret';
@@ -20,16 +21,24 @@ export function SetupWizard(): JSX.Element {
   const setPhase = useAppStore((s) => s.setPhase);
   const pushToast = useAppStore((s) => s.pushToast);
   const toastError = useAppStore((s) => s.toastError);
+  const navigate = useNavigate();
 
   const [schoolName, setSchoolName] = useState('');
   const [deviceName, setDeviceName] = useState('');
   const [secret, setSecret] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [completed, setCompleted] = useState(false);
 
   const secretBad = secret.trim() !== '' && !isBase64Secret(secret.trim());
   const secretMissing = secret.trim() === '';
   const canSubmit = !secretMissing && !secretBad && !submitting;
+
+  /** 进入主框架并跳转目录页，携带 wizard=init 触发建校向导（引导导入全校数据） */
+  const enterAndImport = (): void => {
+    setPhase('ready');
+    navigate('/directory?wizard=init');
+  };
 
   const submit = async (): Promise<void> => {
     setSubmitting(true);
@@ -42,10 +51,10 @@ export function SetupWizard(): JSX.Element {
         schoolName: schoolName.trim() || null,
         secret: secret.trim() || null,
       });
-      // 重载运行期配置（写入 completed_setup / school_name 等），再进入主框架
+      // 重载运行期配置（写入 completed_setup / school_name 等），再展示完成视图
       const raw = await settingsGetAll();
       applySettings(raw);
-      setPhase('ready');
+      setCompleted(true);
       pushToast({ kind: 'success', title: '首次配置已完成', description: '教务端已就绪' });
     } catch (err) {
       setError((err as Error)?.message ?? '配置失败');
@@ -54,6 +63,23 @@ export function SetupWizard(): JSX.Element {
       setSubmitting(false);
     }
   };
+
+  if (completed) {
+    return (
+      <div className="flex min-h-screen w-full items-start justify-center overflow-y-auto bg-surface-sunken p-6">
+        <Card className="max-w-xl w-full min-w-0">
+          <h1 className="text-2xl font-bold text-ink">教务端配置完成</h1>
+          <p className="mt-2 text-ink-soft">
+            共享密钥已生成，请分发给所有班级端。下一步可在「班级目录」中导入全校学年、年级与班级数据。
+          </p>
+          <div className="mt-6 flex justify-end gap-3">
+            <Button variant="secondary" onClick={enterAndImport}>下一步：导入全校数据</Button>
+            <Button onClick={() => setPhase('ready')}>完成并进入</Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen w-full items-start justify-center overflow-y-auto bg-surface-sunken p-6">

@@ -7,6 +7,7 @@ import { StatusBar } from './StatusBar';
 import { useBigScreen } from '@shared/hooks/useBigScreen';
 import { useAutoSync } from '@shared/hooks/useAutoSync';
 import { PageTransition } from '@shared/components/motion/PageTransition';
+import { RolloverBanner } from '@shared/components/settings/RolloverBanner';
 import type { AppTarget } from '@shared/app-target';
 
 export interface AppShellProps {
@@ -84,6 +85,12 @@ export function AppShell({
         )}
 
         <main className="min-w-0 flex-1 overflow-y-auto">
+          {/* 换届自动切换横幅：仅班级端展示（数据只由班级端目录同步写入），非 fixed、不遮挡内容 */}
+          {appTarget === 'classroom' && (
+            <div className="mx-auto w-full max-w-[1800px] px-6 pt-6">
+              <RolloverBanner />
+            </div>
+          )}
           <PageTransition routeKey={location.pathname} className="mx-auto w-full max-w-[1800px] px-6 py-6">
             {children}
           </PageTransition>

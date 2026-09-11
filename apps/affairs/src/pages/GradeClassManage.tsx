@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { CalendarPlus, ArrowRightLeft, Copy, History, ListPlus, Pencil, Plus, Trash2, Users, Monitor } from 'lucide-react';
 import { Card } from '@shared/components/ui/Card';
 import { Button } from '@shared/components/ui/Button';
@@ -18,6 +19,7 @@ import {
 import { RolloverWizardModal } from '@affairs/components/rollover/RolloverWizardModal';
 import { RolloverRecordsModal } from '@affairs/components/rollover/RolloverRecordsModal';
 import type { DirectoryBatchCreateReport } from '@shared/lib/db';
+import { settingsGetAll } from '@shared/lib/db';
 import { useDirectoryStore } from '@shared/store/useDirectoryStore';
 import { useStudentStore } from '@shared/store/useStudentStore';
 import { useDeviceStore } from '@shared/store/useDeviceStore';
@@ -132,6 +134,10 @@ export function GradeClassManage(): JSX.Element {
   const [editTarget, setEditTarget] = useState<Student | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  /** URL 入口（?wizard=init）显式指定的向导模式，优先于按学年目录推导的模式 */
+  const [urlWizardMode, setUrlWizardMode] = useState<'rollover' | 'init' | null>(null);
+  /** app_settings 权威当前学年（current_school_year_id），用于学年选择器置顶分组 */
+  const [authoritativeYearId, setAuthoritativeYearId] = useState<string | null>(null);
   const [recordsOpen, setRecordsOpen] = useState(false);
   const [cloneYearOpen, setCloneYearOpen] = useState(false);
   const [batchAddOpen, setBatchAddOpen] = useState(false);
@@ -141,6 +147,26 @@ export function GradeClassManage(): JSX.Element {
     void loadSchoolYears();
     void loadDevices();
   }, [loadGrades, loadSchoolYears]);
+
+  // SetupWizard 完成页引导入口：?wizard=init → 以建校模式打开向导并清除参数
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('wizard') === 'init') {
+      setUrlWizardMode('init');
+      setWizardOpen(true);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  // 读取权威当前学年（仅换届事务写入），用于学年选择器的历史分组
+  useEffect(() => {
+    void settingsGetAll()
+      .then((list) => {
+        const row = list.find((s) => s.settingKey === 'current_school_year_id');
+        setAuthoritativeYearId(row?.settingValue || null);
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     void classroomList().then(setClassrooms).catch(() => undefined);
@@ -209,6 +235,15 @@ export function GradeClassManage(): JSX.Element {
   const selectedGrade = grades.find((g) => g.id === selectedGradeId) ?? null;
   const selectedClass = classes.find((c) => c.id === selectedClassId) ?? null;
   const selectedYear = schoolYears.find((y) => y.id === selectedSchoolYearId) ?? null;
+
+  // 学年选择器分组：权威年（current_school_year_id）置顶，其余归入「历史学年」；无权威年时维持原排序
+  const yearOptions = schoolYears.map((y) => ({ value: y.id, label: y.schoolYearName }));
+  const pinnedYear = authoritativeYearId
+    ? yearOptions.find((option) => option.value === authoritativeYearId) ?? null
+    : null;
+  const historyYearOptions = pinnedYear
+    ? yearOptions.filter((option) => option.value !== pinnedYear.value)
+    : [];
 
   // 选中班级后联动加载该班名册
   useEffect(() => {
@@ -347,7 +382,7 @@ export function GradeClassManage(): JSX.Element {
         <div className="flex gap-2">
           <Button
             icon={<ArrowRightLeft className="h-5 w-5" />}
-            onClick={() => setWizardOpen(true)}
+            onClick={() => { setUrlWizardMode(null); setWizardOpen(true); }}
           >
             换届 / 建校
           </Button>
@@ -368,7 +403,8 @@ export function GradeClassManage(): JSX.Element {
         <div className="min-w-[12rem] flex-1">
           <SearchableSelect
             label=""
-            options={schoolYears.map((y) => ({ value: y.id, label: y.schoolYearName }))}
+            options={pinnedYear ? [pinnedYear] : yearOptions}
+            groups={pinnedYear && historyYearOptions.length > 0 ? [{ label: '历史学年', options: historyYearOptions }] : undefined}
             value={selectedSchoolYearId ?? ''}
             onChange={(value) => selectSchoolYear(value || null)}
             placeholder="— 全部学年 —"
@@ -872,11 +908,11 @@ export function GradeClassManage(): JSX.Element {
         </>
       )}
 
-      {/* 换届 / 建校向导（学年目录为空时进入首次建校模式） */}
+      {/* 换届 / 建校向导（学年目录为空时进入首次建校模式；?wizard=init 显式指定时优先） */}
       <RolloverWizardModal
         open={wizardOpen}
-        mode={schoolYears.length === 0 ? 'init' : 'rollover'}
-        onClose={() => setWizardOpen(false)}
+        mode={urlWizardMode ?? (schoolYears.length === 0 ? 'init' : 'rollover')}
+        onClose={() => { setWizardOpen(false); setUrlWizardMode(null); }}
         onDone={() => void handleWizardDone()}
       />
       <RolloverRecordsModal open={recordsOpen} onClose={() => setRecordsOpen(false)} />
