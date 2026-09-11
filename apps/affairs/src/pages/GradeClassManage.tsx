@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CalendarPlus, ArrowRightLeft, Copy, ListPlus, Pencil, Plus, School, Trash2, Users, Monitor } from 'lucide-react';
+import { CalendarPlus, ArrowRightLeft, Copy, ListPlus, Pencil, Plus, Trash2, Users, Monitor } from 'lucide-react';
 import { Card } from '@shared/components/ui/Card';
 import { Button } from '@shared/components/ui/Button';
 import { Input } from '@shared/components/ui/Input';
@@ -14,10 +14,9 @@ import { StudentImportDialog } from '@shared/components/student/StudentImportDia
 import {
   BatchAddClassesModal,
   CloneYearModal,
-  QuickSchoolSetupModal,
-  RolloverWizardModal,
 } from '@affairs/components/DirectoryBatchModals';
-import type { DirectoryBatchCreateReport, RolloverReport } from '@shared/lib/db';
+import { RolloverWizardModal } from '@affairs/components/rollover/RolloverWizardModal';
+import type { DirectoryBatchCreateReport } from '@shared/lib/db';
 import { useDirectoryStore } from '@shared/store/useDirectoryStore';
 import { useStudentStore } from '@shared/store/useStudentStore';
 import { useDeviceStore } from '@shared/store/useDeviceStore';
@@ -131,10 +130,9 @@ export function GradeClassManage(): JSX.Element {
 
   const [editTarget, setEditTarget] = useState<Student | null>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [quickSetupOpen, setQuickSetupOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [cloneYearOpen, setCloneYearOpen] = useState(false);
   const [batchAddOpen, setBatchAddOpen] = useState(false);
-  const [rolloverOpen, setRolloverOpen] = useState(false);
 
   useEffect(() => {
     void loadGrades();
@@ -313,19 +311,15 @@ export function GradeClassManage(): JSX.Element {
     setPendingDelete(null);
   };
 
-  /** 换届执行完成后的收尾：刷新目录、切到新学年、汇总 toast。 */
-  const handleRolloverDone = async (report: RolloverReport): Promise<void> => {
+  /** 换届 / 建校向导完成后的收尾：刷新目录 stores、汇总 toast。 */
+  const handleWizardDone = async (): Promise<void> => {
     await loadGrades();
     await loadSchoolYears();
-    selectSchoolYear(report.newSchoolYearId);
     if (selectedGradeId) await loadClasses(selectedGradeId);
     pushToast({
       kind: 'success',
-      title: '换届完成',
-      description:
-        `新学年「${report.newSchoolYearName}」：升级 ${report.promoteCount} 人 · 毕业 ${report.graduateCount} 人 · ` +
-        `新建班级 ${report.classesCreated} 个 · 教室重绑 ${report.rebindCount} 间` +
-        ((report.renamedClassesCount ?? 0) > 0 ? ` · 修正班级名 ${report.renamedClassesCount} 个` : ''),
+      title: '换届 / 建校完成',
+      description: '新学年目录与学生名册已生成；教室端将在下次目录同步后自动切换绑定。',
     });
   };
 
@@ -350,11 +344,10 @@ export function GradeClassManage(): JSX.Element {
         <h1 className="text-3xl font-bold text-ink">年级与班级管理</h1>
         <div className="flex gap-2">
           <Button
-            variant="secondary"
-            icon={<School className="h-5 w-5" />}
-            onClick={() => setQuickSetupOpen(true)}
+            icon={<ArrowRightLeft className="h-5 w-5" />}
+            onClick={() => setWizardOpen(true)}
           >
-            快速建校
+            换届 / 建校
           </Button>
           <Button
             variant="secondary"
@@ -396,16 +389,6 @@ export function GradeClassManage(): JSX.Element {
         >
           克隆学年结构
         </Button>
-        {selectedYear && (
-          <Button
-            variant="secondary"
-            size="md"
-            icon={<ArrowRightLeft className="h-4 w-4" />}
-            onClick={() => setRolloverOpen(true)}
-          >
-            换届
-          </Button>
-        )}
         {selectedYear && (
           <Button
             variant="ghost"
@@ -879,11 +862,12 @@ export function GradeClassManage(): JSX.Element {
         </>
       )}
 
-      {/* 快速建校 / 克隆学年 / 批量加班 */}
-      <QuickSchoolSetupModal
-        open={quickSetupOpen}
-        onClose={() => setQuickSetupOpen(false)}
-        onDone={handleBatchDone}
+      {/* 换届 / 建校向导（学年目录为空时进入首次建校模式） */}
+      <RolloverWizardModal
+        open={wizardOpen}
+        mode={schoolYears.length === 0 ? 'init' : 'rollover'}
+        onClose={() => setWizardOpen(false)}
+        onDone={() => void handleWizardDone()}
       />
       <CloneYearModal
         open={cloneYearOpen}
@@ -898,14 +882,6 @@ export function GradeClassManage(): JSX.Element {
         existingClasses={classes}
         onClose={() => setBatchAddOpen(false)}
         onDone={handleBatchDone}
-      />
-      <RolloverWizardModal
-        open={rolloverOpen}
-        schoolYears={schoolYears}
-        grades={grades}
-        defaultSourceYearId={selectedSchoolYearId}
-        onClose={() => setRolloverOpen(false)}
-        onDone={handleRolloverDone}
       />
     </div>
   );
