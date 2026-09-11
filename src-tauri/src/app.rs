@@ -234,7 +234,9 @@ pub fn run() {
             // ---- 目录批量（快速建校）----
             crate::commands::directory_cmd::directory_batch_create,
             // ---- 学年换届 ----
-            crate::commands::rollover_cmd::school_year_rollover,
+            crate::commands::rollover_cmd::rollover_from_excel,
+            crate::commands::rollover_cmd::rollover_rebind,
+            crate::commands::rollover_cmd::rollover_executions_list,
             crate::commands::rollover_cmd::client_switch_binding,
             // ---- 同步 ----
             crate::commands::sync_cmd::sync_queue_list,
