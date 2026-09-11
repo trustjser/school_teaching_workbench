@@ -777,6 +777,9 @@ classDiagram
 | `sync_log_list` | `{limit}` | `Vec<SyncLogEntry>` | 同步日志 |
 | `package_export_sch` | `{scope, since_ts, path}` | `OfflinePackage` | 导出离线包 |
 | `package_import_sch` | `{path}` | `ImportReport` | 导入离线包 |
+| `rollover_from_excel` | `{request: RolloverExcelRequest, dry_run?}` | `RolloverExcelReport` | Excel 换届/建校：`dry_run=true` 干跑预览，`false` 单事务执行并写审计 |
+| `rollover_rebind` | `{classroom_id, class_id}` | `ClassroomAssignment` | 修正重发：教室在新学年（目标班级所属学年）的绑定改指另一班级，含 rebind 审计 |
+| `rollover_executions_list` | — | `Vec<RolloverExecution>` | 换届执行记录列表（执行记录页数据源） |
 
 ### 5.3 HTTP 端点（Rust ↔ Rust，P2P）
 
