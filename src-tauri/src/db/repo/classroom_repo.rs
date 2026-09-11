@@ -220,6 +220,33 @@ pub async fn merge_remote(pool: &SqlitePool, room: &Classroom) -> AppResult<Merg
     Ok(MergeOutcome::Inserted)
 }
 
+/// 校验教室绑定的三张母表（教室/学年/班级）在本地是否均存在且活跃；
+/// 不存在则说明该绑定是悬空引用，镜像场景下应丢弃而非撞外键 787。
+async fn assignment_parents_exist(pool: &SqlitePool, a: &ClassroomAssignment) -> AppResult<bool> {
+    let room: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM classrooms WHERE id=? AND deleted_at IS NULL")
+            .bind(&a.classroom_id)
+            .fetch_optional(pool)
+            .await?;
+    if room.is_none() {
+        return Ok(false);
+    }
+    let year: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM school_years WHERE id=? AND deleted_at IS NULL")
+            .bind(&a.school_year_id)
+            .fetch_optional(pool)
+            .await?;
+    if year.is_none() {
+        return Ok(false);
+    }
+    let class: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM classes WHERE id=? AND deleted_at IS NULL")
+            .bind(&a.class_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(class.is_some())
+}
+
 /// 清掉其他教室上对远端设备号的残留占用（教务端已把设备改绑到本教室）。
 async fn clear_stale_device(pool: &SqlitePool, room: &Classroom) -> AppResult<()> {
     if let Some(device) = room.device_id.as_deref() {
@@ -243,6 +270,12 @@ pub async fn merge_remote_assignment(
     pool: &SqlitePool,
     assignment: &ClassroomAssignment,
 ) -> AppResult<MergeOutcome> {
+    // 防御：快照/增量若携带指向已不存在（软删或从未同步）母实体的绑定，
+    // 直接落库会撞外键（code 787, FOREIGN KEY constraint failed）。班级端目录是
+    // 只读镜像，缺失母实体意味着该绑定已无权威归属——丢弃而非让整次目录同步失败。
+    if !assignment_parents_exist(pool, assignment).await? {
+        return Ok(MergeOutcome::Ignored);
+    }
     // 不同端首次创建绑定时可能生成不同 UUID；按教室 + 学年寻找已有记录，
     // 避免重复行导致刷新后看起来“绑定丢失”。
     let local: Option<(String, i64)> = sqlx::query_as("SELECT id, updated_at FROM classroom_assignments WHERE (id=? OR (classroom_id=? AND school_year_id=?)) AND deleted_at IS NULL ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END LIMIT 1")

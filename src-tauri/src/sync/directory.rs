@@ -35,12 +35,38 @@ pub struct ClassroomClaimResponse {
 }
 
 pub async fn build_snapshot(pool: &SqlitePool) -> AppResult<DirectorySnapshot> {
+    let school_years = school_year_repo::list(pool).await?;
+    let grades = grade_repo::list(pool).await?;
+    let classes = class_repo::list(pool, None, None).await?;
+    let classrooms = classroom_repo::list(pool).await?;
+    let raw_assignments = classroom_repo::list_assignments(pool, None).await?;
+    // 目录快照必须是自洽的活跃集合：学年/班级/教室「软删后重建」时，
+    // `class_repo::soft_delete` 与 `school_year_repo::soft_delete` 不会级联到
+    // `classroom_assignments`（仅 `classroom_repo::soft_delete` 会），因此母实体
+    // 已软删、绑定仍活跃的行会出现在 list_assignments 里，但母实体并不在
+    // school_years / classes 列表中。若不剔除，班级端 apply_snapshot 插入该绑定时
+    // 会撞外键（code 787, FOREIGN KEY constraint failed）。这里按三张母表的活动
+    // 集合过滤，保证快照内部引用一致。
+    let year_ids: std::collections::HashSet<&str> =
+        school_years.iter().map(|y| y.id.as_str()).collect();
+    let class_ids: std::collections::HashSet<&str> =
+        classes.iter().map(|c| c.id.as_str()).collect();
+    let room_ids: std::collections::HashSet<&str> =
+        classrooms.iter().map(|r| r.id.as_str()).collect();
+    let assignments: Vec<ClassroomAssignment> = raw_assignments
+        .into_iter()
+        .filter(|a| {
+            year_ids.contains(a.school_year_id.as_str())
+                && class_ids.contains(a.class_id.as_str())
+                && room_ids.contains(a.classroom_id.as_str())
+        })
+        .collect();
     Ok(DirectorySnapshot {
-        school_years: school_year_repo::list(pool).await?,
-        grades: grade_repo::list(pool).await?,
-        classes: class_repo::list(pool, None, None).await?,
-        classrooms: classroom_repo::list(pool).await?,
-        assignments: classroom_repo::list_assignments(pool, None).await?,
+        school_years,
+        grades,
+        classes,
+        classrooms,
+        assignments,
     })
 }
 
@@ -75,7 +101,7 @@ pub async fn apply_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use crate::db::models::{Class, Classroom, Grade, SchoolYear};
+    use crate::db::models::{Class, Classroom, ClassroomAssignment, Grade, SchoolYear};
     use crate::db::repo::{class_repo, classroom_repo, grade_repo, school_year_repo};
     use crate::db::{create_pool, run_migrations};
 
@@ -324,6 +350,189 @@ mod tests {
         master.close().await;
         client.close().await;
         std::fs::remove_dir_all(master_dir).ok();
+        std::fs::remove_dir_all(client_dir).ok();
+    }
+
+    /// 回归：教务端软删学年/班级后，其教室绑定仍活跃，但母实体已不在快照的
+    /// 活跃集合中；`build_snapshot` 必须剔除这类悬空绑定，否则班级端
+    /// `apply_snapshot` 插入时会撞外键（code 787, FOREIGN KEY constraint failed）。
+    #[tokio::test]
+    async fn snapshot_excludes_assignments_with_dangling_parents() {
+        let mk = || {
+            let d = std::env::temp_dir()
+                .join(format!("lanwb_dangling_{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&d).unwrap();
+            d
+        };
+        let master_dir = mk();
+        let client_dir = mk();
+        let master = create_pool(&master_dir.join("m.db")).await.unwrap();
+        let client = create_pool(&client_dir.join("c.db")).await.unwrap();
+        run_migrations(&master).await.unwrap();
+        run_migrations(&client).await.unwrap();
+
+        let year = school_year_repo::upsert(
+            &master,
+            SchoolYear {
+                school_year_name: "2028届".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let grade = grade_repo::upsert(
+            &master,
+            Grade {
+                grade_name: "一年级".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let class = class_repo::upsert(
+            &master,
+            Class {
+                grade_id: Some(grade.id.clone()),
+                school_year_id: Some(year.id.clone()),
+                class_name: "一年级1班".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let room = classroom_repo::upsert(
+            &master,
+            Classroom {
+                id: String::new(),
+                room_name: "101".into(),
+                device_id: None,
+                remark: None,
+                created_at: 0,
+                updated_at: 0,
+                deleted_at: None,
+                sync_state: String::new(),
+                dirty: false,
+            },
+        )
+        .await
+        .unwrap();
+        classroom_repo::assign(&master, &room.id, &year.id, &class.id)
+            .await
+            .unwrap();
+
+        // 软删学年：school_year_repo::soft_delete 不级联到 classroom_assignments。
+        school_year_repo::soft_delete(&master, &year.id)
+            .await
+            .unwrap();
+
+        let snapshot = super::build_snapshot(&master).await.unwrap();
+        // 学年已软删 → 不在 school_years 列表；绑定引用了它 → 必须被剔除。
+        assert_eq!(snapshot.school_years.len(), 0);
+        assert_eq!(
+            snapshot.assignments.len(),
+            0,
+            "悬空绑定不得进入快照（回归：787 FK）"
+        );
+
+        // 即便快照为空，apply 也不应撞外键。
+        super::apply_snapshot(&client, &snapshot)
+            .await
+            .expect("空快照不得报 787");
+
+        master.close().await;
+        client.close().await;
+        std::fs::remove_dir_all(master_dir).ok();
+        std::fs::remove_dir_all(client_dir).ok();
+    }
+
+    /// 回归：即便快照本身携带悬空绑定（母实体 id 在客户端不存在），`apply_snapshot`
+    /// 也必须跳过它而非整体失败（code 787）。班级端是只读镜像，丢弃悬空引用即可，
+    /// 不必让整次目录同步崩溃（与 3168a60 的「镜像不撞唯一索引」同思路）。
+    #[tokio::test]
+    async fn apply_snapshot_skips_dangling_assignment_without_fk_error() {
+        let client_dir = std::env::temp_dir()
+            .join(format!("lanwb_dangling_client_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&client_dir).unwrap();
+        let client = create_pool(&client_dir.join("c.db")).await.unwrap();
+        run_migrations(&client).await.unwrap();
+
+        // 客户端已有真实学年/班级/教室，但快照里的绑定却指向不存在的母实体 id。
+        let year = school_year_repo::upsert(
+            &client,
+            SchoolYear {
+                school_year_name: "2028届".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let grade = grade_repo::upsert(
+            &client,
+            Grade {
+                grade_name: "一年级".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let class = class_repo::upsert(
+            &client,
+            Class {
+                grade_id: Some(grade.id.clone()),
+                school_year_id: Some(year.id.clone()),
+                class_name: "一年级1班".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let room = classroom_repo::upsert(
+            &client,
+            Classroom {
+                id: String::new(),
+                room_name: "101".into(),
+                device_id: None,
+                remark: None,
+                created_at: 0,
+                updated_at: 0,
+                deleted_at: None,
+                sync_state: String::new(),
+                dirty: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let dangling = ClassroomAssignment {
+            id: uuid::Uuid::new_v4().to_string(),
+            classroom_id: room.id.clone(),
+            school_year_id: "nonexistent-year".into(),
+            class_id: class.id.clone(),
+            created_at: 1,
+            updated_at: 1,
+            deleted_at: None,
+            sync_state: String::new(),
+            dirty: false,
+        };
+        let snapshot = super::DirectorySnapshot {
+            school_years: vec![],
+            grades: vec![],
+            classes: vec![],
+            classrooms: vec![],
+            assignments: vec![dangling],
+        };
+        let report = super::apply_snapshot(&client, &snapshot)
+            .await
+            .expect("悬空绑定必须被跳过而非报 787");
+        assert_eq!(report.assignments, 1);
+
+        // 客户端不应多插入任何绑定行（悬空绑定被丢弃）。
+        let remaining = classroom_repo::list_assignments(&client, None)
+            .await
+            .unwrap();
+        assert_eq!(remaining.len(), 0, "悬空绑定不得落库");
+
+        client.close().await;
         std::fs::remove_dir_all(client_dir).ok();
     }
 }
