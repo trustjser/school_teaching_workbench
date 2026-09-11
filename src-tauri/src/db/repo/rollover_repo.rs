@@ -17,6 +17,16 @@ use crate::db::models::{Class, SchoolYear, Student};
 use crate::db::repo::{class_repo, new_id, now_ms, school_year_repo};
 use crate::error::{AppError, AppResult};
 
+/// 升班后的展示名：目标年级名 + 班号 + 「班」（如 一年级1班 → 二年级1班）。
+/// 班号缺失时退回原名。换届时年级前进，展示名必须跟随目标年级，否则会出现
+/// 「二年级下挂着一年级1班」的错位。
+fn derived_class_name(target_grade_name: &str, class_no: Option<&str>, fallback: &str) -> String {
+    match class_no.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(no) => format!("{}{}班", target_grade_name, no),
+        None => fallback.to_string(),
+    }
+}
+
 /// 换届请求。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +85,8 @@ pub struct RolloverReport {
     pub new_year_created: bool,
     pub classes_created: usize,
     pub classes_reused: usize,
+    /// 执行模式下被自愈改名的班级数（干跑为 0）。
+    pub renamed_classes_count: usize,
     pub promote_count: usize,
     pub graduate_count: usize,
     pub retain_count: usize,
@@ -87,6 +99,9 @@ pub struct RolloverReport {
     pub updated_students: Vec<Student>,
     #[serde(default)]
     pub created_classes: Vec<Class>,
+    /// 执行模式下被自愈改名的班级（命令层补发离线队列）；干跑为空。
+    #[serde(default)]
+    pub renamed_classes: Vec<Class>,
 }
 
 /// 计算换届计划（干跑主体），`execute` 时复用同一套计划落事务。
@@ -165,9 +180,15 @@ async fn build_plan(
             graduate,
         };
         if !graduate {
+            // 展示名跟随目标年级：一年级1班 → 二年级1班。
+            let derived = derived_class_name(
+                plan.target_grade_name.as_deref().unwrap_or_default(),
+                sc.class_no.as_deref(),
+                &sc.class_name,
+            );
             if new_year_id.is_empty() {
                 plan.create_target = true;
-                plan.target_class_name = Some(sc.class_name.clone());
+                plan.target_class_name = Some(derived);
             } else {
                 let existing: Option<String> = sqlx::query_scalar(
                     "SELECT id FROM classes
@@ -182,15 +203,11 @@ async fn build_plan(
                 .await?;
                 if let Some(id) = existing {
                     plan.target_class_id = Some(id.clone());
-                    plan.target_class_name = Some(
-                        class_repo::get(pool, &id)
-                            .await?
-                            .map(|c| c.class_name)
-                            .unwrap_or_else(|| sc.class_name.clone()),
-                    );
+                    // 预览展示目标名（执行时会自愈刷新存量错名）。
+                    plan.target_class_name = Some(derived);
                 } else {
                     plan.create_target = true;
-                    plan.target_class_name = Some(sc.class_name.clone());
+                    plan.target_class_name = Some(derived);
                 }
             }
         }
@@ -293,6 +310,7 @@ async fn build_plan(
         new_year_created: false,
         classes_created: plans.iter().filter(|p| p.create_target).count(),
         classes_reused: plans.iter().filter(|p| !p.create_target && !p.graduate && p.target_class_id.is_some()).count(),
+        renamed_classes_count: 0,
         promote_count,
         graduate_count,
         retain_count,
@@ -302,6 +320,7 @@ async fn build_plan(
         warnings,
         updated_students: Vec::new(),
         created_classes: Vec::new(),
+        renamed_classes: Vec::new(),
     })
 }
 
@@ -341,6 +360,7 @@ pub async fn execute(pool: &SqlitePool, req: &RolloverRequest) -> AppResult<Roll
 
     // ---- 2. 克隆班级（身份 = (new_year, grade_id, class_no)）----
     let mut created_classes: Vec<Class> = Vec::new();
+    let mut renamed_classes: Vec<Class> = Vec::new();
     let mut class_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     // 源班 → 升学目标年级（与 build_plan 相同的排序口径）
     let mut sorted_grades = crate::db::repo::grade_repo::list(pool).await?;
@@ -358,9 +378,11 @@ pub async fn execute(pool: &SqlitePool, req: &RolloverRequest) -> AppResult<Roll
         let Some(pos) = sorted_grades.iter().position(|g| g.id == grade_id) else { continue };
         let Some(next) = sorted_grades.get(pos + 1) else { continue };
         let target_grade_id = next.id.clone();
+        // 展示名跟随目标年级：一年级1班 → 二年级1班。
+        let derived = derived_class_name(&next.grade_name, sc.class_no.as_deref(), &sc.class_name);
 
-        let existing: Option<String> = sqlx::query_scalar(
-            "SELECT id FROM classes
+        let existing: Option<(String, String)> = sqlx::query_as(
+            "SELECT id, class_name FROM classes
              WHERE deleted_at IS NULL AND school_year_id = ? AND grade_id = ?
                AND COALESCE(class_no, '') = COALESCE(?, '')
              LIMIT 1",
@@ -371,7 +393,26 @@ pub async fn execute(pool: &SqlitePool, req: &RolloverRequest) -> AppResult<Roll
         .fetch_optional(&mut *tx)
         .await?;
         let target_id = match existing {
-            Some(id) => id,
+            Some((id, current_name)) => {
+                // 自愈：旧版本克隆把源名原样带进了新学年（如 二年级下挂着
+                // 「一年级1班」），重跑换届刷新为按目标年级派生的展示名。
+                if current_name != derived {
+                    sqlx::query(
+                        "UPDATE classes SET class_name = ?, updated_at = ?, dirty = 1,
+                                sync_state = 'pending' WHERE id = ?",
+                    )
+                    .bind(&derived)
+                    .bind(now)
+                    .bind(&id)
+                    .execute(&mut *tx)
+                    .await?;
+                    if let Some(mut c) = class_repo::get(pool, &id).await? {
+                        c.class_name = derived.clone();
+                        renamed_classes.push(c);
+                    }
+                }
+                id
+            }
             None => {
                 let id = new_id();
                 sqlx::query(
@@ -385,7 +426,7 @@ pub async fn execute(pool: &SqlitePool, req: &RolloverRequest) -> AppResult<Roll
                 .bind(&next.grade_no)
                 .bind(&next.grade_name)
                 .bind(sc.class_no.as_deref())
-                .bind(&sc.class_name)
+                .bind(&derived)
                 .bind(sc.sort_order)
                 .bind(now)
                 .bind(now)
@@ -398,7 +439,7 @@ pub async fn execute(pool: &SqlitePool, req: &RolloverRequest) -> AppResult<Roll
                     grade_no: Some(next.grade_no.clone()),
                     grade_name: Some(next.grade_name.clone()),
                     class_no: sc.class_no.clone(),
-                    class_name: sc.class_name.clone(),
+                    class_name: derived,
                     head_teacher: None,
                     sort_order: sc.sort_order,
                     remark: None,
@@ -519,6 +560,7 @@ pub async fn execute(pool: &SqlitePool, req: &RolloverRequest) -> AppResult<Roll
         new_year_created: plan.new_school_year_id.is_empty(),
         classes_created: created_classes.len(),
         classes_reused: plan.classes_reused,
+        renamed_classes_count: renamed_classes.len(),
         promote_count: plan.promote_count,
         graduate_count: plan.graduate_count,
         retain_count: plan.retain_count,
@@ -528,6 +570,7 @@ pub async fn execute(pool: &SqlitePool, req: &RolloverRequest) -> AppResult<Roll
         warnings: plan.warnings,
         updated_students,
         created_classes,
+        renamed_classes,
     })
 }
 
@@ -651,9 +694,20 @@ mod tests {
         assert_eq!(report.graduate_count, 2);
         assert_eq!(report.updated_students.len(), 6, "毕业学生不动，仅升级学生入 outbox");
 
-        // 新学年 3 个班
+        // 新学年 3 个班，展示名跟随目标年级（一年级1班 → 二年级1班）
         let new_classes = class_repo::list_by_year(&pool, &report.new_school_year_id).await.unwrap();
         assert_eq!(new_classes.len(), 3);
+        let names: Vec<&str> = new_classes.iter().map(|c| c.class_name.as_str()).collect();
+        assert!(names.contains(&"二年级1班") && names.contains(&"二年级2班") && names.contains(&"三年级1班"),
+            "克隆班级名应按目标年级派生，实际：{names:?}");
+        // 升级学生的 class_name 与目标班一致
+        let promoted = student_repo::list(
+            &pool,
+            student_repo::StudentFilter { class_name: Some("二年级1班".into()), include_deleted: false, exclude_transferred: Some(false), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        assert!(promoted.iter().all(|s| s.grade.as_deref() == Some("二年级")), "升级学生冗余字段应指向二年级");
 
         // 旧学年数据保留（含毕业班）
         let old_classes = class_repo::list_by_year(&pool, &year_id).await.unwrap();
@@ -673,6 +727,34 @@ mod tests {
         let again = execute(&pool, &request(&year_id, &[g3.id.clone()])).await.expect("execute again");
         assert!(!again.new_year_created);
         assert_eq!(again.classes_created, 0);
+    }
+
+    #[tokio::test]
+    async fn rollover_self_heals_stale_class_names_on_rerun() {
+        let pool = fresh_pool().await;
+        let (year_id, _) = seed(&pool).await;
+        let g3 = grade_repo::list(&pool).await.unwrap().into_iter().find(|g| g.grade_name == "三年级").unwrap();
+        let report = execute(&pool, &request(&year_id, &[g3.id.clone()])).await.expect("execute");
+        assert_eq!(report.renamed_classes_count, 0);
+
+        // 模拟旧版本克隆留下的错名（新学年二年级下挂着「一年级1班」）
+        let stale = class_repo::list_by_year(&pool, &report.new_school_year_id).await.unwrap();
+        for c in &stale {
+            sqlx::query("UPDATE classes SET class_name = ? WHERE id = ?")
+                .bind(format!("一年级{}班", c.class_no.as_deref().unwrap_or("")))
+                .bind(&c.id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        // 重跑换届：错名被自愈刷新为按目标年级派生的名字
+        let again = execute(&pool, &request(&year_id, &[g3.id])).await.expect("rerun");
+        assert!(again.renamed_classes_count > 0, "应检测到错名并自愈");
+        let healed = class_repo::list_by_year(&pool, &again.new_school_year_id).await.unwrap();
+        let names: Vec<&str> = healed.iter().map(|c| c.class_name.as_str()).collect();
+        assert!(names.contains(&"二年级1班") && names.contains(&"二年级2班") && names.contains(&"三年级1班"),
+            "自愈后班级名应正确，实际：{names:?}");
     }
 
     #[tokio::test]

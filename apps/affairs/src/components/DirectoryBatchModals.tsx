@@ -595,7 +595,7 @@ export function RolloverWizardModal({
       open={open}
       onClose={onClose}
       title="学年换届向导"
-      description="克隆班级目录到新学年、学生整体升一级、毕业年级原地保留、教室重绑到新班级。预览确认后单事务执行。"
+      description="克隆班级目录到新学年并按目标年级自动改名（一年级1班 → 二年级1班）、学生整体升一级、毕业年级原地保留、教室重绑到新班级。预览确认后单事务执行。"
       widthClass="max-w-3xl"
       footer={
         step === 'form' ? (

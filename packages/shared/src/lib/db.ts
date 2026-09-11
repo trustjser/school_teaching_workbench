@@ -422,6 +422,8 @@ export interface RolloverReport {
   newYearCreated: boolean;
   classesCreated: number;
   classesReused: number;
+  /** 执行模式下被自愈改名的班级数（干跑为 0） */
+  renamedClassesCount?: number;
   promoteCount: number;
   graduateCount: number;
   retainCount: number;

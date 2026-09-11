@@ -41,6 +41,9 @@ pub async fn school_year_rollover(
     for class in &report.created_classes {
         outbox::enqueue_entity(&state.pool, "class", &class.id, "upsert", class, None, None).await?;
     }
+    for class in &report.renamed_classes {
+        outbox::enqueue_entity(&state.pool, "class", &class.id, "upsert", class, None, None).await?;
+    }
     for student in &report.updated_students {
         outbox::enqueue_entity(&state.pool, "student", &student.id, "upsert", student, None, None).await?;
     }
@@ -94,6 +97,7 @@ pub async fn client_switch_binding(
         new_year_created: false,
         classes_created: 0,
         classes_reused: 0,
+        renamed_classes_count: 0,
         promote_count: 0,
         graduate_count: 0,
         retain_count: 0,
@@ -103,5 +107,6 @@ pub async fn client_switch_binding(
         warnings: Vec::new(),
         updated_students: Vec::new(),
         created_classes: Vec::new(),
+        renamed_classes: Vec::new(),
     })
 }

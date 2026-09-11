@@ -324,7 +324,8 @@ export function GradeClassManage(): JSX.Element {
       title: '换届完成',
       description:
         `新学年「${report.newSchoolYearName}」：升级 ${report.promoteCount} 人 · 毕业 ${report.graduateCount} 人 · ` +
-        `新建班级 ${report.classesCreated} 个 · 教室重绑 ${report.rebindCount} 间`,
+        `新建班级 ${report.classesCreated} 个 · 教室重绑 ${report.rebindCount} 间` +
+        ((report.renamedClassesCount ?? 0) > 0 ? ` · 修正班级名 ${report.renamedClassesCount} 个` : ''),
     });
   };
 
