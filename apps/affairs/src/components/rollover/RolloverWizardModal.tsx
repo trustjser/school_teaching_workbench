@@ -45,12 +45,14 @@ export function RolloverWizardModal({ open, mode, onClose, onDone }: RolloverWiz
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<RolloverExcelReport | null>(null);
   const [choices, setChoices] = useState<RolloverBindingChoice[]>([]);
+  /** 已决策的教室（含显式「暂不绑定」）：conflict 行只有决策后才不阻塞执行。 */
+  const [decided, setDecided] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<RolloverExcelReport | null>(null);
   const [classes, setClasses] = useState<{ id: string; label: string }[]>([]);
 
   useEffect(() => {
     if (!open) return;
-    setStep(0); setRows([]); setPreview(null); setResult(null); setError(null); setChoices([]);
+    setStep(0); setRows([]); setPreview(null); setResult(null); setError(null); setChoices([]); setDecided(new Set());
     void (async () => {
       const list = await schoolYearList().catch(() => []);
       setYears(list);
@@ -61,11 +63,15 @@ export function RolloverWizardModal({ open, mode, onClose, onDone }: RolloverWiz
     })();
   }, [open]);
 
+  // 初始全部未决策：auto 建议预填（有 id 用 id，仅名字则记 className 待执行解析），
+  // conflict/none 不预填，由用户逐行仲裁。
   const applyAutoSuggestions = useCallback((p: RolloverExcelReport) => {
     setChoices(p.bindingSuggestions.map((s) => ({
       classroomId: s.classroomId,
-      classId: s.matchKind === 'auto' ? s.suggestedClassId : null,
+      classId: s.matchKind === 'auto' ? (s.suggestedClassId ?? null) : null,
+      className: s.matchKind === 'auto' && !s.suggestedClassId ? (s.suggestedClass ?? null) : null,
     })));
+    setDecided(new Set());
   }, []);
 
   const doPreview = async (): Promise<void> => {
@@ -149,14 +155,25 @@ export function RolloverWizardModal({ open, mode, onClose, onDone }: RolloverWiz
     }]);
   };
 
-  const setChoice = (classroomId: string, classId: string | null): void => {
-    setChoices((prev) => prev.map((c) => (c.classroomId === classroomId ? { ...c, classId } : c)));
+  // 下拉决策：空值 = 显式「暂不绑定」；任一操作均记入 decided（解除 conflict 阻塞）。
+  const setChoice = (classroomId: string, value: string): void => {
+    setChoices((prev) => prev.map((c) => (c.classroomId === classroomId
+      ? (value ? { ...c, classId: value, className: null } : { ...c, classId: null, className: null })
+      : c)));
+    setDecided((prev) => new Set(prev).add(classroomId));
   };
+  // 一键接受全部 auto 建议：有 id 用 id，仅名字则按名提交（执行时解析）；conflict 不自动接受。
   const acceptAll = (): void => {
     if (!preview) return;
-    setChoices(preview.bindingSuggestions
-      .filter((s) => s.suggestedClassId)
-      .map((s) => ({ classroomId: s.classroomId, classId: s.suggestedClassId })));
+    const next = new Map<string, RolloverBindingChoice>();
+    for (const s of preview.bindingSuggestions) {
+      if (s.matchKind !== 'auto') continue;
+      next.set(s.classroomId, s.suggestedClassId
+        ? { classroomId: s.classroomId, classId: s.suggestedClassId, className: null }
+        : { classroomId: s.classroomId, classId: null, className: s.suggestedClass });
+    }
+    setChoices((prev) => prev.map((c) => next.get(c.classroomId) ?? c));
+    setDecided((prev) => new Set([...prev, ...next.keys()]));
   };
 
   // Step ③ 需要的可选班级下拉（新学年目录）。
@@ -170,12 +187,11 @@ export function RolloverWizardModal({ open, mode, onClose, onDone }: RolloverWiz
     })();
   }, [step, preview, result]);
 
+  // conflict 行只有在用户显式决策（选定班级或「暂不绑定」）后才不阻塞执行。
   const conflictsRemain = useMemo(() => {
     if (!preview) return false;
-    const chosen = new Map(choices.map((c) => [c.classroomId, c.classId]));
-    return preview.bindingSuggestions.some((s) =>
-      s.matchKind === 'conflict' && (!chosen.get(s.classroomId) || chosen.get(s.classroomId) === null));
-  }, [preview, choices]);
+    return preview.bindingSuggestions.some((s) => s.matchKind === 'conflict' && !decided.has(s.classroomId));
+  }, [preview, decided]);
 
   return (
     <Modal open={open} onClose={onClose} widthClass="max-w-3xl" title={mode === 'init' ? '首次建校向导' : '新学年换届向导'}
@@ -252,7 +268,10 @@ export function RolloverWizardModal({ open, mode, onClose, onDone }: RolloverWiz
                   <li key={i}>第 {e.rowIndex} 行 {e.studentNo} {e.name}：{e.reason}</li>
                 ))}
               </ul>
-              <Button className="mt-2" variant="secondary" size="md" onClick={() => void downloadErrors()}>下载错误报告</Button>
+              <div className="mt-2 flex gap-2">
+                <Button variant="secondary" size="md" onClick={() => void downloadErrors()}>下载错误报告</Button>
+                <Button variant="secondary" size="md" onClick={() => setStep(1)}>重新上传</Button>
+              </div>
             </div>
           ) : (
             <>
@@ -278,13 +297,16 @@ export function RolloverWizardModal({ open, mode, onClose, onDone }: RolloverWiz
                               <td className="p-2">
                                 <select
                                   className={cn('w-full rounded border bg-surface-raised px-2 py-1 text-ink min-w-0',
-                                    isConflict ? 'border-amber-500' : 'border-surface-border')}
+                                    isConflict && !decided.has(s.classroomId) ? 'border-amber-500' : 'border-surface-border')}
                                   value={chosen?.classId ?? ''}
-                                  onChange={(e) => setChoice(s.classroomId, e.target.value || null)}
+                                  onChange={(e) => setChoice(s.classroomId, e.target.value)}
                                 >
                                   <option value="">暂不绑定</option>
                                   {classes.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                                 </select>
+                                {s.suggestedClass && (
+                                  <p className="mt-0.5 text-xs text-ink-muted">建议：{s.suggestedClass}</p>
+                                )}
                               </td>
                             </tr>
                           );
