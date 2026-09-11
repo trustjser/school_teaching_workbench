@@ -892,7 +892,7 @@ mod tests {
     use super::*;
     use crate::db::repo::{class_repo, grade_repo, school_year_repo, student_repo};
     use crate::db::{create_pool, run_migrations};
-    use crate::db::models::{Grade, SchoolYear, Student, StudentImportRow};
+    use crate::db::models::{Classroom, Grade, SchoolYear, Student, StudentImportRow};
     use crate::db::repo::rollover_repo::{preview_excel, RolloverExcelRequest};
 
     async fn fresh_pool() -> SqlitePool {
@@ -1116,6 +1116,151 @@ mod tests {
             phone: None,
             note: None,
         }
+    }
+
+    fn room(name: &str) -> Classroom {
+        Classroom {
+            id: new_id(),
+            room_name: name.to_string(),
+            device_id: None,
+            remark: None,
+            created_at: now_ms(),
+            updated_at: now_ms(),
+            deleted_at: None,
+            sync_state: "pending".to_string(),
+            dirty: true,
+        }
+    }
+
+    /// rollover 模式绑定建议三态：
+    /// - 两间教室旧绑定同名命中同一新班 → 均降级 conflict；
+    /// - 唯一同名命中 → auto；
+    /// - 旧班级在 Excel/新目录中无同名 → none。
+    /// 绑定建议的目标班级来自「按名找到的目标学年」目录（预览不写库），
+    /// 故先建好目标学年班级（等价于目录已建后的干跑场景）。
+    #[tokio::test]
+    async fn preview_excel_binding_suggestions_auto_conflict_none() {
+        let pool = fresh_pool().await;
+
+        let src_year = school_year_repo::upsert(
+            &pool,
+            SchoolYear { school_year_no: "2025".into(), school_year_name: "2025学年".into(), ..Default::default() },
+        )
+        .await
+        .expect("src year");
+        let g1 = grade_repo::upsert(&pool, Grade { grade_no: "1".into(), grade_name: "一年级".into(), sort_order: 1, ..Default::default() }).await.expect("g1");
+        let g2 = grade_repo::upsert(&pool, Grade { grade_no: "2".into(), grade_name: "二年级".into(), sort_order: 2, ..Default::default() }).await.expect("g2");
+        let g3 = grade_repo::upsert(&pool, Grade { grade_no: "3".into(), grade_name: "三年级".into(), sort_order: 3, ..Default::default() }).await.expect("g3");
+
+        let mut src_class_ids = std::collections::HashMap::new();
+        for (grade, no, name) in [
+            (&g1, "1", "一年级1班"),
+            (&g2, "1", "二年级1班"),
+            (&g3, "1", "三年级1班"),
+        ] {
+            let c = class_repo::upsert(
+                &pool,
+                Class {
+                    grade_id: Some(grade.id.clone()),
+                    school_year_id: Some(src_year.id.clone()),
+                    grade_no: Some(grade.grade_no.clone()),
+                    grade_name: Some(grade.grade_name.clone()),
+                    class_no: Some(no.into()),
+                    class_name: name.into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("src class");
+            src_class_ids.insert(name.to_string(), c.id);
+        }
+
+        // 目标学年目录：一年级1班 / 二年级1班。
+        let new_year = school_year_repo::upsert(
+            &pool,
+            SchoolYear { school_year_no: "2026".into(), school_year_name: "2026-2027学年".into(), ..Default::default() },
+        )
+        .await
+        .expect("new year");
+        let mut new_class_ids = std::collections::HashMap::new();
+        for (grade, name) in [(&g1, "一年级1班"), (&g2, "二年级1班")] {
+            let c = class_repo::upsert(
+                &pool,
+                Class {
+                    grade_id: Some(grade.id.clone()),
+                    school_year_id: Some(new_year.id.clone()),
+                    grade_no: Some(grade.grade_no.clone()),
+                    grade_name: Some(grade.grade_name.clone()),
+                    class_no: Some("1".into()),
+                    class_name: name.into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("new class");
+            new_class_ids.insert(name.to_string(), c.id);
+        }
+
+        // 绑定：A/B → 源一年级1班（conflict）；C → 源三年级1班（none）；D → 源二年级1班（auto）。
+        for (room_name, class_name) in [
+            ("教室A", "一年级1班"),
+            ("教室B", "一年级1班"),
+            ("教室C", "三年级1班"),
+            ("教室D", "二年级1班"),
+        ] {
+            let r = classroom_repo::upsert(&pool, room(room_name)).await.expect("room");
+            classroom_repo::assign(&pool, &r.id, &src_year.id, &src_class_ids[class_name])
+                .await
+                .expect("assign");
+        }
+
+        let req = RolloverExcelRequest {
+            source_school_year_id: Some(src_year.id.clone()),
+            ..excel_req(
+                "rollover",
+                "2026-2027学年",
+                vec![
+                    row("S1", "张三", "一年级", "一年级1班", Some(1)),
+                    row("S2", "李四", "二年级", "二年级1班", None),
+                ],
+            )
+        };
+        let report = preview_excel(&pool, &req).await.expect("preview");
+        assert_eq!(report.binding_suggestions.len(), 4);
+
+        let find = |room_name: &str| {
+            report
+                .binding_suggestions
+                .iter()
+                .find(|s| s.room_name == room_name)
+                .unwrap_or_else(|| panic!("缺少 {room_name} 的绑定建议"))
+        };
+        let a = find("教室A");
+        let b = find("教室B");
+        let c = find("教室C");
+        let d = find("教室D");
+
+        assert_eq!(a.match_kind, "conflict");
+        assert_eq!(a.old_class.as_deref(), Some("一年级1班"));
+        assert_eq!(a.suggested_class.as_deref(), Some("一年级1班"));
+        assert_eq!(a.suggested_class_id.as_deref(), Some(new_class_ids["一年级1班"].as_str()));
+        assert_eq!(b.match_kind, "conflict");
+        assert_eq!(b.suggested_class.as_deref(), Some("一年级1班"));
+
+        assert_eq!(d.match_kind, "auto");
+        assert_eq!(d.old_class.as_deref(), Some("二年级1班"));
+        assert_eq!(d.suggested_class.as_deref(), Some("二年级1班"));
+        assert_eq!(d.suggested_class_id.as_deref(), Some(new_class_ids["二年级1班"].as_str()));
+
+        assert_eq!(c.match_kind, "none");
+        assert_eq!(c.old_class.as_deref(), Some("三年级1班"));
+        assert_eq!(c.suggested_class, None);
+        assert_eq!(c.suggested_class_id, None);
+
+        let kinds: Vec<&str> = report.binding_suggestions.iter().map(|s| s.match_kind.as_str()).collect();
+        assert_eq!(kinds.iter().filter(|k| **k == "auto").count(), 1);
+        assert_eq!(kinds.iter().filter(|k| **k == "conflict").count(), 2);
+        assert_eq!(kinds.iter().filter(|k| **k == "none").count(), 1);
     }
 
     #[tokio::test]
