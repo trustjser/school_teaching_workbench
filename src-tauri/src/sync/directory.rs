@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::db::models::{Class, Classroom, ClassroomAssignment, Grade, SchoolYear};
-use crate::db::repo::{class_repo, classroom_repo, grade_repo, school_year_repo};
+use crate::db::repo::{class_repo, classroom_repo, grade_repo, school_year_repo, settings_repo};
 use crate::error::AppResult;
 
 /// 教务端可供班级端重复拉取的完整工作目录。
@@ -14,6 +14,20 @@ pub struct DirectorySnapshot {
     pub classes: Vec<Class>,
     pub classrooms: Vec<Classroom>,
     pub assignments: Vec<ClassroomAssignment>,
+    /// 权威当前学年（教务端换届执行后写入）。None = 尚未换届确认。
+    #[serde(default)]
+    pub current_school_year_id: Option<String>,
+}
+
+/// 班级端自动切换守护（设计 §5.1）的切换结果，供前端提示「已切到新学年班级」。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoSwitchInfo {
+    pub school_year_id: String,
+    pub school_year_name: String,
+    pub class_id: String,
+    pub class_name: String,
+    pub grade_name: Option<String>,
 }
 
 /// 目录同步结果，用于前端反馈本次实际取得的数据量。
@@ -25,6 +39,9 @@ pub struct DirectorySyncReport {
     pub classes: usize,
     pub classrooms: usize,
     pub assignments: usize,
+    /// 目录应用后自动切绑的结果（None = 未触发切换）。
+    #[serde(default)]
+    pub auto_switched: Option<AutoSwitchInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,12 +78,17 @@ pub async fn build_snapshot(pool: &SqlitePool) -> AppResult<DirectorySnapshot> {
                 && room_ids.contains(a.classroom_id.as_str())
         })
         .collect();
+    let current_school_year_id = settings_repo::get_string(pool, "current_school_year_id", "")
+        .await
+        .ok()
+        .filter(|s| !s.is_empty());
     Ok(DirectorySnapshot {
         school_years,
         grades,
         classes,
         classrooms,
         assignments,
+        current_school_year_id,
     })
 }
 
@@ -96,13 +118,90 @@ pub async fn apply_snapshot(
         classes: snapshot.classes.len(),
         classrooms: snapshot.classrooms.len(),
         assignments: snapshot.assignments.len(),
+        auto_switched: None,
     })
+}
+
+/// 班级端自动切换守护（设计 §5.1）：比较「权威年 + 认领教室在权威年的绑定」与
+/// 本机绑定，目标绑定对 (schoolYearId, classId) 一致即切绑——同年重绑也会对齐。
+/// 各前置条件不满足时返回 `Ok(None)` 且不落任何写入；只有切绑成功才写三个
+/// settings key（school_year_id / class_id / bound_class_id）。
+pub async fn auto_switch_if_ready(
+    pool: &SqlitePool,
+    current_school_year_id: Option<&str>,
+) -> AppResult<Option<AutoSwitchInfo>> {
+    let Some(year_id) = current_school_year_id
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return Ok(None); // 权威年缺失：尚未换届确认，永不触发。
+    };
+    let device_id = settings_repo::get_string(pool, "device_id", "")
+        .await
+        .unwrap_or_default();
+    if device_id.is_empty() {
+        return Ok(None); // 本机未认领设备。
+    }
+    let bound_year = settings_repo::get_string(pool, "school_year_id", "")
+        .await
+        .unwrap_or_default();
+    let bound_class = settings_repo::get_string(pool, "bound_class_id", "")
+        .await
+        .unwrap_or_default();
+    if bound_year == year_id && bound_class.is_empty() {
+        return Ok(None); // 已在权威年但尚未绑定班级，留给手动绑定流程。
+    }
+    let Some(room) = classroom_repo::list(pool)
+        .await?
+        .into_iter()
+        .find(|r| r.device_id.as_deref() == Some(device_id.as_str()))
+    else {
+        return Ok(None); // 设备未认领教室。
+    };
+    let Some(a) = classroom_repo::list_assignments(pool, None)
+        .await?
+        .into_iter()
+        .find(|a| a.classroom_id == room.id && a.school_year_id == year_id)
+    else {
+        return Ok(None); // 权威年下该教室无绑定。
+    };
+    if bound_year == year_id && bound_class == a.class_id {
+        return Ok(None); // 已对齐。
+    }
+    let Some(klass) = class_repo::get(pool, &a.class_id)
+        .await?
+        .filter(|c| c.deleted_at.is_none() && c.school_year_id.as_deref() == Some(year_id))
+    else {
+        return Ok(None); // 目标班级不存在或已软删或跨年不符。
+    };
+    let roster: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM students WHERE class_id = ? AND deleted_at IS NULL")
+            .bind(&a.class_id)
+            .fetch_one(pool)
+            .await?;
+    if roster.0 == 0 {
+        return Ok(None); // 名册未就绪。
+    }
+    settings_repo::set_raw(pool, "school_year_id", Some(year_id), "string").await?;
+    settings_repo::set_raw(pool, "class_id", Some(a.class_id.as_str()), "string").await?;
+    settings_repo::set_raw(pool, "bound_class_id", Some(a.class_id.as_str()), "string").await?;
+    let year_name = school_year_repo::get(pool, year_id)
+        .await?
+        .map(|y| y.school_year_name)
+        .unwrap_or_else(|| year_id.to_string());
+    Ok(Some(AutoSwitchInfo {
+        school_year_id: year_id.to_string(),
+        school_year_name: year_name,
+        class_id: a.class_id.clone(),
+        class_name: klass.class_name,
+        grade_name: klass.grade_name,
+    }))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::db::models::{Class, Classroom, ClassroomAssignment, Grade, SchoolYear};
-    use crate::db::repo::{class_repo, classroom_repo, grade_repo, school_year_repo};
+    use crate::db::models::{Class, Classroom, ClassroomAssignment, Grade, SchoolYear, Student};
+    use crate::db::repo::{class_repo, classroom_repo, grade_repo, school_year_repo, settings_repo, student_repo};
     use crate::db::{create_pool, run_migrations};
 
     #[tokio::test]
@@ -520,6 +619,7 @@ mod tests {
             classes: vec![],
             classrooms: vec![],
             assignments: vec![dangling],
+            current_school_year_id: None,
         };
         let report = super::apply_snapshot(&client, &snapshot)
             .await
@@ -577,6 +677,7 @@ mod tests {
             classes: vec![],
             classrooms: vec![],
             assignments: vec![],
+            current_school_year_id: None,
         };
         super::apply_snapshot(&client, &snapshot)
             .await
@@ -589,5 +690,160 @@ mod tests {
 
         client.close().await;
         std::fs::remove_dir_all(client_dir).ok();
+    }
+
+    /// 班级端自动切换守护（设计 §5.1）：
+    /// ① 名册非空 + 设备认领教室 + 权威年绑定齐备 → 切绑并写三个 settings key；
+    /// ② 已对齐 → 不再触发；
+    /// ③ 权威年为空 → 永不触发；
+    /// ④ 名册为空 → 返回 None 且不改写绑定。
+    #[tokio::test]
+    async fn auto_switch_fires_when_ready_and_skips_empty_roster() {
+        let dir =
+            std::env::temp_dir().join(format!("lanwb_auto_switch_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let pool = create_pool(&dir.join("c.db")).await.expect("pool");
+        run_migrations(&pool).await.expect("migrations");
+
+        // 场景数据：设备 d1 认领教室 room1；room1 在新学年 y2 绑定 class2；class2 有 1 名学生。
+        school_year_repo::upsert(
+            &pool,
+            SchoolYear { id: "y1".into(), school_year_name: "2025届".into(), ..Default::default() },
+        )
+        .await
+        .expect("year y1");
+        school_year_repo::upsert(
+            &pool,
+            SchoolYear { id: "y2".into(), school_year_name: "2026届".into(), ..Default::default() },
+        )
+        .await
+        .expect("year y2");
+        let grade = grade_repo::upsert(
+            &pool,
+            Grade { grade_name: "一年级".into(), ..Default::default() },
+        )
+        .await
+        .expect("grade");
+        class_repo::upsert(
+            &pool,
+            Class {
+                id: "class1".into(),
+                grade_id: Some(grade.id.clone()),
+                school_year_id: Some("y1".into()),
+                class_name: "一年级1班".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("class1");
+        class_repo::upsert(
+            &pool,
+            Class {
+                id: "class2".into(),
+                grade_id: Some(grade.id.clone()),
+                school_year_id: Some("y2".into()),
+                class_name: "一年级2班".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("class2");
+        classroom_repo::upsert(
+            &pool,
+            Classroom {
+                id: "room1".into(),
+                room_name: "101".into(),
+                device_id: Some("d1".into()),
+                remark: None,
+                created_at: 0,
+                updated_at: 0,
+                deleted_at: None,
+                sync_state: String::new(),
+                dirty: false,
+            },
+        )
+        .await
+        .expect("room1");
+        classroom_repo::assign(&pool, "room1", "y2", "class2")
+            .await
+            .expect("assignment");
+        student_repo::upsert(
+            &pool,
+            Student {
+                id: "stu1".into(),
+                student_no: "S001".into(),
+                name: "张三".into(),
+                gender: "male".into(),
+                class_id: Some("class2".into()),
+                class_name: Some("一年级2班".into()),
+                status: "active".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("student");
+
+        // 本机绑定 settings（旧学年 y1 / class1）。
+        settings_repo::set_raw(&pool, "device_id", Some("d1"), "string")
+            .await
+            .unwrap();
+        settings_repo::set_raw(&pool, "school_year_id", Some("y1"), "string")
+            .await
+            .unwrap();
+        settings_repo::set_raw(&pool, "bound_class_id", Some("class1"), "string")
+            .await
+            .unwrap();
+        settings_repo::set_raw(&pool, "class_id", Some("class1"), "string")
+            .await
+            .unwrap();
+
+        // ① 名册非空 → 切换成功。
+        let info = super::auto_switch_if_ready(&pool, Some("y2"))
+            .await
+            .unwrap()
+            .expect("should switch");
+        assert_eq!(info.school_year_id, "y2");
+        assert_eq!(info.class_id, "class2");
+        assert_eq!(info.school_year_name, "2026届");
+        assert_eq!(info.class_name, "一年级2班");
+        assert_eq!(
+            settings_repo::get_string(&pool, "bound_class_id", "").await.unwrap(),
+            "class2"
+        );
+        assert_eq!(
+            settings_repo::get_string(&pool, "school_year_id", "").await.unwrap(),
+            "y2"
+        );
+
+        // ② 已对齐 → 不再触发。
+        assert!(super::auto_switch_if_ready(&pool, Some("y2"))
+            .await
+            .unwrap()
+            .is_none());
+
+        // ③ 权威年为空 → 永不触发。
+        assert!(super::auto_switch_if_ready(&pool, None).await.unwrap().is_none());
+
+        // ④ 名册为空 → 返回 None 且不改写绑定。
+        // 先把绑定改回旧班（否则 ② 的「已对齐」会短路），再删学生。
+        settings_repo::set_raw(&pool, "bound_class_id", Some("class1"), "string")
+            .await
+            .unwrap();
+        settings_repo::set_raw(&pool, "class_id", Some("class1"), "string")
+            .await
+            .unwrap();
+        student_repo::soft_delete(&pool, "stu1").await.unwrap();
+        assert!(super::auto_switch_if_ready(&pool, Some("y2"))
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            settings_repo::get_string(&pool, "bound_class_id", "").await.unwrap(),
+            "class1",
+            "名册为空时不得改写绑定"
+        );
+
+        pool.close().await;
+        std::fs::remove_dir_all(dir).ok();
     }
 }

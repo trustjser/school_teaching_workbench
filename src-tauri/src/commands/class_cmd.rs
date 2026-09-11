@@ -61,12 +61,26 @@ pub async fn directory_sync(state: State<'_, Arc<AppState>>) -> AppResult<Direct
             match client::request_json::<DirectorySnapshot>(&base_url, "/api/v1/directory", &env).await
             {
                 Ok(snapshot) => {
-                    let report = directory::apply_snapshot(&state.pool, &snapshot).await?;
+                    let mut report = directory::apply_snapshot(&state.pool, &snapshot).await?;
                     let _ = state
                         .app
                         .emit(Events::SCHOOL_YEAR_CHANGED, serde_json::json!({}));
                     let _ = state.app.emit(Events::GRADE_CHANGED, serde_json::json!({}));
                     let _ = state.app.emit(Events::CLASS_CHANGED, serde_json::json!({}));
+                    // 自动切换守护（设计 §5.1）：目录应用后，若权威年与本机条件齐备则切绑，
+                    // 并只在真正切换时向前端发 CLASS_CHANGED（携带新班级 id）。
+                    let auto_switched = directory::auto_switch_if_ready(
+                        &state.pool,
+                        snapshot.current_school_year_id.as_deref(),
+                    )
+                    .await?;
+                    if let Some(info) = &auto_switched {
+                        let _ = state.app.emit(
+                            Events::CLASS_CHANGED,
+                            serde_json::json!({ "id": info.class_id }),
+                        );
+                    }
+                    report.auto_switched = auto_switched;
                     return Ok(report);
                 }
                 Err(err) => last_error = Some(err),
