@@ -78,6 +78,14 @@ import type { ErrorCode } from '@shared/types/enums';
  * 48  class_delete               ({ id }) -> void
  *       理由：软删班级。
  *
+ * —— D. 换届流水线（Excel 驱动，单事务执行）——
+ * 49  rollover_from_excel        ({ request, dryRun }) -> RolloverExcelReport
+ *       理由：教务端上传整校名册 Excel 驱动的建校 / 换届流水线，dryRun 预览。
+ * 50  rollover_rebind            ({ classroomId, classId }) -> void
+ *       理由：修正重发——对单个教室按确认结果补绑 / 改绑学年班级。
+ * 51  rollover_executions_list   () -> RolloverExecution[]
+ *       理由：换届执行记录展示（审计与回溯）。
+ *
  * 参数与返回字段一律 camelCase（与 Rust #[serde(rename_all = "camelCase")] 对齐），
  * 时间为 number 毫秒时间戳，ID 为 string UUID。
  *

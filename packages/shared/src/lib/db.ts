@@ -248,6 +248,17 @@ export interface DirectorySyncReport {
   classes: number;
   classrooms: number;
   assignments: number;
+  /** 目录同步触发的班级端自动切绑结果（未触发时为 null） */
+  autoSwitched?: AutoSwitchInfo | null;
+}
+
+/** 班级端自动切绑信息（目录同步时） */
+export interface AutoSwitchInfo {
+  schoolYearId: string;
+  schoolYearName: string;
+  classId: string;
+  className: string;
+  gradeName: string | null;
 }
 
 export async function directorySync(): Promise<DirectorySyncReport> {
@@ -375,81 +386,110 @@ export async function directoryBatchCreate(
 }
 
 /* -------------------------------------------------------------------------- */
-/* rollover（学年换届 / 班级端切绑）                                              */
+/* rollover（Excel 换届 / 建校 / 修正重发 / 执行记录）                              */
 /* -------------------------------------------------------------------------- */
 
-/** 换届请求 */
-export interface RolloverRequest {
-  sourceSchoolYearId: string;
+export interface RolloverBindingChoice {
+  classroomId: string;
+  classId: string | null;
+}
+
+export interface RolloverExcelRequest {
+  mode: 'init' | 'rollover';
+  sourceSchoolYearId?: string | null;
   newSchoolYearName: string;
   newSchoolYearNo?: string | null;
   newStartDate?: string | null;
   newEndDate?: string | null;
-  /** 这些年级的学生整体毕业（保留在原学年班级，不升入新学年名册） */
-  graduatingGradeIds: string[];
-  /** 逐行勾选留级的学生 id（完全不动） */
-  retainedStudentIds: string[];
+  rows: StudentImportRowPayload[];
+  confirmBindings?: RolloverBindingChoice[] | null;
 }
 
-/** 单个学生的换届计划 */
-export interface RolloverStudentPlan {
-  studentId: string;
+/** 与 Rust StudentImportRow 对齐（studentBatchImport 现用行类型） */
+export type StudentImportRowPayload = {
   studentNo: string;
   name: string;
-  fromClassId: string;
-  fromGrade: string;
-  fromClass: string;
-  action: 'promote' | 'graduate' | 'retain';
-  toGrade: string | null;
-  toClass: string | null;
-  toClassId: string | null;
+  gender?: string | null;
+  grade?: string | null;
+  className?: string | null;
+  classId?: string | null;
+  seatNo?: number | null;
+  phone?: string | null;
+  note?: string | null;
+};
+
+export interface RolloverRowError {
+  rowIndex: number;
+  studentNo: string;
+  name: string;
+  reason: string;
 }
 
-/** 教室重绑计划 */
-export interface RolloverRebindPlan {
+export interface RolloverBindingSuggestion {
   classroomId: string;
   roomName: string;
-  fromClass: string;
-  toClass: string;
-  toClassId: string;
+  oldClass: string | null;
+  suggestedClassId: string | null;
+  suggestedClass: string | null;
+  matchKind: 'auto' | 'conflict' | 'none';
 }
 
-/** 换届预览 / 执行结果 */
-export interface RolloverReport {
-  sourceSchoolYearId: string;
+export interface RolloverExcelReport {
+  mode: string;
   newSchoolYearId: string;
   newSchoolYearName: string;
-  newYearCreated: boolean;
-  classesCreated: number;
-  classesReused: number;
-  /** 执行模式下被自愈改名的班级数（干跑为 0） */
-  renamedClassesCount?: number;
-  promoteCount: number;
-  graduateCount: number;
-  retainCount: number;
-  rebindCount: number;
-  studentPlans: RolloverStudentPlan[];
-  rebindPlans: RolloverRebindPlan[];
-  warnings: string[];
+  directory: {
+    newGrades: string[];
+    newClasses: [string, string][];
+    untouchedClasses: string[];
+  };
+  studentsAdded: number;
+  studentsUpdated: number;
+  studentsMissing: number;
+  errors: RolloverRowError[];
+  bindingSuggestions: RolloverBindingSuggestion[];
+  upsertedStudents: unknown[];
+  createdGrades: unknown[];
+  createdClasses: unknown[];
 }
 
-/**
- * 学年换届（教务端）。`dryRun=true` 返回预览不写库；确认后 `dryRun=false`
- * 在单一事务内执行（新学年 + 克隆班级 + 学生升级 + 教室重绑）。
- */
-export async function schoolYearRollover(
-  request: RolloverRequest,
+export interface RolloverExecution {
+  id: string;
+  executedAt: number;
+  mode: string;
+  sourceYearId: string | null;
+  newYearId: string;
+  summaryJson: string;
+}
+
+export async function rolloverFromExcel(
+  request: RolloverExcelRequest,
   dryRun: boolean,
-): Promise<RolloverReport> {
-  return invokeCmd<RolloverReport>('school_year_rollover', { request, dryRun });
+): Promise<RolloverExcelReport> {
+  return invokeCmd<RolloverExcelReport>('rollover_from_excel', { request, dryRun });
+}
+
+export async function rolloverRebind(classroomId: string, classId: string): Promise<void> {
+  return invokeCmd<void>('rollover_rebind', { classroomId, classId });
+}
+
+export async function rolloverExecutionsList(): Promise<RolloverExecution[]> {
+  return invokeCmd<RolloverExecution[]>('rollover_executions_list');
+}
+
+export interface SwitchBindingResult {
+  schoolYearId: string;
+  schoolYearName: string;
+  classId: string;
+  className: string;
 }
 
 /** 班级端换届切绑：把本机绑定切到新学年班级（只切绑定、不重装） */
 export async function clientSwitchBinding(
   schoolYearId: string,
   classId: string,
-): Promise<RolloverReport> {
-  return invokeCmd<RolloverReport>('client_switch_binding', {
+): Promise<SwitchBindingResult> {
+  return invokeCmd<SwitchBindingResult>('client_switch_binding', {
     schoolYearId,
     classId,
   });
