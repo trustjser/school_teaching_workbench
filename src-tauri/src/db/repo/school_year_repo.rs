@@ -114,12 +114,46 @@ pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
 }
 
 /// 合并远端学年（last-write-wins）。
+///
+/// 两条镜像语义（班级端目录是只读镜像，教务端活跃集合即权威）：
+/// 1. 远端墓碑（删除 op 携带 `deleted_at`）按 id 落软删并提前返回——
+///    走 upsert 会被 `ON CONFLICT ... SET deleted_at = NULL` 复活；
+/// 2. 教务端对同名学年「删了重建」（新 id）后，本地残留的活跃旧行会顶住
+///    部分唯一索引 `ux_school_years_name`，班级端刷新目录直接报 2067——
+///    插入路径先把同名异 id 的旧行按镜像状态墓碑化（不标 dirty、不入 outbox）。
 pub async fn merge_remote(pool: &SqlitePool, remote: &SchoolYear) -> AppResult<MergeOutcome> {
+    if remote.deleted_at.is_some() {
+        sqlx::query(
+            "UPDATE school_years SET deleted_at = ?, updated_at = ?, sync_state = 'synced', dirty = 0
+             WHERE id = ?",
+        )
+        .bind(remote.deleted_at)
+        .bind(remote.updated_at)
+        .bind(&remote.id)
+        .execute(pool)
+        .await?;
+        return Ok(MergeOutcome::Deleted);
+    }
     let local: Option<(i64,)> =
         sqlx::query_as::<_, (i64,)>("SELECT updated_at FROM school_years WHERE id = ?")
             .bind(&remote.id)
             .fetch_optional(pool)
             .await?;
+    if local.is_none() {
+        if let Some(stale) = find_by_name(pool, &remote.school_year_name).await? {
+            if stale.id != remote.id {
+                sqlx::query(
+                    "UPDATE school_years SET deleted_at = ?, updated_at = ?, sync_state = 'synced', dirty = 0
+                     WHERE id = ? AND deleted_at IS NULL",
+                )
+                .bind(remote.updated_at)
+                .bind(remote.updated_at)
+                .bind(&stale.id)
+                .execute(pool)
+                .await?;
+            }
+        }
+    }
     let outcome = match local {
         None => MergeOutcome::Inserted,
         Some((local_updated,)) => decide_merge(local_updated, remote.updated_at),
@@ -130,4 +164,74 @@ pub async fn merge_remote(pool: &SqlitePool, remote: &SchoolYear) -> AppResult<M
     merged.dirty = false;
     upsert(pool, merged).await?;
     Ok(outcome)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{create_pool, run_migrations};
+
+    async fn fresh_pool() -> SqlitePool {
+        let dir = std::env::temp_dir().join(format!("lanwb_year_merge_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let pool = create_pool(&dir.join("test.db")).await.expect("pool");
+        run_migrations(&pool).await.expect("migrations");
+        pool
+    }
+
+    #[tokio::test]
+    async fn merge_remote_delete_tombstone_is_not_resurrected() {
+        let pool = fresh_pool().await;
+        let year = upsert(
+            &pool,
+            SchoolYear { school_year_name: "2028届".into(), ..Default::default() },
+        )
+        .await
+        .expect("year");
+
+        let mut tombstone = year.clone();
+        tombstone.updated_at += 1;
+        tombstone.deleted_at = Some(tombstone.updated_at);
+        let outcome = merge_remote(&pool, &tombstone).await.expect("merge");
+        assert!(matches!(outcome, MergeOutcome::Deleted));
+        assert!(
+            list(&pool).await.expect("list").is_empty(),
+            "远端墓碑不得被 upsert 的 ON CONFLICT 复活"
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn merge_remote_supersedes_stale_same_name_row() {
+        let pool = fresh_pool().await;
+        let stale = upsert(
+            &pool,
+            SchoolYear { school_year_name: "2028届".into(), ..Default::default() },
+        )
+        .await
+        .expect("stale");
+
+        // 教务端「删了重建」：同名、新 id、新版本。
+        let remote = SchoolYear {
+            id: uuid::Uuid::new_v4().to_string(),
+            school_year_name: "2028届".into(),
+            school_year_no: "2028".into(),
+            created_at: stale.updated_at + 100,
+            updated_at: stale.updated_at + 100,
+            ..Default::default()
+        };
+        let outcome = merge_remote(&pool, &remote)
+            .await
+            .expect("同名异 id 不得撞 ux_school_years_name（回归：2067）");
+        assert!(matches!(outcome, MergeOutcome::Inserted));
+
+        let active = list(&pool).await.expect("list");
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, remote.id, "活跃行应为远端重建行");
+        assert!(
+            get(&pool, &stale.id).await.expect("get").unwrap().deleted_at.is_some(),
+            "本地残留旧行应被镜像墓碑化"
+        );
+        pool.close().await;
+    }
 }

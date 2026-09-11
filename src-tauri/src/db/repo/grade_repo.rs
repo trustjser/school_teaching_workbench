@@ -105,12 +105,44 @@ pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
 }
 
 /// 合并远端年级（last-write-wins）。
+///
+/// 镜像语义与 `school_year_repo::merge_remote` 一致：远端墓碑按 id 落软删
+/// （upsert 会复活）；教务端「删了重建」同名年级（新 id）时，插入路径先把
+/// 同名异 id 的本地残留行按镜像状态墓碑化（不标 dirty、不入 outbox），
+/// 避免顶住部分唯一索引 `ux_grades_name`。
 pub async fn merge_remote(pool: &SqlitePool, remote: &Grade) -> AppResult<MergeOutcome> {
+    if remote.deleted_at.is_some() {
+        sqlx::query(
+            "UPDATE grades SET deleted_at = ?, updated_at = ?, sync_state = 'synced', dirty = 0
+             WHERE id = ?",
+        )
+        .bind(remote.deleted_at)
+        .bind(remote.updated_at)
+        .bind(&remote.id)
+        .execute(pool)
+        .await?;
+        return Ok(MergeOutcome::Deleted);
+    }
     let local: Option<(i64,)> =
         sqlx::query_as::<_, (i64,)>("SELECT updated_at FROM grades WHERE id = ?")
             .bind(&remote.id)
             .fetch_optional(pool)
             .await?;
+    if local.is_none() {
+        if let Some(stale) = find_by_name(pool, &remote.grade_name).await? {
+            if stale.id != remote.id {
+                sqlx::query(
+                    "UPDATE grades SET deleted_at = ?, updated_at = ?, sync_state = 'synced', dirty = 0
+                     WHERE id = ? AND deleted_at IS NULL",
+                )
+                .bind(remote.updated_at)
+                .bind(remote.updated_at)
+                .bind(&stale.id)
+                .execute(pool)
+                .await?;
+            }
+        }
+    }
     let outcome = match local {
         None => MergeOutcome::Inserted,
         Some((local_updated,)) => decide_merge(local_updated, remote.updated_at),
@@ -121,4 +153,65 @@ pub async fn merge_remote(pool: &SqlitePool, remote: &Grade) -> AppResult<MergeO
     merged.dirty = false;
     upsert(pool, merged).await?;
     Ok(outcome)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{create_pool, run_migrations};
+
+    async fn fresh_pool() -> SqlitePool {
+        let dir = std::env::temp_dir().join(format!("lanwb_grade_merge_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let pool = create_pool(&dir.join("test.db")).await.expect("pool");
+        run_migrations(&pool).await.expect("migrations");
+        pool
+    }
+
+    #[tokio::test]
+    async fn merge_remote_delete_tombstone_is_not_resurrected() {
+        let pool = fresh_pool().await;
+        let grade = upsert(
+            &pool,
+            Grade { grade_name: "三年级".into(), ..Default::default() },
+        )
+        .await
+        .expect("grade");
+
+        let mut tombstone = grade.clone();
+        tombstone.updated_at += 1;
+        tombstone.deleted_at = Some(tombstone.updated_at);
+        let outcome = merge_remote(&pool, &tombstone).await.expect("merge");
+        assert!(matches!(outcome, MergeOutcome::Deleted));
+        assert!(list(&pool).await.expect("list").is_empty());
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn merge_remote_supersedes_stale_same_name_row() {
+        let pool = fresh_pool().await;
+        let stale = upsert(
+            &pool,
+            Grade { grade_name: "三年级".into(), ..Default::default() },
+        )
+        .await
+        .expect("stale");
+
+        let remote = Grade {
+            id: uuid::Uuid::new_v4().to_string(),
+            grade_name: "三年级".into(),
+            grade_no: "3".into(),
+            created_at: stale.updated_at + 100,
+            updated_at: stale.updated_at + 100,
+            ..Default::default()
+        };
+        let outcome = merge_remote(&pool, &remote)
+            .await
+            .expect("同名异 id 不得撞 ux_grades_name");
+        assert!(matches!(outcome, MergeOutcome::Inserted));
+        let active = list(&pool).await.expect("list");
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, remote.id);
+        pool.close().await;
+    }
 }

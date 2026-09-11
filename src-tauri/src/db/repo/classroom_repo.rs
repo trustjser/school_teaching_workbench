@@ -164,6 +164,12 @@ pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
 }
 
 /// 合并远端教室目录，避免再次写入发件箱。
+///
+/// 镜像修正（不标 dirty、不入 outbox，时间戳取远端行版本保持 LWW 顺序）：
+/// - 教务端「删了重建」同名教室（新 id）→ 插入路径把同名异 id 的本地残留行
+///   墓碑化，避免顶住部分唯一索引 `ux_classrooms_name`；
+/// - 教务端把设备改绑到另一教室 → 清掉本地旧教室上的设备占用，避免顶住
+///   `ux_classrooms_device`。更新与插入路径都要清：先到哪条都能收敛。
 pub async fn merge_remote(pool: &SqlitePool, room: &Classroom) -> AppResult<MergeOutcome> {
     let local: Option<(i64, Option<String>)> =
         sqlx::query_as("SELECT updated_at, device_id FROM classrooms WHERE id=?")
@@ -188,15 +194,48 @@ pub async fn merge_remote(pool: &SqlitePool, room: &Classroom) -> AppResult<Merg
             }
             return Ok(decision);
         }
+        clear_stale_device(pool, room).await?;
         // 目录同步可能先于设备认领到达：远端目录中的空 device_id 不应清掉
         // 本端已经确认的设备绑定。只有远端明确提供设备 ID 时才覆盖。
         sqlx::query("UPDATE classrooms SET room_name=?,device_id=COALESCE(?, device_id),remark=?,updated_at=?,deleted_at=?,sync_state=?,dirty=0 WHERE id=?")
             .bind(&room.room_name).bind(&room.device_id).bind(&room.remark).bind(room.updated_at).bind(room.deleted_at).bind(merged_sync_state(decision)).bind(&room.id).execute(pool).await?;
         return Ok(decision);
     }
+    // 插入路径：先墓碑化同名残留行（教务端删了重建教室）。
+    if room.deleted_at.is_none() {
+        sqlx::query(
+            "UPDATE classrooms SET deleted_at=?, updated_at=?, sync_state='synced', dirty=0
+             WHERE room_name=? AND deleted_at IS NULL AND id<>?",
+        )
+        .bind(room.updated_at)
+        .bind(room.updated_at)
+        .bind(&room.room_name)
+        .bind(&room.id)
+        .execute(pool)
+        .await?;
+    }
+    clear_stale_device(pool, room).await?;
     sqlx::query("INSERT INTO classrooms (id,room_name,device_id,remark,created_at,updated_at,deleted_at,sync_state,dirty) VALUES (?,?,?,?,?,?,?,'clean',0)")
         .bind(&room.id).bind(&room.room_name).bind(&room.device_id).bind(&room.remark).bind(room.created_at).bind(room.updated_at).bind(room.deleted_at).execute(pool).await?;
     Ok(MergeOutcome::Inserted)
+}
+
+/// 清掉其他教室上对远端设备号的残留占用（教务端已把设备改绑到本教室）。
+async fn clear_stale_device(pool: &SqlitePool, room: &Classroom) -> AppResult<()> {
+    if let Some(device) = room.device_id.as_deref() {
+        if !device.is_empty() {
+            sqlx::query(
+                "UPDATE classrooms SET device_id=NULL, updated_at=?, sync_state='synced', dirty=0
+                 WHERE device_id=? AND deleted_at IS NULL AND id<>?",
+            )
+            .bind(room.updated_at)
+            .bind(device)
+            .bind(&room.id)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 /// 合并远端教室与班级绑定，避免再次写入发件箱。
@@ -297,6 +336,98 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.message.contains("已被其他设备绑定"));
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn merge_remote_supersedes_same_name_room_and_moves_device() {
+        let dir = std::env::temp_dir().join(format!("lanwb_room_merge_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pool = create_pool(&dir.join("test.db")).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        // 本地旧状态：教室 101（设备 device-a 占用）+ 教室 102（未绑设备）。
+        let r1 = upsert(
+            &pool,
+            Classroom {
+                id: String::new(),
+                room_name: "101".into(),
+                device_id: Some("device-a".into()),
+                remark: None,
+                created_at: 0,
+                updated_at: 100,
+                deleted_at: None,
+                sync_state: "synced".into(),
+                dirty: false,
+            },
+        )
+        .await
+        .unwrap();
+        let r2 = upsert(
+            &pool,
+            Classroom {
+                id: String::new(),
+                room_name: "102".into(),
+                device_id: None,
+                remark: None,
+                created_at: 0,
+                updated_at: 100,
+                deleted_at: None,
+                sync_state: "synced".into(),
+                dirty: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        // 教务端删了重建 101（新 id）；随后把设备改绑到 102（更新路径）。
+        let rebuilt = Classroom {
+            id: uuid::Uuid::new_v4().to_string(),
+            room_name: "101".into(),
+            device_id: None,
+            remark: None,
+            created_at: 200,
+            updated_at: 200,
+            deleted_at: None,
+            sync_state: "pending".into(),
+            dirty: false,
+        };
+        merge_remote(&pool, &rebuilt)
+            .await
+            .expect("同名异 id 不得撞 ux_classrooms_name");
+        let moved = Classroom {
+            id: r2.id.clone(),
+            room_name: "102".into(),
+            device_id: Some("device-a".into()),
+            remark: None,
+            created_at: 0,
+            updated_at: 300,
+            deleted_at: None,
+            sync_state: "pending".into(),
+            dirty: false,
+        };
+        merge_remote(&pool, &moved)
+            .await
+            .expect("设备改绑不得撞 ux_classrooms_device");
+
+        let rooms = list(&pool).await.unwrap();
+        assert_eq!(rooms.len(), 2, "活跃教室应为重建的 101 与改绑设备的 102");
+        let by_name: std::collections::HashMap<&str, &Classroom> =
+            rooms.iter().map(|r| (r.room_name.as_str(), r)).collect();
+        assert_eq!(by_name["101"].id, rebuilt.id);
+        assert_eq!(by_name["101"].device_id, None);
+        assert_eq!(
+            by_name["102"].device_id.as_deref(),
+            Some("device-a"),
+            "设备应从旧 101 迁到 102"
+        );
+        let r1_deleted: Option<i64> =
+            sqlx::query_scalar("SELECT deleted_at FROM classrooms WHERE id=?")
+                .bind(&r1.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(r1_deleted.is_some(), "本地残留旧教室应被镜像墓碑化");
         pool.close().await;
     }
 }

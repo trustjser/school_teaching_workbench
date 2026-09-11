@@ -201,6 +201,35 @@ pub async fn merge_remote(pool: &SqlitePool, remote: &Class) -> AppResult<MergeO
             .bind(&remote.id)
             .fetch_optional(pool)
             .await?;
+    if local.is_none() {
+        // 教务端「删了重建」班级（新 id 占据同一业务键）时，本地残留的活跃旧行
+        // 会顶住部分唯一索引 ux_classes_year；按镜像状态墓碑化（不标 dirty、
+        // 不入 outbox）。班级端目录是只读镜像，教务端活跃集合即权威。
+        let stale: Option<(String,)> = sqlx::query_as(
+            "SELECT id FROM classes
+             WHERE deleted_at IS NULL AND id <> ?
+               AND school_year_id IS ? AND grade_id IS ?
+               AND COALESCE(class_no, '') = COALESCE(?, '')
+             LIMIT 1",
+        )
+        .bind(&remote.id)
+        .bind(&remote.school_year_id)
+        .bind(&remote.grade_id)
+        .bind(&remote.class_no)
+        .fetch_optional(pool)
+        .await?;
+        if let Some((stale_id,)) = stale {
+            sqlx::query(
+                "UPDATE classes SET deleted_at = ?, updated_at = ?, sync_state = 'synced', dirty = 0
+                 WHERE id = ? AND deleted_at IS NULL",
+            )
+            .bind(remote.updated_at)
+            .bind(remote.updated_at)
+            .bind(&stale_id)
+            .execute(pool)
+            .await?;
+        }
+    }
     let outcome = match local {
         None => MergeOutcome::Inserted,
         Some((local_updated,)) => decide_merge(local_updated, remote.updated_at),
@@ -235,4 +264,69 @@ pub async fn merge_remote(pool: &SqlitePool, remote: &Class) -> AppResult<MergeO
 /// 查询单个年级（内部，用于冗余字段填充）。
 async fn get_grade(pool: &SqlitePool, id: &str) -> AppResult<Option<crate::db::models::Grade>> {
     crate::db::repo::grade_repo::get(pool, id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::models::Grade;
+    use crate::db::repo::grade_repo;
+    use crate::db::{create_pool, run_migrations};
+
+    async fn fresh_pool() -> SqlitePool {
+        let dir = std::env::temp_dir().join(format!("lanwb_class_merge_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let pool = create_pool(&dir.join("test.db")).await.expect("pool");
+        run_migrations(&pool).await.expect("migrations");
+        pool
+    }
+
+    #[tokio::test]
+    async fn merge_remote_supersedes_stale_same_business_key_row() {
+        let pool = fresh_pool().await;
+        let grade = grade_repo::upsert(
+            &pool,
+            Grade { grade_name: "一年级".into(), ..Default::default() },
+        )
+        .await
+        .expect("grade");
+        let stale = upsert(
+            &pool,
+            Class {
+                grade_id: Some(grade.id.clone()),
+                school_year_id: Some("year-2028".into()),
+                class_no: Some("1".into()),
+                class_name: "一年级1班".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("stale");
+
+        // 教务端「删了重建」：同一业务键（学年+年级+班号）、新 id、新版本。
+        let remote = Class {
+            id: uuid::Uuid::new_v4().to_string(),
+            grade_id: Some(grade.id.clone()),
+            school_year_id: Some("year-2028".into()),
+            grade_no: Some(grade.grade_no.clone()),
+            grade_name: Some(grade.grade_name.clone()),
+            class_no: Some("1".into()),
+            class_name: "一年级1班".into(),
+            created_at: stale.updated_at + 100,
+            updated_at: stale.updated_at + 100,
+            ..Default::default()
+        };
+        let outcome = merge_remote(&pool, &remote)
+            .await
+            .expect("同业务键异 id 不得撞 ux_classes_year");
+        assert!(matches!(outcome, MergeOutcome::Inserted));
+        let active = list(&pool, None, Some("year-2028")).await.expect("list");
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, remote.id);
+        assert!(
+            get(&pool, &stale.id).await.expect("get").unwrap().deleted_at.is_some(),
+            "本地残留旧行应被镜像墓碑化"
+        );
+        pool.close().await;
+    }
 }
