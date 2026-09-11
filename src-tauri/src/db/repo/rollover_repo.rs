@@ -13,8 +13,10 @@
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::db::models::{Class, SchoolYear, Student};
-use crate::db::repo::{class_repo, new_id, now_ms, school_year_repo};
+use crate::db::models::{Class, Grade, Student, StudentImportRow};
+use crate::db::repo::{
+    classroom_repo, class_repo, grade_repo, new_id, now_ms, school_year_repo, student_repo,
+};
 use crate::error::{AppError, AppResult};
 
 /// 升班后的展示名：目标年级名 + 班号 + 「班」（如 一年级1班 → 二年级1班）。
@@ -579,12 +581,319 @@ async fn student_repo_get(pool: &SqlitePool, id: &str) -> AppResult<Option<Stude
     crate::db::repo::student_repo::get(pool, id).await
 }
 
+/// 绑定确认行（仅 execute 用；dry-run 忽略）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RolloverBindingChoice {
+    pub classroom_id: String,
+    /// None = 暂不绑定（保留旧绑定）。
+    pub class_id: Option<String>,
+}
+
+/// Excel 驱动换届请求（2026-09-11 设计 §4）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RolloverExcelRequest {
+    /// 'init'（首次建校）| 'rollover'（学年换届）。
+    pub mode: String,
+    #[serde(default)]
+    pub source_school_year_id: Option<String>,
+    pub new_school_year_name: String,
+    #[serde(default)]
+    pub new_school_year_no: Option<String>,
+    #[serde(default)]
+    pub new_start_date: Option<String>,
+    #[serde(default)]
+    pub new_end_date: Option<String>,
+    /// 前端解析好的整校名册行。
+    #[serde(default)]
+    pub rows: Vec<StudentImportRow>,
+    /// Step ③ 用户确认后的绑定列表；execute 缺省时仅应用 auto 建议。
+    #[serde(default)]
+    pub confirm_bindings: Option<Vec<RolloverBindingChoice>>,
+}
+
+/// 绑定建议行。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RolloverBindingSuggestion {
+    pub classroom_id: String,
+    pub room_name: String,
+    pub old_class: Option<String>,
+    pub suggested_class_id: Option<String>,
+    pub suggested_class: Option<String>,
+    /// 'auto' | 'conflict' | 'none'。
+    pub match_kind: String,
+}
+
+/// 目录 diff。
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RolloverDirectoryDiff {
+    pub new_grades: Vec<String>,
+    /// (gradeName, className)
+    pub new_classes: Vec<(String, String)>,
+    /// 系统有而 Excel 未涉及（仅提示，保留不动）。
+    pub untouched_classes: Vec<String>,
+}
+
+/// 行级错误（存在任一错误时禁止执行）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RolloverRowError {
+    pub row_index: i64,
+    pub student_no: String,
+    pub name: String,
+    pub reason: String,
+}
+
+/// 干跑 / 执行结果。
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RolloverExcelReport {
+    pub mode: String,
+    pub new_school_year_id: String,
+    pub new_school_year_name: String,
+    pub directory: RolloverDirectoryDiff,
+    pub students_added: usize,
+    pub students_updated: usize,
+    /// 目录里有、Excel 里没有的学生数（仅 rollover 模式提示，不做删除）。
+    pub students_missing: usize,
+    pub errors: Vec<RolloverRowError>,
+    pub binding_suggestions: Vec<RolloverBindingSuggestion>,
+    /// execute 实际写入的学生（命令层补发离线队列）；dry-run 为空。
+    #[serde(default)]
+    pub upserted_students: Vec<Student>,
+    #[serde(default)]
+    pub created_grades: Vec<Grade>,
+    #[serde(default)]
+    pub created_classes: Vec<Class>,
+}
+
+/// 干跑：目录 diff + 名册落位预览 + 教室绑定建议。不写库。
+pub async fn preview_excel(
+    pool: &SqlitePool,
+    req: &RolloverExcelRequest,
+) -> AppResult<RolloverExcelReport> {
+    let name = req.new_school_year_name.trim();
+    if name.is_empty() {
+        return Err(AppError::validation("新学年名称不能为空"));
+    }
+    let is_init = req.mode == "init";
+    if !is_init {
+        let src = req.source_school_year_id.as_deref().unwrap_or("").trim();
+        if src.is_empty() {
+            return Err(AppError::validation("换届模式必须选择源学年"));
+        }
+        school_year_repo::get(pool, src)
+            .await?
+            .filter(|y| y.deleted_at.is_none())
+            .ok_or_else(|| AppError::validation("源学年不存在"))?;
+    }
+
+    // 目标学年按名幂等。
+    let existing_year = school_year_repo::find_by_name(pool, name).await?;
+    let year_id = existing_year.as_ref().map(|y| y.id.clone()).unwrap_or_default();
+
+    // Excel (年级, 班级) 引用去重。
+    let mut refs: Vec<crate::db::repo::directory_repo::EnsureClassRef> = Vec::new();
+    for r in &req.rows {
+        let grade = r.grade.as_deref().map(str::trim).unwrap_or_default();
+        let class = r.class_name.as_deref().map(str::trim).unwrap_or_default();
+        if grade.is_empty() || class.is_empty() {
+            continue;
+        }
+        let rf = crate::db::repo::directory_repo::EnsureClassRef {
+            grade_name: grade.to_string(),
+            class_name: class.to_string(),
+        };
+        if !refs.contains(&rf) {
+            refs.push(rf);
+        }
+    }
+
+    // 目录 diff（相对当前库，空校 = 全新增）。
+    let all_grades = grade_repo::list(pool).await?;
+    let grade_names: std::collections::HashSet<&str> =
+        all_grades.iter().map(|g| g.grade_name.as_str()).collect();
+    let existing_classes = if year_id.is_empty() {
+        Vec::new()
+    } else {
+        class_repo::list_by_year(pool, &year_id).await?
+    };
+    let existing_keys: std::collections::HashSet<(String, String)> = existing_classes
+        .iter()
+        .map(|c| (c.grade_name.clone().unwrap_or_default(), c.class_name.clone()))
+        .collect();
+    let ref_keys: std::collections::HashSet<(String, String)> = refs
+        .iter()
+        .map(|r| (r.grade_name.clone(), r.class_name.clone()))
+        .collect();
+    let mut directory = RolloverDirectoryDiff::default();
+    for r in &refs {
+        if !grade_names.contains(r.grade_name.as_str()) {
+            directory.new_grades.push(r.grade_name.clone());
+        }
+        if !existing_keys.contains(&(r.grade_name.clone(), r.class_name.clone())) {
+            directory
+                .new_classes
+                .push((r.grade_name.clone(), r.class_name.clone()));
+        }
+    }
+    directory.new_grades.sort();
+    directory.new_grades.dedup();
+    if !is_init {
+        for c in &existing_classes {
+            if !ref_keys.contains(&(
+                c.grade_name.clone().unwrap_or_default(),
+                c.class_name.clone(),
+            )) {
+                directory
+                    .untouched_classes
+                    .push(format!("{}{}", c.grade_name.clone().unwrap_or_default(), c.class_name));
+            }
+        }
+    }
+
+    // 行校验（row_index 对齐 Excel 1-based 行号：首行表头，数据从 2 起）。
+    let mut errors: Vec<RolloverRowError> = Vec::new();
+    let mut seen_no: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut seen_seat: std::collections::HashMap<(String, i64), String> = std::collections::HashMap::new();
+    for (i, r) in req.rows.iter().enumerate() {
+        let row_index = (i + 2) as i64;
+        let grade = r.grade.as_deref().map(str::trim).unwrap_or_default();
+        let class = r.class_name.as_deref().map(str::trim).unwrap_or_default();
+        let mut fail = |reason: String| {
+            errors.push(RolloverRowError {
+                row_index,
+                student_no: r.student_no.clone(),
+                name: r.name.clone(),
+                reason,
+            });
+        };
+        if grade.is_empty() || class.is_empty() {
+            fail("年级或班级为空".to_string());
+            continue;
+        }
+        if r.student_no.trim().is_empty() || r.name.trim().is_empty() {
+            fail("学号或姓名为空".to_string());
+            continue;
+        }
+        let key = (class.to_string(), r.student_no.trim().to_string());
+        if !seen_no.insert(key) {
+            fail("同班级学号重复".to_string());
+            continue;
+        }
+        if let Some(seat) = r.seat_no {
+            let skey = (class.to_string(), seat);
+            if let Some(prev) = seen_seat.get(&skey) {
+                fail(format!("座位号 {seat} 与 {prev} 冲突"));
+                continue;
+            }
+            seen_seat.insert(skey, r.name.clone());
+        }
+    }
+
+    // 缺席学生（仅 rollover 模式提示）。
+    let mut students_missing = 0usize;
+    if !is_init && !existing_classes.is_empty() {
+        let excel_nos: std::collections::HashSet<&str> =
+            req.rows.iter().map(|r| r.student_no.trim()).collect();
+        for c in &existing_classes {
+            let students = student_repo::list_by_class(pool, &c.id).await?;
+            students_missing += students
+                .iter()
+                .filter(|s| s.deleted_at.is_none() && !excel_nos.contains(s.student_no.as_str()))
+                .count();
+        }
+    }
+
+    // 绑定建议（rollover 模式）。
+    let binding_suggestions = if is_init {
+        Vec::new()
+    } else {
+        build_binding_suggestions(
+            pool,
+            req.source_school_year_id.as_deref().unwrap_or(""),
+            &existing_classes,
+        )
+        .await?
+    };
+
+    Ok(RolloverExcelReport {
+        mode: req.mode.clone(),
+        new_school_year_id: year_id,
+        new_school_year_name: name.to_string(),
+        directory,
+        students_added: 0,
+        students_updated: 0,
+        students_missing,
+        errors,
+        binding_suggestions,
+        upserted_students: Vec::new(),
+        created_grades: Vec::new(),
+        created_classes: Vec::new(),
+    })
+}
+
+/// 按旧绑定教室 → 同名新班级生成建议；一名多教室或无同名 → conflict/none。
+async fn build_binding_suggestions(
+    pool: &SqlitePool,
+    source_year_id: &str,
+    new_classes: &[Class],
+) -> AppResult<Vec<RolloverBindingSuggestion>> {
+    let rooms = classroom_repo::list(pool).await?;
+    let assignments = classroom_repo::list_assignments(pool, None).await?;
+    let src_classes = class_repo::list_by_year(pool, source_year_id).await?;
+    let src_name: std::collections::HashMap<&str, &str> = src_classes
+        .iter()
+        .map(|c| (c.id.as_str(), c.class_name.as_str()))
+        .collect();
+    let mut out: Vec<RolloverBindingSuggestion> = Vec::new();
+    for a in assignments.iter().filter(|a| a.school_year_id == source_year_id) {
+        let Some(room) = rooms.iter().find(|r| r.id == a.classroom_id) else {
+            continue;
+        };
+        let old = src_name.get(a.class_id.as_str()).copied();
+        let target = old.and_then(|n| {
+            new_classes
+                .iter()
+                .find(|c| c.class_name == n)
+                .map(|c| (c.id.clone(), c.class_name.clone()))
+        });
+        out.push(RolloverBindingSuggestion {
+            classroom_id: room.id.clone(),
+            room_name: room.room_name.clone(),
+            old_class: old.map(str::to_string),
+            suggested_class_id: target.as_ref().map(|(id, _)| id.clone()),
+            suggested_class: target.as_ref().map(|(_, n)| n.clone()),
+            match_kind: if target.is_some() { "auto" } else { "none" }.to_string(),
+        });
+    }
+    // 同一新班级被多间教室建议 → 全部降级 conflict。
+    let mut use_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for s in &out {
+        if let Some(id) = &s.suggested_class_id {
+            *use_count.entry(id.clone()).or_default() += 1;
+        }
+    }
+    for s in &mut out {
+        if let Some(id) = &s.suggested_class_id {
+            if use_count.get(id.as_str()).copied().unwrap_or(0) > 1 {
+                s.match_kind = "conflict".to_string();
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::repo::{class_repo, grade_repo, school_year_repo, student_repo};
     use crate::db::{create_pool, run_migrations};
-    use crate::db::models::{Grade, Student};
+    use crate::db::models::{Grade, SchoolYear, Student, StudentImportRow};
+    use crate::db::repo::rollover_repo::{preview_excel, RolloverExcelRequest};
 
     async fn fresh_pool() -> SqlitePool {
         let dir = std::env::temp_dir().join(format!("lanwb_rollover_{}", uuid::Uuid::new_v4()));
@@ -780,5 +1089,53 @@ mod tests {
         let retained = student_repo::get(&pool, &retain_id).await.unwrap().unwrap();
         assert_eq!(retained.class_id.as_deref(), Some(class_ids[0].as_str()), "留级学生班级不动");
         assert_eq!(retained.status, "active");
+    }
+
+    fn excel_req(mode: &str, name: &str, rows: Vec<StudentImportRow>) -> RolloverExcelRequest {
+        RolloverExcelRequest {
+            mode: mode.to_string(),
+            source_school_year_id: None,
+            new_school_year_name: name.to_string(),
+            new_school_year_no: None,
+            new_start_date: None,
+            new_end_date: None,
+            rows,
+            confirm_bindings: None,
+        }
+    }
+
+    fn row(no: &str, name: &str, grade: &str, class: &str, seat: Option<i64>) -> StudentImportRow {
+        StudentImportRow {
+            student_no: no.to_string(),
+            name: name.to_string(),
+            gender: None,
+            grade: Some(grade.to_string()),
+            class_name: Some(class.to_string()),
+            class_id: None,
+            seat_no: seat,
+            phone: None,
+            note: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn preview_excel_reports_errors_and_diff() {
+        let pool = fresh_pool().await; // 本文件既有 helper（brief 的 test_pool 即此）
+        let req = excel_req(
+            "init",
+            "2026-2027学年",
+            vec![
+                row("S1", "张三", "一年级", "一年级1班", Some(1)),
+                row("S2", "李四", "", "一年级1班", None),      // 缺年级 → 错误行
+                row("S1", "王五", "一年级", "一年级1班", None), // 同班同学号重复 → 错误行
+            ],
+        );
+        let report = preview_excel(&pool, &req).await.expect("preview");
+        assert_eq!(report.errors.len(), 2);
+        assert_eq!(report.directory.new_grades, vec!["一年级".to_string()]);
+        assert_eq!(
+            report.directory.new_classes,
+            vec![("一年级".to_string(), "一年级1班".to_string())]
+        );
     }
 }

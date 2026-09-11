@@ -127,6 +127,20 @@ pub async fn list_by_import_batch(pool: &SqlitePool, batch_id: &str) -> AppResul
     .await?)
 }
 
+/// 按班级目录 ID 查询有效学生（换届预览统计缺席名单用）。
+pub async fn list_by_class(pool: &SqlitePool, class_id: &str) -> AppResult<Vec<Student>> {
+    let rows = sqlx::query_as::<_, Student>(
+        "SELECT id, student_no, name, gender, grade, class_name, class_id, seat_no, status, status_since,
+                note, phone, import_batch_id, created_at, updated_at, deleted_at, sync_state, dirty
+         FROM students WHERE class_id = ? AND deleted_at IS NULL
+         ORDER BY COALESCE(seat_no, 999999), student_no",
+    )
+    .bind(class_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 /// 按 `(grade, class_name, student_no)` 查询有效学生。
 pub async fn find_by_no(
     pool: &SqlitePool,
