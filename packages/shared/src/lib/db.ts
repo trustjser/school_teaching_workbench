@@ -451,6 +451,8 @@ export interface RolloverExcelReport {
   errors: RolloverRowError[];
   bindingSuggestions: RolloverBindingSuggestion[];
   upsertedStudents: unknown[];
+  /** execute 实际落库的教室绑定 (classroomId, classId)；dry-run 为空。 */
+  appliedBindings?: [string, string][];
   createdGrades: unknown[];
   createdClasses: unknown[];
 }

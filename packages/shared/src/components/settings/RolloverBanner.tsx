@@ -35,14 +35,17 @@ export function RolloverBanner(): JSX.Element | null {
   }, []);
   if (!data) return null;
   return (
-    <div className={cn('flex items-center justify-between gap-2 rounded-lg border border-brand-400 bg-brand-50 px-3 py-2')}>
-      <p className="text-sm text-ink">
-        已切换到 {data.schoolYearName} · {data.gradeName ?? ''}{data.className}
-      </p>
-      <button
-        className="rounded px-2 py-1 text-sm text-ink-soft hover:bg-surface-muted"
-        onClick={() => { localStorage.removeItem(KEY); setData(null); }}
-      >知道了</button>
+    // 包装（对齐 AppShell 内容区宽度）在组件内部：无数据时不渲染，避免留下 pt-6 空占位。
+    <div className="mx-auto w-full max-w-[1800px] px-6 pt-6">
+      <div className={cn('flex items-center justify-between gap-2 rounded-lg border border-brand-400 bg-brand-50 px-3 py-2')}>
+        <p className="text-sm text-ink">
+          已切换到 {data.schoolYearName} · {data.gradeName ?? ''}{data.className}
+        </p>
+        <button
+          className="rounded px-2 py-1 text-sm text-ink-soft hover:bg-surface-muted"
+          onClick={() => { localStorage.removeItem(KEY); setData(null); }}
+        >知道了</button>
+      </div>
     </div>
   );
 }

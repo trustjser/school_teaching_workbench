@@ -6,6 +6,7 @@ import { TopBar } from './TopBar';
 import { StatusBar } from './StatusBar';
 import { useBigScreen } from '@shared/hooks/useBigScreen';
 import { useAutoSync } from '@shared/hooks/useAutoSync';
+import { usePeriodicDirectorySync } from '@shared/hooks/usePeriodicDirectorySync';
 import { PageTransition } from '@shared/components/motion/PageTransition';
 import { RolloverBanner } from '@shared/components/settings/RolloverBanner';
 import type { AppTarget } from '@shared/app-target';
@@ -37,6 +38,9 @@ export function AppShell({
 
   // 同步驱动：仅在进入主界面后启用
   useAutoSync(true);
+
+  // 班级端周期目录同步：换届后不打开设置页也能自动切绑（final review F2）
+  usePeriodicDirectorySync(appTarget === 'classroom');
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-surface-sunken surface-grid">
@@ -85,12 +89,9 @@ export function AppShell({
         )}
 
         <main className="min-w-0 flex-1 overflow-y-auto">
-          {/* 换届自动切换横幅：仅班级端展示（数据只由班级端目录同步写入），非 fixed、不遮挡内容 */}
-          {appTarget === 'classroom' && (
-            <div className="mx-auto w-full max-w-[1800px] px-6 pt-6">
-              <RolloverBanner />
-            </div>
-          )}
+          {/* 换届自动切换横幅：仅班级端展示（数据只由班级端目录同步写入），非 fixed、不遮挡内容。
+              无数据时 RolloverBanner 返回 null，不渲染带 pt-6 的占位包装（final review F6）。 */}
+          {appTarget === 'classroom' && <RolloverBanner />}
           <PageTransition routeKey={location.pathname} className="mx-auto w-full max-w-[1800px] px-6 py-6">
             {children}
           </PageTransition>

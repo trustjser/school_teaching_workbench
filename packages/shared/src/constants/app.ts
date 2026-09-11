@@ -57,6 +57,9 @@ export const AUTO_SYNC_INTERVAL_MS = 15000;
 /** 设备列表自动刷新周期（毫秒） */
 export const DEVICE_REFRESH_INTERVAL_MS = 20000;
 
+/** 班级端目录同步周期（毫秒）——换届后自动切绑的兜底轮询 */
+export const DIRECTORY_SYNC_INTERVAL_MS = 60000;
+
 /** 大屏 refresh：教务处大屏轮询周期（毫秒） */
 export const BOARD_REFRESH_INTERVAL_MS = 20000;
 

@@ -49,10 +49,13 @@ export function RolloverWizardModal({ open, mode, onClose, onDone }: RolloverWiz
   const [decided, setDecided] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<RolloverExcelReport | null>(null);
   const [classes, setClasses] = useState<{ id: string; label: string }[]>([]);
+  /** 目标学年未建时的按名兜底选项（value = 班级名，执行时按名解析）。 */
+  const [nameOptions, setNameOptions] = useState<{ id: string; label: string }[]>([]);
 
   useEffect(() => {
     if (!open) return;
     setStep(0); setRows([]); setPreview(null); setResult(null); setError(null); setChoices([]); setDecided(new Set());
+    setStartDate(''); setEndDate(''); setNameOptions([]);
     void (async () => {
       const list = await schoolYearList().catch(() => []);
       setYears(list);
@@ -156,9 +159,15 @@ export function RolloverWizardModal({ open, mode, onClose, onDone }: RolloverWiz
   };
 
   // 下拉决策：空值 = 显式「暂不绑定」；任一操作均记入 decided（解除 conflict 阻塞）。
+  // 值命中 id 选项 → 按 id 绑定；命中按名兜底选项 → classId 置空 + 记名字（执行时解析）。
   const setChoice = (classroomId: string, value: string): void => {
+    const isName = value !== '' && nameOptions.some((o) => o.id === value);
     setChoices((prev) => prev.map((c) => (c.classroomId === classroomId
-      ? (value ? { ...c, classId: value, className: null } : { ...c, classId: null, className: null })
+      ? (value
+        ? (isName
+          ? { ...c, classId: null, className: value }
+          : { ...c, classId: value, className: null })
+        : { ...c, classId: null, className: null })
       : c)));
     setDecided((prev) => new Set(prev).add(classroomId));
   };
@@ -176,14 +185,24 @@ export function RolloverWizardModal({ open, mode, onClose, onDone }: RolloverWiz
     setDecided((prev) => new Set([...prev, ...next.keys()]));
   };
 
-  // Step ③ 需要的可选班级下拉（新学年目录）。
+  // Step ③ 需要的可选班级下拉（新学年目录）。目标学年未建（首次换届）时目录过滤
+  // 结果为空 → 用 bindingSuggestions 中的建议班级名兜底（value=名字，执行时按名解析）。
   useEffect(() => {
     if (step !== 2 || !preview) return;
     void (async () => {
       const list = await classList(null, null).catch(() => []);
-      setClasses(list
+      const filtered = list
         .filter((c) => c.schoolYearId === (result?.newSchoolYearId ?? preview.newSchoolYearId))
-        .map((c) => ({ id: c.id, label: `${c.gradeName ?? ''}${c.className}` })));
+        .map((c) => ({ id: c.id, label: `${c.gradeName ?? ''}${c.className}` }));
+      setClasses(filtered);
+      if (filtered.length > 0) {
+        setNameOptions([]);
+        return;
+      }
+      const names = [...new Set(preview.bindingSuggestions
+        .map((s) => s.suggestedClass?.trim())
+        .filter((n): n is string => Boolean(n)))];
+      setNameOptions(names.map((n) => ({ id: n, label: `${n}（按名）` })));
     })();
   }, [step, preview, result]);
 
@@ -298,11 +317,16 @@ export function RolloverWizardModal({ open, mode, onClose, onDone }: RolloverWiz
                                 <select
                                   className={cn('w-full rounded border bg-surface-raised px-2 py-1 text-ink min-w-0',
                                     isConflict && !decided.has(s.classroomId) ? 'border-amber-500' : 'border-surface-border')}
-                                  value={chosen?.classId ?? ''}
+                                  value={chosen?.classId ?? chosen?.className ?? ''}
                                   onChange={(e) => setChoice(s.classroomId, e.target.value)}
                                 >
                                   <option value="">暂不绑定</option>
                                   {classes.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                                  {nameOptions.length > 0 && (
+                                    <optgroup label="按名匹配（目标学年未建）">
+                                      {nameOptions.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                                    </optgroup>
+                                  )}
                                 </select>
                                 {s.suggestedClass && (
                                   <p className="mt-0.5 text-xs text-ink-muted">建议：{s.suggestedClass}</p>

@@ -12,6 +12,8 @@ interface BindingSuggestion {
 interface ExecutionSummary {
   rebind?: unknown;
   bindingSuggestions?: BindingSuggestion[];
+  /** execute 实际落库的教室绑定 (classroomId, classId)。 */
+  appliedBindings?: [string, string][];
 }
 
 function parseSummary(raw: string): ExecutionSummary | null {
@@ -121,6 +123,18 @@ export function RolloverRecordsModal({ open, onClose }: { open: boolean; onClose
               ) : summary.rebind ? (
                 <p className="mt-1 break-all text-sm text-ink-muted">{JSON.stringify(summary.rebind)}</p>
               ) : null}
+              {summary?.appliedBindings && summary.appliedBindings.length > 0 && (
+                <div className="mt-2">
+                  <p className="text-sm font-medium text-ink">实际绑定</p>
+                  <ul className="mt-1 space-y-0.5 text-sm text-ink-muted">
+                    {summary.appliedBindings.map(([classroomId, classId]) => {
+                      const room = summary.bindingSuggestions?.find((s) => s.classroomId === classroomId)?.roomName
+                        ?? classroomId.slice(0, 8);
+                      return <li key={classroomId}>{room} → {classId.slice(0, 8)}</li>;
+                    })}
+                  </ul>
+                </div>
+              )}
             </div>
           );
         })}

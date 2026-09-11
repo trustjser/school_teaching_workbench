@@ -105,6 +105,9 @@ pub struct RolloverExcelReport {
     /// execute 实际写入的学生（命令层补发离线队列）；dry-run 为空。
     #[serde(default)]
     pub upserted_students: Vec<Student>,
+    /// execute 实际落库的教室绑定 (classroom_id, class_id)；dry-run 为空。
+    #[serde(default)]
+    pub applied_bindings: Vec<(String, String)>,
     #[serde(default)]
     pub created_grades: Vec<Grade>,
     #[serde(default)]
@@ -280,6 +283,7 @@ pub async fn preview_excel(
         errors,
         binding_suggestions,
         upserted_students: Vec::new(),
+        applied_bindings: Vec::new(),
         created_grades: Vec::new(),
         created_classes: Vec::new(),
     })
@@ -503,6 +507,7 @@ pub async fn execute_excel(
             })
             .collect(),
     };
+    let mut applied_bindings: Vec<(String, String)> = Vec::new();
     for c in &choices {
         // 最终 class_id 解析：显式 id 直接用；仅名字 → 从事务内目录预置结果精确匹配；
         // 两者皆无 → 暂不绑定（跳过，保留旧绑定语义由执行记录页仲裁）。
@@ -539,12 +544,14 @@ pub async fn execute_excel(
             .bind(&aid)
             .bind(&c.classroom_id)
             .bind(&year_id)
-            .bind(class_id)
+            .bind(&class_id)
             .bind(now)
             .bind(now)
             .execute(&mut *tx)
             .await?;
+        applied_bindings.push((c.classroom_id.clone(), class_id));
     }
+    report.applied_bindings = applied_bindings;
 
     // ---- 5. 审计（提交前填齐报告字段，summary 才是执行后的完整快照）----
     report.new_school_year_id = year_id.clone();
@@ -891,8 +898,9 @@ mod tests {
             .expect("audit");
         assert_eq!(n.0, 2);
         // 首次执行的审计快照必须含新建班级（与返回值一致，不存在「未新建任何班级」的矛盾记录）。
+        // rowid 单调递增：同毫秒执行时排序仍幂等稳定（final review F5）。
         let (summary_json,): (String,) =
-            sqlx::query_as("SELECT summary_json FROM rollover_executions ORDER BY created_at LIMIT 1")
+            sqlx::query_as("SELECT summary_json FROM rollover_executions ORDER BY rowid LIMIT 1")
                 .fetch_one(&pool)
                 .await
                 .expect("summary");
@@ -1080,6 +1088,29 @@ mod tests {
             .expect("bound class");
         assert_eq!(bound.0, "一年级1班", "按名字解析到的班级应正确");
         assert_eq!(bound.1, report.new_school_year_id, "绑定班级应属于新学年");
+
+        // 审计：applied_bindings 与返回值一致且非空（final review F3）。
+        assert_eq!(report.applied_bindings.len(), 1, "应记录实际落库的绑定");
+        assert_eq!(
+            report.applied_bindings[0],
+            (r.id.clone(), rows[0].0.clone()),
+            "applied_bindings 应为 (教室 id, 解析后班级 id)"
+        );
+        let (summary_json,): (String,) =
+            sqlx::query_as("SELECT summary_json FROM rollover_executions ORDER BY rowid LIMIT 1")
+                .fetch_one(&pool)
+                .await
+                .expect("summary");
+        let audited: serde_json::Value =
+            serde_json::from_str(&summary_json).expect("summary_json 反序列化");
+        let audited_bindings: Vec<(String, String)> = serde_json::from_value(
+            audited["appliedBindings"].clone(),
+        )
+        .expect("appliedBindings 反序列化");
+        assert_eq!(
+            audited_bindings, report.applied_bindings,
+            "审计快照的 applied_bindings 应与返回值一致"
+        );
     }
 
     /// finding #2：confirm_bindings 中名字解析到 0 个班级 id → 校验错误、整体回滚。
