@@ -15,7 +15,8 @@ use sqlx::SqlitePool;
 
 use crate::db::models::{Class, Grade, Student, StudentImportRow};
 use crate::db::repo::{
-    classroom_repo, class_repo, grade_repo, new_id, now_ms, school_year_repo, student_repo,
+    classroom_repo, class_repo, directory_repo, grade_repo, new_id, now_ms, school_year_repo,
+    student_repo,
 };
 use crate::error::{AppError, AppResult};
 
@@ -887,6 +888,225 @@ async fn build_binding_suggestions(
     Ok(out)
 }
 
+/// 性别归一化：与 `student_repo::normalize_gender` 同口径（该函数私有，此处对齐实现）。
+fn normalize_gender(raw: &str) -> String {
+    match raw.trim() {
+        "男" | "M" | "m" => "male".to_string(),
+        "女" | "F" | "f" => "female".to_string(),
+        _ => "unknown".to_string(),
+    }
+}
+
+/// 执行：建学年（按名幂等）→ 目录预置 → 名册落位 → 教室绑定 → 审计，单事务；
+/// `current_school_year_id` 在事务提交后写入（单条幂等 upsert，失败重跑自愈）。
+pub async fn execute_excel(
+    pool: &SqlitePool,
+    req: &RolloverExcelRequest,
+) -> AppResult<RolloverExcelReport> {
+    let mut report = preview_excel(pool, req).await?;
+    if !report.errors.is_empty() {
+        return Err(AppError::validation(format!(
+            "名册存在 {} 行错误，请先修正（详见预览错误列表）",
+            report.errors.len()
+        )));
+    }
+    let name = req.new_school_year_name.trim().to_string();
+    let is_init = req.mode == "init";
+    let now = now_ms();
+
+    let mut tx = pool.begin().await?;
+
+    // ---- 1. 学年（按名幂等；INSERT 原样照抄旧 execute 中建学年的语句）----
+    let year_id = match school_year_repo::find_by_name(pool, &name).await? {
+        Some(y) => y.id,
+        None => {
+            let id = new_id();
+            sqlx::query(
+                "INSERT INTO school_years (id, school_year_no, school_year_name, start_date, end_date,
+                     sort_order, remark, created_at, updated_at, deleted_at, sync_state, dirty)
+                 VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 'pending', 1)",
+            )
+            .bind(&id)
+            .bind(req.new_school_year_no.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+            .bind(&name)
+            .bind(req.new_start_date.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+            .bind(req.new_end_date.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+            .bind(now)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+            id
+        }
+    };
+
+    // ---- 2. 目录预置（同事务；Excel (年级, 班级) 引用去重）----
+    let mut refs: Vec<directory_repo::EnsureClassRef> = Vec::new();
+    for r in &req.rows {
+        let grade = r.grade.as_deref().map(str::trim).unwrap_or_default();
+        let class = r.class_name.as_deref().map(str::trim).unwrap_or_default();
+        if grade.is_empty() || class.is_empty() {
+            continue;
+        }
+        let rf = directory_repo::EnsureClassRef {
+            grade_name: grade.to_string(),
+            class_name: class.to_string(),
+        };
+        if !refs.contains(&rf) {
+            refs.push(rf);
+        }
+    }
+    let ensured = directory_repo::ensure_classes_tx(&mut tx, &year_id, &refs).await?;
+
+    // ---- 3. 名册落位（与 student_repo::batch_import 同口径：按 (grade, class_name,
+    //         student_no) 业务键查重复用 id，upsert_in_tx 全量覆盖）----
+    let mut upserted: Vec<Student> = Vec::new();
+    let mut students_added = 0usize;
+    let mut students_updated = 0usize;
+    for r in &req.rows {
+        // 合法行在 preview_excel 已校验；此处按同口径 trim 后跳过残行（防御）。
+        let grade = r.grade.as_deref().map(str::trim).unwrap_or_default();
+        let class = r.class_name.as_deref().map(str::trim).unwrap_or_default();
+        if grade.is_empty() || class.is_empty() || r.student_no.trim().is_empty() || r.name.trim().is_empty() {
+            continue;
+        }
+        // class_id 从事务内的目录预置结果解析（pool 读不到未提交的新建班级）。
+        let Some((_, _, class_id)) = ensured
+            .class_map
+            .iter()
+            .find(|(g, c, _)| g == grade && c == class)
+        else {
+            continue;
+        };
+        let gender = match r.gender.as_deref().unwrap_or("unknown") {
+            "male" | "female" | "unknown" => {
+                r.gender.clone().unwrap_or_else(|| "unknown".to_string())
+            }
+            other => normalize_gender(other),
+        };
+        let mut student = Student {
+            id: String::new(),
+            student_no: r.student_no.trim().to_string(),
+            name: r.name.trim().to_string(),
+            gender,
+            grade: Some(grade.to_string()),
+            class_name: Some(class.to_string()),
+            class_id: Some(class_id.clone()),
+            seat_no: r.seat_no,
+            status: "active".to_string(),
+            status_since: Some(now),
+            note: r.note.clone(),
+            phone: r.phone.clone(),
+            // 换届流水线没有导入批次概念，与 batch_import 唯一不同点：不写 import_batch_id。
+            import_batch_id: None,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            sync_state: "pending".to_string(),
+            dirty: true,
+        };
+        let existing: Option<(String,)> = sqlx::query_as(
+            "SELECT id FROM students
+             WHERE COALESCE(grade, '') = COALESCE(?, '')
+               AND COALESCE(class_name, '') = COALESCE(?, '')
+               AND student_no = ? AND deleted_at IS NULL LIMIT 1",
+        )
+        .bind(&student.grade)
+        .bind(&student.class_name)
+        .bind(&student.student_no)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some((id,)) = existing {
+            student.id = id;
+            students_updated += 1;
+        } else {
+            student.id = new_id();
+            students_added += 1;
+        }
+        student_repo::upsert_in_tx(&mut tx, &student).await?;
+        upserted.push(student);
+    }
+
+    // ---- 4. 教室绑定（确认列表优先；缺省仅应用 auto 建议；upsert SQL 原样
+    //         取自 classroom_repo::assign，幂等）----
+    let choices: Vec<RolloverBindingChoice> = match &req.confirm_bindings {
+        Some(list) => list.clone(),
+        None => report
+            .binding_suggestions
+            .iter()
+            .filter(|s| s.match_kind == "auto")
+            .map(|s| RolloverBindingChoice {
+                classroom_id: s.classroom_id.clone(),
+                class_id: s.suggested_class_id.clone(),
+            })
+            .collect(),
+    };
+    for c in &choices {
+        let Some(class_id) = c.class_id.as_deref() else {
+            continue;
+        };
+        let existing: Option<(String,)> = sqlx::query_as("SELECT id FROM classroom_assignments WHERE classroom_id=? AND school_year_id=? AND deleted_at IS NULL")
+            .bind(&c.classroom_id)
+            .bind(&year_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        let aid = existing.map(|x| x.0).unwrap_or_else(new_id);
+        sqlx::query("INSERT INTO classroom_assignments (id,classroom_id,school_year_id,class_id,created_at,updated_at,deleted_at,sync_state,dirty)
+            VALUES (?,?,?,?,?,?,NULL,'pending',1) ON CONFLICT(id) DO UPDATE SET class_id=excluded.class_id,updated_at=excluded.updated_at,deleted_at=NULL,sync_state='pending',dirty=1")
+            .bind(&aid)
+            .bind(&c.classroom_id)
+            .bind(&year_id)
+            .bind(class_id)
+            .bind(now)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    // ---- 5. 审计（提交前填齐报告字段，summary 才是执行后的完整快照）----
+    report.new_school_year_id = year_id.clone();
+    report.upserted_students = upserted;
+    report.students_added = students_added;
+    report.students_updated = students_updated;
+    let summary = serde_json::to_string(&report).unwrap_or_default();
+    sqlx::query(
+        "INSERT INTO rollover_executions (id, executed_at, mode, source_year_id, new_year_id, summary_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(new_id())
+    .bind(now)
+    .bind(req.mode.as_str())
+    .bind(if is_init { None } else { req.source_school_year_id.as_deref() })
+    .bind(&year_id)
+    .bind(&summary)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    // ---- 6. 收尾：实际新建实体回读（提交后 pool 可见）+ 权威当前年 ----
+    let mut created_grades: Vec<Grade> = Vec::new();
+    for id in &ensured.created_grade_ids {
+        if let Some(g) = grade_repo::get(pool, id).await? {
+            created_grades.push(g);
+        }
+    }
+    let mut created_classes: Vec<Class> = Vec::new();
+    for id in &ensured.created_class_ids {
+        if let Some(c) = class_repo::get(pool, id).await? {
+            created_classes.push(c);
+        }
+    }
+    report.created_grades = created_grades;
+    report.created_classes = created_classes;
+
+    // 权威当前年：事务外单条幂等写；失败重跑自愈。
+    crate::db::repo::settings_repo::set_raw(pool, "current_school_year_id", Some(&year_id), "string")
+        .await?;
+
+    Ok(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1282,5 +1502,66 @@ mod tests {
             report.directory.new_classes,
             vec![("一年级".to_string(), "一年级1班".to_string())]
         );
+    }
+
+    /// execute：建学年 + 目录预置 + 名册落位 + 权威年 + 审计；
+    /// 幂等重跑复用学年/班级，审计恰为 2 行。
+    #[tokio::test]
+    async fn execute_excel_creates_year_classes_students_and_settings() {
+        let pool = fresh_pool().await;
+        let req = excel_req(
+            "init",
+            "2026-2027学年",
+            vec![row("S1", "张三", "一年级", "一年级1班", Some(1))],
+        );
+        let report = super::execute_excel(&pool, &req).await.expect("execute");
+        assert!(!report.new_school_year_id.is_empty());
+        assert_eq!(report.upserted_students.len(), 1);
+        assert_eq!(report.students_added, 1);
+        assert_eq!(report.created_classes.len(), 1, "首次执行新建 1 个班");
+        // 幂等：重跑复用学年，不重复建班。
+        let again = super::execute_excel(&pool, &req).await.expect("re-execute");
+        assert_eq!(again.new_school_year_id, report.new_school_year_id);
+        assert!(again.created_classes.is_empty());
+        assert_eq!(again.students_added, 0, "重跑按业务键复用学生");
+        assert_eq!(again.students_updated, 1);
+        // 权威年已写入。
+        let cur = crate::db::repo::settings_repo::get_string(&pool, "current_school_year_id", "")
+            .await
+            .expect("settings");
+        assert_eq!(cur, report.new_school_year_id);
+        // 审计已落（两次执行各 1 行）。
+        let n: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM rollover_executions")
+            .fetch_one(&pool)
+            .await
+            .expect("audit");
+        assert_eq!(n.0, 2);
+    }
+
+    /// 名册存在错误行时禁止执行：不建学年、不留审计。
+    #[tokio::test]
+    async fn execute_excel_rejects_rows_with_errors() {
+        let pool = fresh_pool().await;
+        let req = excel_req(
+            "init",
+            "2026-2027学年",
+            vec![
+                row("S1", "张三", "一年级", "一年级1班", Some(1)),
+                row("S2", "李四", "", "一年级1班", None), // 缺年级 → 错误行
+            ],
+        );
+        assert!(super::execute_excel(&pool, &req).await.is_err());
+        assert!(
+            school_year_repo::find_by_name(&pool, "2026-2027学年")
+                .await
+                .expect("year")
+                .is_none(),
+            "错误行必须整体阻断，不得留下半个学年"
+        );
+        let n: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM rollover_executions")
+            .fetch_one(&pool)
+            .await
+            .expect("audit");
+        assert_eq!(n.0, 0);
     }
 }

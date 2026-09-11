@@ -425,8 +425,8 @@ pub async fn batch_import(
     })
 }
 
-/// 在事务内写入单条学生（供批量导入使用）。
-async fn upsert_in_tx(
+/// 在事务内写入单条学生（供批量导入、换届执行等调用方复用）。
+pub(crate) async fn upsert_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     student: &Student,
 ) -> AppResult<()> {
