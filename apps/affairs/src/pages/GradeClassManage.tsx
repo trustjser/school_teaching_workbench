@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CalendarPlus, ArrowRightLeft, Copy, ListPlus, Pencil, Plus, Trash2, Users, Monitor } from 'lucide-react';
+import { CalendarPlus, ArrowRightLeft, Copy, History, ListPlus, Pencil, Plus, Trash2, Users, Monitor } from 'lucide-react';
 import { Card } from '@shared/components/ui/Card';
 import { Button } from '@shared/components/ui/Button';
 import { Input } from '@shared/components/ui/Input';

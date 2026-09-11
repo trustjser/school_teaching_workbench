@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Modal } from '@shared/components/ui/Modal';
 import { cn } from '@shared/lib/cn';
-import { rolloverExecutionsList, rolloverRebind, classroomList, classList, schoolYearList, type RolloverExecution } from '@shared/lib/db';
+import { rolloverExecutionsList, rolloverRebind, classList, schoolYearList, type RolloverExecution } from '@shared/lib/db';
 import { useAppStore } from '@shared/store/useAppStore';
 
 interface BindingSuggestion {
@@ -85,7 +85,7 @@ export function RolloverRecordsModal({ open, onClose }: { open: boolean; onClose
         {records.map((rec) => {
           const summary = parseSummary(rec.summaryJson);
           return (
-            <div key={rec.id} className={cn('rounded-lg border border-surface-border p-3')}>
+            <div key={rec.id} className="rounded-lg border border-surface-border p-3">
               <p className="text-sm font-medium text-ink">
                 {modeLabel(rec.mode)} · {new Date(rec.executedAt).toLocaleString()}
               </p>
