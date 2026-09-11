@@ -535,4 +535,59 @@ mod tests {
         client.close().await;
         std::fs::remove_dir_all(client_dir).ok();
     }
+
+    /// 回归：快照携带两个同名活跃学年（如重复「删了重建」/ 半途崩溃残留），
+    /// 且后到的旧行走更新路径会被 upsert 的 `SET deleted_at = NULL` 复活成活跃——
+    /// 修复前会撞唯一索引 ux_school_years_name（code 2067），且因快照顺序而时好时坏。
+    /// 现在插入与更新路径都先墓碑化同名异 id 旧行，绝不再撞唯一索引。
+    #[tokio::test]
+    async fn apply_snapshot_survives_same_named_year_update_path() {
+        let client_dir = std::env::temp_dir()
+            .join(format!("lanwb_same_name_year_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&client_dir).unwrap();
+        let client = create_pool(&client_dir.join("c.db")).await.unwrap();
+        run_migrations(&client).await.unwrap();
+
+        // 客户端已有一个活跃学年 X（id 固定，模拟早于本次重建即已同步）。
+        school_year_repo::upsert(
+            &client,
+            SchoolYear {
+                id: "X-id".into(),
+                school_year_name: "2028届".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        // 快照携带两个同名活跃学年：Y（新 id，先到）→ X（同 id，后到，走更新路径复活）。
+        let y = SchoolYear {
+            id: "Y-id".into(),
+            school_year_name: "2028届".into(),
+            ..Default::default()
+        };
+        let x = SchoolYear {
+            id: "X-id".into(),
+            school_year_name: "2028届".into(),
+            ..Default::default()
+        };
+        let snapshot = super::DirectorySnapshot {
+            school_years: vec![y, x],
+            grades: vec![],
+            classes: vec![],
+            classrooms: vec![],
+            assignments: vec![],
+        };
+        super::apply_snapshot(&client, &snapshot)
+            .await
+            .expect("同名学年不得撞 ux_school_years_name（回归：2067 更新路径复活）");
+
+        // 最终应恰好剩一个活跃同名学年（后处理者胜出），不得 2067、不得双活。
+        let active = school_year_repo::list(&client).await.unwrap();
+        assert_eq!(active.len(), 1, "活跃同名学年应只剩一个");
+        assert_eq!(active[0].school_year_name, "2028届");
+
+        client.close().await;
+        std::fs::remove_dir_all(client_dir).ok();
+    }
 }

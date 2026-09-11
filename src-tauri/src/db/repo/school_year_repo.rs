@@ -139,20 +139,21 @@ pub async fn merge_remote(pool: &SqlitePool, remote: &SchoolYear) -> AppResult<M
             .bind(&remote.id)
             .fetch_optional(pool)
             .await?;
-    if local.is_none() {
-        if let Some(stale) = find_by_name(pool, &remote.school_year_name).await? {
-            if stale.id != remote.id {
-                sqlx::query(
-                    "UPDATE school_years SET deleted_at = ?, updated_at = ?, sync_state = 'synced', dirty = 0
-                     WHERE id = ? AND deleted_at IS NULL",
-                )
-                .bind(remote.updated_at)
-                .bind(remote.updated_at)
-                .bind(&stale.id)
-                .execute(pool)
-                .await?;
-            }
-        }
+    // 镜像修正（插入与更新路径都要做）：教务端对同名学年「删了重建」（新 id）后，
+    // 本地可能仍有活跃的同名旧行顶住部分唯一索引 ux_school_years_name；班级端刷新
+    // 目录会直接报 2067。无论本行走插入还是更新，都先把其它同名异 id 的活跃旧行
+    // 墓碑化（不标 dirty、不入 outbox），避免 upsert 复活旧行时撞唯一索引。
+    if remote.deleted_at.is_none() {
+        sqlx::query(
+            "UPDATE school_years SET deleted_at = ?, updated_at = ?, sync_state = 'synced', dirty = 0
+             WHERE school_year_name = ? AND deleted_at IS NULL AND id <> ?",
+        )
+        .bind(remote.updated_at)
+        .bind(remote.updated_at)
+        .bind(&remote.school_year_name)
+        .bind(&remote.id)
+        .execute(pool)
+        .await?;
     }
     let outcome = match local {
         None => MergeOutcome::Inserted,

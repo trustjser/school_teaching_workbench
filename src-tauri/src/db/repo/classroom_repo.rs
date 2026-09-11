@@ -171,6 +171,22 @@ pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
 /// - 教务端把设备改绑到另一教室 → 清掉本地旧教室上的设备占用，避免顶住
 ///   `ux_classrooms_device`。更新与插入路径都要清：先到哪条都能收敛。
 pub async fn merge_remote(pool: &SqlitePool, room: &Classroom) -> AppResult<MergeOutcome> {
+    // 镜像修正（插入与更新路径都要做）：教务端「删了重建」同名教室（新 id）后，
+    // 本地可能仍有活跃的同名旧行顶住部分唯一索引 ux_classrooms_name；无论本行走
+    // 插入还是更新，都先把其它同名异 id 的活跃旧行墓碑化（不标 dirty、不入 outbox），
+    // 避免后续 upsert 复活旧行时撞唯一索引（2067）。
+    if room.deleted_at.is_none() {
+        sqlx::query(
+            "UPDATE classrooms SET deleted_at=?, updated_at=?, sync_state='synced', dirty=0
+             WHERE room_name=? AND deleted_at IS NULL AND id<>?",
+        )
+        .bind(room.updated_at)
+        .bind(room.updated_at)
+        .bind(&room.room_name)
+        .bind(&room.id)
+        .execute(pool)
+        .await?;
+    }
     let local: Option<(i64, Option<String>)> =
         sqlx::query_as("SELECT updated_at, device_id FROM classrooms WHERE id=?")
             .bind(&room.id)
@@ -200,19 +216,6 @@ pub async fn merge_remote(pool: &SqlitePool, room: &Classroom) -> AppResult<Merg
         sqlx::query("UPDATE classrooms SET room_name=?,device_id=COALESCE(?, device_id),remark=?,updated_at=?,deleted_at=?,sync_state=?,dirty=0 WHERE id=?")
             .bind(&room.room_name).bind(&room.device_id).bind(&room.remark).bind(room.updated_at).bind(room.deleted_at).bind(merged_sync_state(decision)).bind(&room.id).execute(pool).await?;
         return Ok(decision);
-    }
-    // 插入路径：先墓碑化同名残留行（教务端删了重建教室）。
-    if room.deleted_at.is_none() {
-        sqlx::query(
-            "UPDATE classrooms SET deleted_at=?, updated_at=?, sync_state='synced', dirty=0
-             WHERE room_name=? AND deleted_at IS NULL AND id<>?",
-        )
-        .bind(room.updated_at)
-        .bind(room.updated_at)
-        .bind(&room.room_name)
-        .bind(&room.id)
-        .execute(pool)
-        .await?;
     }
     clear_stale_device(pool, room).await?;
     sqlx::query("INSERT INTO classrooms (id,room_name,device_id,remark,created_at,updated_at,deleted_at,sync_state,dirty) VALUES (?,?,?,?,?,?,?,'clean',0)")
