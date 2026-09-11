@@ -17,6 +17,9 @@ pub const CLASSROOM_SQL: &str = include_str!("../../migrations/004_classroom_bin
 pub const SCHOOL_YEAR_REPAIR_SQL: &str =
     include_str!("../../migrations/005_repair_school_year_unique.sql");
 
+/// 换届执行审计表迁移 SQL 原文（编译期内嵌）。
+pub const ROLLOVER_AUDIT_SQL: &str = include_str!("../../migrations/006_rollover_audit.sql");
+
 /// 迁移版本号。
 pub const INIT_VERSION: i64 = 1;
 
@@ -111,6 +114,7 @@ pub fn all_statements() -> Vec<String> {
     out.extend(split_sql(SCHOOL_YEAR_SQL));
     out.extend(split_sql(CLASSROOM_SQL));
     out.extend(split_sql(SCHOOL_YEAR_REPAIR_SQL));
+    out.extend(split_sql(ROLLOVER_AUDIT_SQL));
     out
 }
 

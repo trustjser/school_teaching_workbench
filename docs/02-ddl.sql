@@ -611,3 +611,18 @@ DROP INDEX IF EXISTS ux_classes_name;
 -- 说明: 学年实体也要参与同步，故 pending_queue.entity_type 的 CHECK 必须包含
 --       'school_year'（见第 11 节）。历史上漏掉该取值会导致教务处新建学年时
 --       入队失败，并触发 Rust 侧的 pending_queue 重建路径。
+
+-- 17. rollover_executions —— 换届执行审计表（006，2026-09-11 新学年换届流水线）
+--      每次执行（init / rollover / rebind）落一条记录，summary_json 为
+--      RolloverExcelReport 序列化快照。只用 CREATE TABLE/INDEX IF NOT EXISTS
+--      （本机 SQLite < 3.35，禁 ALTER IF NOT EXISTS）。
+CREATE TABLE IF NOT EXISTS rollover_executions (
+    id             TEXT PRIMARY KEY,
+    executed_at    INTEGER NOT NULL,
+    mode           TEXT    NOT NULL,           -- 'init' | 'rollover' | 'rebind'
+    source_year_id TEXT,                        -- init 模式为 NULL
+    new_year_id    TEXT    NOT NULL,
+    summary_json   TEXT    NOT NULL,
+    created_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_rollover_exec_time ON rollover_executions(executed_at DESC);

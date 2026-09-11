@@ -1807,6 +1807,24 @@ DROP TABLE pending_queue_old;
         pool.close().await;
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    /// 006 — rollover_executions 审计表随迁移创建，且重复迁移幂等。
+    #[tokio::test]
+    async fn rollover_executions_table_created_idempotent() {
+        let (dir, pool) = temp_pool("rollover_audit").await;
+        run_migrations(&pool).await.expect("首次迁移");
+        let n: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='rollover_executions'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("query");
+        assert_eq!(n.0, 1);
+        run_migrations(&pool).await.expect("二次迁移幂等");
+
+        pool.close().await;
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
 
 /// 启动时做一次完整性检查，返回 `ok` 或首个异常描述。
