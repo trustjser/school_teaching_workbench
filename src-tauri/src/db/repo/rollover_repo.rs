@@ -1067,6 +1067,34 @@ pub async fn execute_excel(
     report.upserted_students = upserted;
     report.students_added = students_added;
     report.students_updated = students_updated;
+    // 实际新建实体在事务内回读（列清单照抄 grade_repo::get / class_repo::get，
+    // bind 逐一对齐），保证审计 summary_json 与最终返回值一致。
+    let mut created_grades: Vec<Grade> = Vec::new();
+    for id in &ensured.created_grade_ids {
+        let row: Option<Grade> = sqlx::query_as::<_, Grade>(
+            "SELECT id, grade_no, grade_name, sort_order, remark,
+                    created_at, updated_at, deleted_at, sync_state, dirty
+             FROM grades WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        created_grades.extend(row);
+    }
+    let mut created_classes: Vec<Class> = Vec::new();
+    for id in &ensured.created_class_ids {
+        let row: Option<Class> = sqlx::query_as::<_, Class>(
+            "SELECT id, grade_id, school_year_id, grade_no, grade_name, class_no, class_name, head_teacher,
+                    sort_order, remark, created_at, updated_at, deleted_at, sync_state, dirty
+             FROM classes WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        created_classes.extend(row);
+    }
+    report.created_grades = created_grades;
+    report.created_classes = created_classes;
     let summary = serde_json::to_string(&report).unwrap_or_default();
     sqlx::query(
         "INSERT INTO rollover_executions (id, executed_at, mode, source_year_id, new_year_id, summary_json, created_at)
@@ -1084,23 +1112,8 @@ pub async fn execute_excel(
 
     tx.commit().await?;
 
-    // ---- 6. 收尾：实际新建实体回读（提交后 pool 可见）+ 权威当前年 ----
-    let mut created_grades: Vec<Grade> = Vec::new();
-    for id in &ensured.created_grade_ids {
-        if let Some(g) = grade_repo::get(pool, id).await? {
-            created_grades.push(g);
-        }
-    }
-    let mut created_classes: Vec<Class> = Vec::new();
-    for id in &ensured.created_class_ids {
-        if let Some(c) = class_repo::get(pool, id).await? {
-            created_classes.push(c);
-        }
-    }
-    report.created_grades = created_grades;
-    report.created_classes = created_classes;
-
-    // 权威当前年：事务外单条幂等写；失败重跑自愈。
+    // ---- 6. 收尾：created_grades/created_classes 已在事务内填齐（审计快照一致）；
+    //          权威当前年：事务外单条幂等写；失败重跑自愈。 ----
     crate::db::repo::settings_repo::set_raw(pool, "current_school_year_id", Some(&year_id), "string")
         .await?;
 
@@ -1536,6 +1549,37 @@ mod tests {
             .await
             .expect("audit");
         assert_eq!(n.0, 2);
+        // 首次执行的审计快照必须含新建班级（与返回值一致，不存在「未新建任何班级」的矛盾记录）。
+        let (summary_json,): (String,) =
+            sqlx::query_as("SELECT summary_json FROM rollover_executions ORDER BY created_at LIMIT 1")
+                .fetch_one(&pool)
+                .await
+                .expect("summary");
+        let audited: serde_json::Value =
+            serde_json::from_str(&summary_json).expect("summary_json 反序列化");
+        let audited_class_ids: Vec<&str> = audited["createdClasses"]
+            .as_array()
+            .expect("createdClasses 数组")
+            .iter()
+            .map(|c| c["id"].as_str().expect("class id"))
+            .collect();
+        assert!(
+            !audited_class_ids.is_empty(),
+            "审计快照应记录新建班级"
+        );
+        assert_eq!(
+            audited_class_ids,
+            report.created_classes.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            "审计快照的 created_classes 应与返回值一致"
+        );
+        assert_eq!(
+            audited["studentsAdded"].as_u64(),
+            Some(report.students_added as u64)
+        );
+        assert_eq!(
+            audited["studentsUpdated"].as_u64(),
+            Some(report.students_updated as u64)
+        );
     }
 
     /// 名册存在错误行时禁止执行：不建学年、不留审计。
