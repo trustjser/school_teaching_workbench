@@ -24,8 +24,11 @@ use crate::error::{AppError, AppResult};
 #[serde(rename_all = "camelCase")]
 pub struct RolloverBindingChoice {
     pub classroom_id: String,
-    /// None = 暂不绑定（保留旧绑定）。
+    /// Some = 绑定到该班级 id；None 时按 class_name 解析；两者皆 None = 暂不绑定。
     pub class_id: Option<String>,
+    /// 按班级名绑定（首次换届目标学年未建时无 id，执行时在事务内目录预置结果中解析）。
+    #[serde(default)]
+    pub class_name: Option<String>,
 }
 
 /// Excel 驱动换届请求（2026-09-11 设计 §4）。
@@ -250,10 +253,18 @@ pub async fn preview_excel(
     let binding_suggestions = if is_init {
         Vec::new()
     } else {
+        // Excel 引用的班级名集合（trim 去重）：目标学年未建时按名字给出建议。
+        let excel_class_names: std::collections::HashSet<String> = req
+            .rows
+            .iter()
+            .filter_map(|r| r.class_name.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+            .map(str::to_string)
+            .collect();
         build_binding_suggestions(
             pool,
             req.source_school_year_id.as_deref().unwrap_or(""),
             &existing_classes,
+            &excel_class_names,
         )
         .await?
     };
@@ -275,10 +286,12 @@ pub async fn preview_excel(
 }
 
 /// 按旧绑定教室 → 同名新班级生成建议；一名多教室或无同名 → conflict/none。
+/// 匹配优先级：目标学年已存在班级（有 id）→ Excel 引用的班级名（无 id，执行时解析）→ 无。
 async fn build_binding_suggestions(
     pool: &SqlitePool,
     source_year_id: &str,
     new_classes: &[Class],
+    excel_class_names: &std::collections::HashSet<String>,
 ) -> AppResult<Vec<RolloverBindingSuggestion>> {
     let rooms = classroom_repo::list(pool).await?;
     let assignments = classroom_repo::list_assignments(pool, None).await?;
@@ -293,31 +306,39 @@ async fn build_binding_suggestions(
             continue;
         };
         let old = src_name.get(a.class_id.as_str()).copied();
+        // 先按目标学年已存在班级匹配（拿到 id）；否则按名字匹配 Excel 引用（无 id，
+        // 由 execute 在目录预置结果中解析）；两者皆无 → none。
         let target = old.and_then(|n| {
             new_classes
                 .iter()
                 .find(|c| c.class_name == n)
-                .map(|c| (c.id.clone(), c.class_name.clone()))
+                .map(|c| (Some(c.id.clone()), c.class_name.clone()))
+                .or_else(|| {
+                    excel_class_names
+                        .contains(n)
+                        .then(|| (None, n.to_string()))
+                })
         });
         out.push(RolloverBindingSuggestion {
             classroom_id: room.id.clone(),
             room_name: room.room_name.clone(),
             old_class: old.map(str::to_string),
-            suggested_class_id: target.as_ref().map(|(id, _)| id.clone()),
+            suggested_class_id: target.as_ref().and_then(|(id, _)| id.clone()),
             suggested_class: target.as_ref().map(|(_, n)| n.clone()),
             match_kind: if target.is_some() { "auto" } else { "none" }.to_string(),
         });
     }
-    // 同一新班级被多间教室建议 → 全部降级 conflict。
+    // 同一名字被多间教室建议 → 全部降级 conflict（按匹配到的名字计数，
+    // 覆盖「目标学年已建」与「仅按名匹配 Excel」两种建议形态）。
     let mut use_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for s in &out {
-        if let Some(id) = &s.suggested_class_id {
-            *use_count.entry(id.clone()).or_default() += 1;
+        if let Some(n) = &s.suggested_class {
+            *use_count.entry(n.clone()).or_default() += 1;
         }
     }
     for s in &mut out {
-        if let Some(id) = &s.suggested_class_id {
-            if use_count.get(id.as_str()).copied().unwrap_or(0) > 1 {
+        if let Some(n) = &s.suggested_class {
+            if use_count.get(n).copied().unwrap_or(0) > 1 {
                 s.match_kind = "conflict".to_string();
             }
         }
@@ -474,11 +495,37 @@ pub async fn execute_excel(
             .map(|s| RolloverBindingChoice {
                 classroom_id: s.classroom_id.clone(),
                 class_id: s.suggested_class_id.clone(),
+                class_name: if s.suggested_class_id.is_none() {
+                    s.suggested_class.clone()
+                } else {
+                    None
+                },
             })
             .collect(),
     };
     for c in &choices {
-        let Some(class_id) = c.class_id.as_deref() else {
+        // 最终 class_id 解析：显式 id 直接用；仅名字 → 从事务内目录预置结果精确匹配；
+        // 两者皆无 → 暂不绑定（跳过，保留旧绑定语义由执行记录页仲裁）。
+        let class_id: String = if let Some(id) = c.class_id.as_deref().filter(|s| !s.is_empty()) {
+            id.to_string()
+        } else if let Some(cname) = c.class_name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            let matched: Vec<&str> = ensured
+                .class_map
+                .iter()
+                .filter(|(_, cn, _)| cn == cname)
+                .map(|(_, _, id)| id.as_str())
+                .collect();
+            let mut distinct = matched.clone();
+            distinct.sort_unstable();
+            distinct.dedup();
+            if distinct.len() != 1 {
+                return Err(AppError::validation(format!(
+                    "绑定确认中的班级「{cname}」在目标学年目录中匹配到 {} 个班级 id，无法自动绑定；请在该学年建成后于执行记录页仲裁",
+                    distinct.len()
+                )));
+            }
+            distinct[0].to_string()
+        } else {
             continue;
         };
         let existing: Option<(String,)> = sqlx::query_as("SELECT id FROM classroom_assignments WHERE classroom_id=? AND school_year_id=? AND deleted_at IS NULL")
@@ -876,7 +923,204 @@ mod tests {
         );
     }
 
-    /// 名册存在错误行时禁止执行：不建学年、不留审计。
+    /// finding #2：首次换届（目标学年未建）时，绑定建议按名字匹配 Excel 引用仍产出
+    /// （suggested_class_id=None、suggested_class=Some(名)），auto/conflict/none 三态齐全。
+    #[tokio::test]
+    async fn preview_excel_rollover_without_target_year_suggests_by_name() {
+        let pool = fresh_pool().await;
+
+        let src_year = school_year_repo::upsert(
+            &pool,
+            SchoolYear { school_year_no: "2025".into(), school_year_name: "2025学年".into(), ..Default::default() },
+        )
+        .await
+        .expect("src year");
+        let g1 = grade_repo::upsert(&pool, Grade { grade_no: "1".into(), grade_name: "一年级".into(), sort_order: 1, ..Default::default() }).await.expect("g1");
+        let g2 = grade_repo::upsert(&pool, Grade { grade_no: "2".into(), grade_name: "二年级".into(), sort_order: 2, ..Default::default() }).await.expect("g2");
+        let g3 = grade_repo::upsert(&pool, Grade { grade_no: "3".into(), grade_name: "三年级".into(), sort_order: 3, ..Default::default() }).await.expect("g3");
+
+        let mut src_class_ids = std::collections::HashMap::new();
+        for (grade, name) in [(&g1, "一年级1班"), (&g2, "二年级1班"), (&g3, "三年级1班")] {
+            let c = class_repo::upsert(
+                &pool,
+                Class {
+                    grade_id: Some(grade.id.clone()),
+                    school_year_id: Some(src_year.id.clone()),
+                    grade_no: Some(grade.grade_no.clone()),
+                    grade_name: Some(grade.grade_name.clone()),
+                    class_no: Some("1".into()),
+                    class_name: name.into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("src class");
+            src_class_ids.insert(name.to_string(), c.id);
+        }
+
+        // 不建目标学年目录，仅建教室并绑定源学年班级：
+        // A/B → 一年级1班（同名被两教室建议 → conflict）；D → 二年级1班（唯一同名 → auto）；
+        // C → 三年级1班（Excel 未引用 → none）。
+        for (room_name, class_name) in [
+            ("教室A", "一年级1班"),
+            ("教室B", "一年级1班"),
+            ("教室C", "三年级1班"),
+            ("教室D", "二年级1班"),
+        ] {
+            let r = classroom_repo::upsert(&pool, room(room_name)).await.expect("room");
+            classroom_repo::assign(&pool, &r.id, &src_year.id, &src_class_ids[class_name])
+                .await
+                .expect("assign");
+        }
+
+        let req = RolloverExcelRequest {
+            source_school_year_id: Some(src_year.id.clone()),
+            ..excel_req(
+                "rollover",
+                "2026-2027学年",
+                vec![
+                    row("S1", "张三", "一年级", "一年级1班", Some(1)),
+                    row("S2", "李四", "二年级", "二年级1班", None),
+                ],
+            )
+        };
+        let report = preview_excel(&pool, &req).await.expect("preview");
+        assert_eq!(report.new_school_year_id, "", "目标学年未建");
+        assert_eq!(report.binding_suggestions.len(), 4);
+
+        let find = |room_name: &str| {
+            report
+                .binding_suggestions
+                .iter()
+                .find(|s| s.room_name == room_name)
+                .unwrap_or_else(|| panic!("缺少 {room_name} 的绑定建议"))
+        };
+        for name in ["教室A", "教室B"] {
+            let s = find(name);
+            assert_eq!(s.match_kind, "conflict", "{name}：同名被两教室建议应 conflict");
+            assert_eq!(s.suggested_class_id, None, "{name}：目标学年未建不应有 id");
+            assert_eq!(s.suggested_class.as_deref(), Some("一年级1班"), "{name}：应按名给出建议");
+        }
+        let d = find("教室D");
+        assert_eq!(d.match_kind, "auto");
+        assert_eq!(d.suggested_class_id, None);
+        assert_eq!(d.suggested_class.as_deref(), Some("二年级1班"));
+        let c = find("教室C");
+        assert_eq!(c.match_kind, "none");
+        assert_eq!(c.suggested_class, None);
+        assert_eq!(c.suggested_class_id, None);
+
+        let kinds: Vec<&str> = report.binding_suggestions.iter().map(|s| s.match_kind.as_str()).collect();
+        assert_eq!(kinds.iter().filter(|k| **k == "auto").count(), 1);
+        assert_eq!(kinds.iter().filter(|k| **k == "conflict").count(), 2);
+        assert_eq!(kinds.iter().filter(|k| **k == "none").count(), 1);
+    }
+
+    /// finding #2：execute 的 confirm_bindings 按名字（class_id=None、class_name=Some）
+    /// 在事务内目录预置结果中解析 id 并落库 classroom_assignments。
+    #[tokio::test]
+    async fn execute_excel_resolves_confirm_bindings_by_class_name() {
+        let pool = fresh_pool().await;
+
+        let src_year = school_year_repo::upsert(
+            &pool,
+            SchoolYear { school_year_no: "2025".into(), school_year_name: "2025学年".into(), ..Default::default() },
+        )
+        .await
+        .expect("src year");
+        let g1 = grade_repo::upsert(&pool, Grade { grade_no: "1".into(), grade_name: "一年级".into(), sort_order: 1, ..Default::default() }).await.expect("g1");
+        let src_class = class_repo::upsert(
+            &pool,
+            Class {
+                grade_id: Some(g1.id.clone()),
+                school_year_id: Some(src_year.id.clone()),
+                grade_no: Some("1".into()),
+                grade_name: Some("一年级".into()),
+                class_no: Some("1".into()),
+                class_name: "一年级1班".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("src class");
+        let r = classroom_repo::upsert(&pool, room("教室A")).await.expect("room");
+        classroom_repo::assign(&pool, &r.id, &src_year.id, &src_class.id)
+            .await
+            .expect("assign");
+
+        let req = RolloverExcelRequest {
+            source_school_year_id: Some(src_year.id.clone()),
+            confirm_bindings: Some(vec![RolloverBindingChoice {
+                classroom_id: r.id.clone(),
+                class_id: None,
+                class_name: Some("一年级1班".to_string()),
+            }]),
+            ..excel_req(
+                "rollover",
+                "2026-2027学年",
+                vec![row("S1", "张三", "一年级", "一年级1班", Some(1))],
+            )
+        };
+        let report = super::execute_excel(&pool, &req).await.expect("execute");
+
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT class_id FROM classroom_assignments
+             WHERE classroom_id = ? AND school_year_id = ? AND deleted_at IS NULL",
+        )
+        .bind(&r.id)
+        .bind(&report.new_school_year_id)
+        .fetch_all(&pool)
+        .await
+        .expect("assignments");
+        assert_eq!(rows.len(), 1, "应恰好落库一条新学年绑定");
+        let bound: (String, String) = sqlx::query_as("SELECT class_name, school_year_id FROM classes WHERE id = ?")
+            .bind(&rows[0].0)
+            .fetch_one(&pool)
+            .await
+            .expect("bound class");
+        assert_eq!(bound.0, "一年级1班", "按名字解析到的班级应正确");
+        assert_eq!(bound.1, report.new_school_year_id, "绑定班级应属于新学年");
+    }
+
+    /// finding #2：confirm_bindings 中名字解析到 0 个班级 id → 校验错误、整体回滚。
+    #[tokio::test]
+    async fn execute_excel_rejects_unresolvable_class_name_binding() {
+        let pool = fresh_pool().await;
+        let src_year = school_year_repo::upsert(
+            &pool,
+            SchoolYear { school_year_no: "2025".into(), school_year_name: "2025学年".into(), ..Default::default() },
+        )
+        .await
+        .expect("src year");
+        let r = classroom_repo::upsert(&pool, room("教室A")).await.expect("room");
+
+        let req = RolloverExcelRequest {
+            source_school_year_id: Some(src_year.id.clone()),
+            confirm_bindings: Some(vec![RolloverBindingChoice {
+                classroom_id: r.id.clone(),
+                class_id: None,
+                class_name: Some("不存在的班级".to_string()),
+            }]),
+            ..excel_req(
+                "rollover",
+                "2026-2027学年",
+                vec![row("S1", "张三", "一年级", "一年级1班", Some(1))],
+            )
+        };
+        assert!(
+            super::execute_excel(&pool, &req).await.is_err(),
+            "解析到 0 个班级 id 应校验失败"
+        );
+        assert!(
+            school_year_repo::find_by_name(&pool, "2026-2027学年")
+                .await
+                .expect("year")
+                .is_none(),
+            "失败执行不得留下半个学年"
+        );
+    }
+
+
     #[tokio::test]
     async fn execute_excel_rejects_rows_with_errors() {
         let pool = fresh_pool().await;

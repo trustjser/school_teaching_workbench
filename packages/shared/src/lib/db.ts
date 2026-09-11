@@ -392,6 +392,8 @@ export async function directoryBatchCreate(
 export interface RolloverBindingChoice {
   classroomId: string;
   classId: string | null;
+  /** 按班级名绑定（首次换届目标学年未建时无 id，由后端在执行时解析）。 */
+  className?: string | null;
 }
 
 export interface RolloverExcelRequest {
