@@ -1,7 +1,7 @@
 {
   "name": "lan-workbench",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "局域网分布式教务与班级协同工作台 (LAN School-Affairs & Class Collaboration Workbench)",
   "type": "module",
   "scripts": {

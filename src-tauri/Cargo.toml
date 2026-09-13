@@ -1,6 +1,6 @@
 [package]
 name = "lan-workbench"
-version = "0.1.0"
+version = "1.0.1"
 description = "局域网分布式教务与班级协同工作台"
 authors = ["LAN Workbench Team"]
 edition = "2021"
