@@ -174,7 +174,10 @@ mod tests {
         let pool = fresh_pool().await;
         let grade = upsert(
             &pool,
-            Grade { grade_name: "三年级".into(), ..Default::default() },
+            Grade {
+                grade_name: "三年级".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("grade");
@@ -193,7 +196,10 @@ mod tests {
         let pool = fresh_pool().await;
         let stale = upsert(
             &pool,
-            Grade { grade_name: "三年级".into(), ..Default::default() },
+            Grade {
+                grade_name: "三年级".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("stale");

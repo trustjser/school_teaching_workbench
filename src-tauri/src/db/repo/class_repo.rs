@@ -277,7 +277,10 @@ mod tests {
         let pool = fresh_pool().await;
         let grade = grade_repo::upsert(
             &pool,
-            Grade { grade_name: "一年级".into(), ..Default::default() },
+            Grade {
+                grade_name: "一年级".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("grade");
@@ -315,7 +318,12 @@ mod tests {
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].id, remote.id);
         assert!(
-            get(&pool, &stale.id).await.expect("get").unwrap().deleted_at.is_some(),
+            get(&pool, &stale.id)
+                .await
+                .expect("get")
+                .unwrap()
+                .deleted_at
+                .is_some(),
             "本地残留旧行应被镜像墓碑化"
         );
         pool.close().await;

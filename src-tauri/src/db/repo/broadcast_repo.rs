@@ -492,7 +492,9 @@ pub async fn soft_delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_recall, close, get, mark_recalled, mark_sent_when_delivered, recall_preview};
+    use super::{
+        apply_recall, close, get, mark_recalled, mark_sent_when_delivered, recall_preview,
+    };
     use crate::db::{create_pool, run_migrations};
     use sqlx::SqlitePool;
 
@@ -548,7 +550,10 @@ mod tests {
         insert_queue_row(&pool, "q-2", "bc-1", "pending").await;
 
         let preview = recall_preview(&pool, "bc-1").await.expect("撤回预览");
-        assert!(preview.delivered_targets.is_empty(), "尚未送达时没有撤回目标");
+        assert!(
+            preview.delivered_targets.is_empty(),
+            "尚未送达时没有撤回目标"
+        );
 
         let after = mark_recalled(&pool, "bc-1").await.expect("撤回");
         assert_eq!(after.status, "cancelled");
@@ -622,7 +627,9 @@ mod tests {
         let (pool, dir) = temp_pool().await;
         insert_task(&pool, "bc-1", "closed").await;
 
-        let err = recall_preview(&pool, "bc-1").await.expect_err("终态应拒绝撤回");
+        let err = recall_preview(&pool, "bc-1")
+            .await
+            .expect_err("终态应拒绝撤回");
         assert_eq!(err.code, crate::error::ErrorCode::Mode);
 
         pool.close().await;
@@ -738,20 +745,27 @@ mod tests {
         insert_queue_row(&pool, "q-done", "bc-1", "done").await;
         insert_queue_row(&pool, "q-pending", "bc-1", "pending").await;
 
-        assert!(!mark_sent_when_delivered(&pool, "bc-1").await.expect("结算"), "仍有待投递条目时不应推进");
+        assert!(
+            !mark_sent_when_delivered(&pool, "bc-1").await.expect("结算"),
+            "仍有待投递条目时不应推进"
+        );
         assert_eq!(get(&pool, "bc-1").await.unwrap().unwrap().status, "sending");
 
         // 最后一条投递完成（done 会软删）。
-        sqlx::query("UPDATE pending_queue SET status = 'done', deleted_at = 1 WHERE id = 'q-pending'")
-            .execute(&pool)
-            .await
-            .expect("标记投递完成");
+        sqlx::query(
+            "UPDATE pending_queue SET status = 'done', deleted_at = 1 WHERE id = 'q-pending'",
+        )
+        .execute(&pool)
+        .await
+        .expect("标记投递完成");
 
         assert!(mark_sent_when_delivered(&pool, "bc-1").await.expect("结算"));
         assert_eq!(get(&pool, "bc-1").await.unwrap().unwrap().status, "sent");
 
         // 幂等：已 sent / 已收到回执的 partial 都不该被改写。
-        assert!(!mark_sent_when_delivered(&pool, "bc-1").await.expect("重复结算"));
+        assert!(!mark_sent_when_delivered(&pool, "bc-1")
+            .await
+            .expect("重复结算"));
         sqlx::query("UPDATE broadcast_tasks SET status = 'partial' WHERE id = 'bc-1'")
             .execute(&pool)
             .await
@@ -771,10 +785,12 @@ mod tests {
         insert_queue_row(&pool, "q-pending", "bc-1", "pending").await;
         assert!(!get(&pool, "bc-1").await.unwrap().unwrap().delivered);
 
-        sqlx::query("UPDATE pending_queue SET status = 'done', deleted_at = 1 WHERE id = 'q-pending'")
-            .execute(&pool)
-            .await
-            .expect("标记投递完成");
+        sqlx::query(
+            "UPDATE pending_queue SET status = 'done', deleted_at = 1 WHERE id = 'q-pending'",
+        )
+        .execute(&pool)
+        .await
+        .expect("标记投递完成");
         assert!(get(&pool, "bc-1").await.unwrap().unwrap().delivered);
 
         pool.close().await;

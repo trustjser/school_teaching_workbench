@@ -637,7 +637,8 @@ pub struct BroadcastTask {
     /// 方向：out / in。
     pub direction: String,
     /// 状态：draft / sending / sent / partial / closed / cancelled。
-    pub status: String,    /// 发送时间。
+    pub status: String,
+    /// 发送时间。
     pub sent_at: Option<i64>,
     /// 关闭时间。
     pub closed_at: Option<i64>,

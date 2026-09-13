@@ -508,7 +508,13 @@ mod tests {
         .expect("插入在线教务处端");
     }
 
-    async fn insert_dead(pool: &SqlitePool, id: &str, entity_id: &str, target: Option<&str>, created_at: i64) {
+    async fn insert_dead(
+        pool: &SqlitePool,
+        id: &str,
+        entity_id: &str,
+        target: Option<&str>,
+        created_at: i64,
+    ) {
         sqlx::query(
             "INSERT INTO pending_queue (id, op_type, entity_type, entity_id, payload, target_device_id,
                                         attempt_count, max_attempts, next_retry_at, last_error, status,

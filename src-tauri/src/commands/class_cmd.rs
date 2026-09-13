@@ -58,7 +58,8 @@ pub async fn directory_sync(state: State<'_, Arc<AppState>>) -> AppResult<Direct
                 "/api/v1/directory",
                 &serde_json::json!({}),
             )?;
-            match client::request_json::<DirectorySnapshot>(&base_url, "/api/v1/directory", &env).await
+            match client::request_json::<DirectorySnapshot>(&base_url, "/api/v1/directory", &env)
+                .await
             {
                 Ok(snapshot) => {
                     let mut report = directory::apply_snapshot(&state.pool, &snapshot).await?;

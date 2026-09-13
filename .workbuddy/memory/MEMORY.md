@@ -74,3 +74,17 @@ SQLite 不支持 `ALTER TABLE ... ALTER COLUMN` 改 CHECK，只能「改名旧�
 - 端边界静态校验：`scripts/check-app-boundaries.mjs`（router 不引用另一端 + shared 不反向依赖 app）；构建目标校验：`scripts/check-build-targets.mjs`（8 个 npm 脚本 + 4 份 Tauri 配置）。
 - 共享 `AppRoot`（`packages/shared/src/components/layout/AppRoot.tsx`）用 `createAppRoutes({ appTarget, navItems, setup, routes })` 收敛入口骨架，两端 router 只声明 `navItems` 与 `routes`。
 - `settings_switch_mode` 命令与 `useAppStore.switchMode` 已删除。`settings_complete_setup` 不再接受 `mode` 参数，直接使用 `state.mode()`。
+
+## 代码风格与 CI 关卡（2026-09-13）
+- **提交 Rust 前必跑 `npm run fmt`**（= `cargo fmt --manifest-path src-tauri/Cargo.toml`），或用 `npm run fmt:check` 复现 CI 校验。CI 的 `Cargo fmt check` 步骤就是这条命令的 `--check` 形式，历史上因代码从未过 rustfmt 而挂过一次。
+- 工具链版本：**CI 与 release 统一钉 Rust 1.96.1**（唯一来源 = 两份 workflow 的 `env.RUST_TOOLCHAIN`，step 里用 `${{ env.RUST_TOOLCHAIN }}` 引用；本机默认也是 1.96.1）。`Cargo.toml` 的 `rust-version = "1.88"` 是**依赖树真实 MSRV**（不是编译用版本），作用是让过旧工具链报「requires rustc 1.88 or newer」这句人话，而不是到解析依赖时才抛 `feature edition2024 is required`。
+- **依赖树 MSRV 会随 Cargo.lock 漂移**：本项目曾是 1.77.2，2026-09-13 时 lock 里最高已到 **1.88.0**（darling 0.23 / time 0.3.55 / plist 1.10.1 / icu 2.3 系），且有 40+ 包是 edition 2024（≥1.85）。**升级依赖后如 CI 报 edition2024 / rustc too old，先把 `RUST_TOOLCHAIN` 提上去。**
+- **查依赖树真实 MSRV 的正确姿势**（比翻本地 registry 可靠）：读 `Cargo.lock` 全部包 → 查 **crates.io 稀疏索引** `https://index.crates.io/{分片路径}` 拿每个版本的 `rust_version` 取最大值。分片规则：名长 1→`1/{name}`、2→`2/{name}`、3→`3/{首字母}/{name}`、≥4→`{前2}/{次2}/{name}`。**只看 `~/.cargo/registry/src/` 会漏掉非当前平台的依赖。**
+- **GitHub Actions 日志取用**：公开仓库的原始日志（`/actions/jobs/{id}/logs`、`/runs/{id}/logs` zip、`/lines`）一律 403/404，**匿名拿不到**；能匿名拿到的只有 `GET /repos/{o}/{r}/actions/runs/{id}/jobs`（逐 step 的 conclusion + started_at/completed_at）和 `check-runs/{id}/annotations`（只有一句 `Process completed with exit code 1.`）。**靠 step 耗时反推失败阶段**是最有效的手段（例：tauri build 仅 10-19s 就挂 ⇒ 必然在 `cargo metadata`/前端构建之前，与 Rust 编译无关）。
+- **`tauri build` 内部顺序**（排查时按这个切段定位）：① tauri CLI 启动 → ② `cargo metadata`（打印 "Looking up installed tauri packages"）→ ③ `beforeBuildCommand`（= `npm run build:affairs`，本机 tsc 25.8s + vite 32s）→ ④ cargo 编译（本项目本机全量约 5m08s）→ ⑤ 打包 .app/.dmg。**关键**：② 在 ③ 之前，且 ② 依赖 PATH 里有 `cargo`（没有会报 `failed to run 'cargo metadata' … No such file or directory`）。
+- **本机跑 DMG 打包会被沙箱拦**（`hdiutil` 要写 `/Volumes/{productName}/…`，报 `file-write-unlink` 被拒），所以 `.dmg` 那步本地无法验证，只能验证到 `.app`；`dangerouslyDisableSandbox` 在本机也没生效。CI 的 macOS runner 上正常。
+- 已知**Linux 产物名称问题（不会让 CI 变红，但装不上）**：`productName = "教务端"` 经 `heck::AsKebabCase` 是**无操作**（heck 只切 ASCII 大小写边界，CJK 属 `is_alphanumeric`，整串当一个词），于是 deb 的 `Package:` / rpm 的 `Name:` 都成了 `教务端`，违反 Debian/RPM 包名字符集。tauri-bundler 是**纯 Rust 自己拼 .deb（ar+tar.gz）**、不调 `dpkg-deb`/`rpmbuild`，所以不会报错；但用户 `dpkg -i` 时会因非法包名失败。DebConfig **没有 name 字段**可覆盖 ⇒ 只能改 `productName`（会连带影响 .app/.dmg 名字，需产品决策）。
+- **release 触发条件不一致**：`release.yml` 只在 `tags: ["v*"]` + `workflow_dispatch` 触发，而实际打的 tag 是 `1.0.0`（无 v 前缀）⇒ 推这个 tag 不会自动发布，只能手动 dispatch。要么改 tag 规范为 `v1.0.0`，要么给 trigger 加数字模式。
+- CI 的 clippy **未开 `-D warnings`**（存在约 20+ 条历史告警），`Cargo test` 有 **92 个 lib 层单测**，全绿的基线是：fmt ✅ / clippy 仅 warning / test 92 passed / `npm run typecheck` ✅ / `check:boundaries` ✅ / `check:build-targets` ✅。
+- **判断 rustfmt 改动是否无语义变化时，「去空白比哈希」不够用**：rustfmt 会新增行尾逗号与闭包体花括号。应 `tr -d '[:space:],'` 后再逐字符 diff；预期只剩 `use` 重排与花括号增减两类。
+- **坑**：本机 WorkBuddy 的 Bash 跑非交互 zsh，`cargo` 不在 PATH（`command not found: cargo`）。跑 Rust 命令前先 `export PATH="$HOME/.cargo/bin:$PATH"`。

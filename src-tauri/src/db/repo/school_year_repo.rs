@@ -185,7 +185,10 @@ mod tests {
         let pool = fresh_pool().await;
         let year = upsert(
             &pool,
-            SchoolYear { school_year_name: "2028届".into(), ..Default::default() },
+            SchoolYear {
+                school_year_name: "2028届".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("year");
@@ -207,7 +210,10 @@ mod tests {
         let pool = fresh_pool().await;
         let stale = upsert(
             &pool,
-            SchoolYear { school_year_name: "2028届".into(), ..Default::default() },
+            SchoolYear {
+                school_year_name: "2028届".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("stale");
@@ -230,7 +236,12 @@ mod tests {
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].id, remote.id, "活跃行应为远端重建行");
         assert!(
-            get(&pool, &stale.id).await.expect("get").unwrap().deleted_at.is_some(),
+            get(&pool, &stale.id)
+                .await
+                .expect("get")
+                .unwrap()
+                .deleted_at
+                .is_some(),
             "本地残留旧行应被镜像墓碑化"
         );
         pool.close().await;

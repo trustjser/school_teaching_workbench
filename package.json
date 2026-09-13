@@ -12,6 +12,8 @@
     "typecheck": "tsc --noEmit",
     "check:boundaries": "node scripts/check-app-boundaries.mjs",
     "check:build-targets": "node scripts/check-build-targets.mjs",
+    "fmt": "cargo fmt --manifest-path src-tauri/Cargo.toml",
+    "fmt:check": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check",
     "tauri": "tauri",
     "tauri:dev:affairs": "tauri dev --config src-tauri/tauri.affairs.conf.json --config src-tauri/tauri.affairs.dev.conf.json",
     "tauri:dev:classroom": "tauri dev --config src-tauri/tauri.classroom.conf.json --config src-tauri/tauri.classroom.dev.conf.json",

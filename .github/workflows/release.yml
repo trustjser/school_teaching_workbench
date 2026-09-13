@@ -17,7 +17,9 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.77.2"
+  # 与 .github/workflows/ci.yml 保持同一个工具链来源。
+  # 依赖树 MSRV 为 1.88（详见 ci.yml 注释），1.77.2 会因 edition2024 直接构建失败。
+  RUST_TOOLCHAIN: "1.96.1"
 
   # ---------- 可选：macOS 代码签名与公证 ----------
   # 在仓库 Settings → Secrets 中配置后生效；留空则走未签名构建，不阻塞流水线。
@@ -53,7 +55,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.77.2"
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

@@ -201,7 +201,9 @@ pub async fn auto_switch_if_ready(
 #[cfg(test)]
 mod tests {
     use crate::db::models::{Class, Classroom, ClassroomAssignment, Grade, SchoolYear, Student};
-    use crate::db::repo::{class_repo, classroom_repo, grade_repo, school_year_repo, settings_repo, student_repo};
+    use crate::db::repo::{
+        class_repo, classroom_repo, grade_repo, school_year_repo, settings_repo, student_repo,
+    };
     use crate::db::{create_pool, run_migrations};
 
     #[tokio::test]
@@ -305,28 +307,41 @@ mod tests {
     #[tokio::test]
     async fn snapshot_apply_survives_master_delete_and_recreate() {
         let mk_dir = |tag: &str| {
-            let dir =
-                std::env::temp_dir().join(format!("lanwb_recreate_{}_{}", tag, uuid::Uuid::new_v4()));
+            let dir = std::env::temp_dir().join(format!(
+                "lanwb_recreate_{}_{}",
+                tag,
+                uuid::Uuid::new_v4()
+            ));
             std::fs::create_dir_all(&dir).expect("temp dir");
             dir
         };
         let master_dir = mk_dir("master");
         let client_dir = mk_dir("client");
-        let master = create_pool(&master_dir.join("db.sqlite")).await.expect("master pool");
-        let client = create_pool(&client_dir.join("db.sqlite")).await.expect("client pool");
+        let master = create_pool(&master_dir.join("db.sqlite"))
+            .await
+            .expect("master pool");
+        let client = create_pool(&client_dir.join("db.sqlite"))
+            .await
+            .expect("client pool");
         run_migrations(&master).await.expect("master migrations");
         run_migrations(&client).await.expect("client migrations");
 
         // ---- 第一版目录：2028届(A) + 一年级 + 一年级1班(C1) + 教室101(R1, 设备D) ----
         let year_a = school_year_repo::upsert(
             &master,
-            SchoolYear { school_year_name: "2028届".into(), ..Default::default() },
+            SchoolYear {
+                school_year_name: "2028届".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("year a");
         let grade = grade_repo::upsert(
             &master,
-            Grade { grade_name: "一年级".into(), ..Default::default() },
+            Grade {
+                grade_name: "一年级".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("grade");
@@ -363,16 +378,27 @@ mod tests {
             .expect("assign");
 
         let snapshot1 = super::build_snapshot(&master).await.expect("snapshot1");
-        super::apply_snapshot(&client, &snapshot1).await.expect("apply snapshot1");
+        super::apply_snapshot(&client, &snapshot1)
+            .await
+            .expect("apply snapshot1");
 
         // ---- 教务端删了重建：软删旧实体，同名/同业务键新建（全新 id） ----
-        class_repo::soft_delete(&master, &class_c1.id).await.expect("del c1");
-        school_year_repo::soft_delete(&master, &year_a.id).await.expect("del year a");
-        classroom_repo::soft_delete(&master, &room_r1.id).await.expect("del r1");
+        class_repo::soft_delete(&master, &class_c1.id)
+            .await
+            .expect("del c1");
+        school_year_repo::soft_delete(&master, &year_a.id)
+            .await
+            .expect("del year a");
+        classroom_repo::soft_delete(&master, &room_r1.id)
+            .await
+            .expect("del r1");
 
         let year_b = school_year_repo::upsert(
             &master,
-            SchoolYear { school_year_name: "2028届".into(), ..Default::default() },
+            SchoolYear {
+                school_year_name: "2028届".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("year b");
@@ -417,7 +443,9 @@ mod tests {
         let years = school_year_repo::list(&client).await.expect("years");
         assert_eq!(years.len(), 1);
         assert_eq!(years[0].id, year_b.id);
-        let classes = class_repo::list_by_year(&client, &year_b.id).await.expect("classes");
+        let classes = class_repo::list_by_year(&client, &year_b.id)
+            .await
+            .expect("classes");
         assert_eq!(classes.len(), 1);
         assert_eq!(classes[0].id, class_c2.id);
         let rooms = classroom_repo::list(&client).await.expect("rooms");
@@ -425,7 +453,9 @@ mod tests {
         assert_eq!(rooms[0].id, room_r2.id);
 
         // ---- 二轮：班级也删了重建（同业务键、新 id） ----
-        class_repo::soft_delete(&master, &class_c2.id).await.expect("del c2");
+        class_repo::soft_delete(&master, &class_c2.id)
+            .await
+            .expect("del c2");
         let class_c3 = class_repo::upsert(
             &master,
             Class {
@@ -442,7 +472,9 @@ mod tests {
         super::apply_snapshot(&client, &snapshot3)
             .await
             .expect("班级重建不得撞 ux_classes_year");
-        let classes = class_repo::list_by_year(&client, &year_b.id).await.expect("classes");
+        let classes = class_repo::list_by_year(&client, &year_b.id)
+            .await
+            .expect("classes");
         assert_eq!(classes.len(), 1);
         assert_eq!(classes[0].id, class_c3.id);
 
@@ -458,8 +490,7 @@ mod tests {
     #[tokio::test]
     async fn snapshot_excludes_assignments_with_dangling_parents() {
         let mk = || {
-            let d = std::env::temp_dir()
-                .join(format!("lanwb_dangling_{}", uuid::Uuid::new_v4()));
+            let d = std::env::temp_dir().join(format!("lanwb_dangling_{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&d).unwrap();
             d
         };
@@ -549,8 +580,8 @@ mod tests {
     /// 不必让整次目录同步崩溃（与 3168a60 的「镜像不撞唯一索引」同思路）。
     #[tokio::test]
     async fn apply_snapshot_skips_dangling_assignment_without_fk_error() {
-        let client_dir = std::env::temp_dir()
-            .join(format!("lanwb_dangling_client_{}", uuid::Uuid::new_v4()));
+        let client_dir =
+            std::env::temp_dir().join(format!("lanwb_dangling_client_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&client_dir).unwrap();
         let client = create_pool(&client_dir.join("c.db")).await.unwrap();
         run_migrations(&client).await.unwrap();
@@ -642,8 +673,8 @@ mod tests {
     /// 现在插入与更新路径都先墓碑化同名异 id 旧行，绝不再撞唯一索引。
     #[tokio::test]
     async fn apply_snapshot_survives_same_named_year_update_path() {
-        let client_dir = std::env::temp_dir()
-            .join(format!("lanwb_same_name_year_{}", uuid::Uuid::new_v4()));
+        let client_dir =
+            std::env::temp_dir().join(format!("lanwb_same_name_year_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&client_dir).unwrap();
         let client = create_pool(&client_dir.join("c.db")).await.unwrap();
         run_migrations(&client).await.unwrap();
@@ -699,8 +730,7 @@ mod tests {
     /// ④ 名册为空 → 返回 None 且不改写绑定。
     #[tokio::test]
     async fn auto_switch_fires_when_ready_and_skips_empty_roster() {
-        let dir =
-            std::env::temp_dir().join(format!("lanwb_auto_switch_{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("lanwb_auto_switch_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         let pool = create_pool(&dir.join("c.db")).await.expect("pool");
         run_migrations(&pool).await.expect("migrations");
@@ -708,19 +738,30 @@ mod tests {
         // 场景数据：设备 d1 认领教室 room1；room1 在新学年 y2 绑定 class2；class2 有 1 名学生。
         school_year_repo::upsert(
             &pool,
-            SchoolYear { id: "y1".into(), school_year_name: "2025届".into(), ..Default::default() },
+            SchoolYear {
+                id: "y1".into(),
+                school_year_name: "2025届".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("year y1");
         school_year_repo::upsert(
             &pool,
-            SchoolYear { id: "y2".into(), school_year_name: "2026届".into(), ..Default::default() },
+            SchoolYear {
+                id: "y2".into(),
+                school_year_name: "2026届".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("year y2");
         let grade = grade_repo::upsert(
             &pool,
-            Grade { grade_name: "一年级".into(), ..Default::default() },
+            Grade {
+                grade_name: "一年级".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("grade");
@@ -807,11 +848,15 @@ mod tests {
         assert_eq!(info.school_year_name, "2026届");
         assert_eq!(info.class_name, "一年级2班");
         assert_eq!(
-            settings_repo::get_string(&pool, "bound_class_id", "").await.unwrap(),
+            settings_repo::get_string(&pool, "bound_class_id", "")
+                .await
+                .unwrap(),
             "class2"
         );
         assert_eq!(
-            settings_repo::get_string(&pool, "school_year_id", "").await.unwrap(),
+            settings_repo::get_string(&pool, "school_year_id", "")
+                .await
+                .unwrap(),
             "y2"
         );
 
@@ -822,7 +867,10 @@ mod tests {
             .is_none());
 
         // ③ 权威年为空 → 永不触发。
-        assert!(super::auto_switch_if_ready(&pool, None).await.unwrap().is_none());
+        assert!(super::auto_switch_if_ready(&pool, None)
+            .await
+            .unwrap()
+            .is_none());
 
         // ④ 名册为空 → 返回 None 且不改写绑定。
         // 先把绑定改回旧班（否则 ② 的「已对齐」会短路），再删学生。
@@ -838,7 +886,9 @@ mod tests {
             .unwrap()
             .is_none());
         assert_eq!(
-            settings_repo::get_string(&pool, "bound_class_id", "").await.unwrap(),
+            settings_repo::get_string(&pool, "bound_class_id", "")
+                .await
+                .unwrap(),
             "class1",
             "名册为空时不得改写绑定"
         );

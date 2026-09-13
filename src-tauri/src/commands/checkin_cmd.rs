@@ -228,5 +228,6 @@ pub async fn checkin_exception_students(
     date: String,
     class_name: Option<String>,
 ) -> AppResult<Vec<ExceptionStudentRow>> {
-    crate::db::repo::checkin_repo::exception_students(&state.pool, &date, class_name.as_deref()).await
+    crate::db::repo::checkin_repo::exception_students(&state.pool, &date, class_name.as_deref())
+        .await
 }

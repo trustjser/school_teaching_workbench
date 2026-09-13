@@ -110,8 +110,8 @@ pub async fn ensure_defaults(
 mod tests {
     use super::{ensure_defaults, local_machine_id, stable_device_id};
     use crate::db::models::AppMode;
-    use crate::db::{create_pool, run_migrations};
     use crate::db::repo::settings_repo;
+    use crate::db::{create_pool, run_migrations};
 
     #[test]
     fn stable_device_id_is_repeatable_and_namespaced_by_mode() {
@@ -144,7 +144,9 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            settings_repo::get_string(&pool, "app_mode", "client").await.unwrap(),
+            settings_repo::get_string(&pool, "app_mode", "client")
+                .await
+                .unwrap(),
             "master"
         );
         pool.close().await;
@@ -165,7 +167,9 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            settings_repo::get_string(&pool, "app_mode", "master").await.unwrap(),
+            settings_repo::get_string(&pool, "app_mode", "master")
+                .await
+                .unwrap(),
             "client"
         );
         pool.close().await;
@@ -190,7 +194,9 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            settings_repo::get_string(&pool, "app_mode", "master").await.unwrap(),
+            settings_repo::get_string(&pool, "app_mode", "master")
+                .await
+                .unwrap(),
             "client"
         );
         pool.close().await;
@@ -201,7 +207,9 @@ mod tests {
     async fn migrates_legacy_client_namespace_when_master_is_already_configured() {
         let dir = std::env::temp_dir().join(format!("lanwb_settings_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("create temp dir");
-        let pool = create_pool(&dir.join("settings.db")).await.expect("create pool");
+        let pool = create_pool(&dir.join("settings.db"))
+            .await
+            .expect("create pool");
         run_migrations(&pool).await.expect("run migrations");
         settings_repo::set_raw(&pool, "app_mode", Some("master"), "string")
             .await

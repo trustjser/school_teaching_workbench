@@ -200,13 +200,15 @@ async fn settle_broadcast_delivery(
         return;
     }
     if let Err(e) =
-        crate::db::repo::broadcast_repo::mark_sent_when_delivered(&state.pool, &item.entity_id).await
+        crate::db::repo::broadcast_repo::mark_sent_when_delivered(&state.pool, &item.entity_id)
+            .await
     {
         tracing::warn!("同步：结算广播投递状态失败: {}", e);
     }
 }
 
-async fn recover_unsynced_broadcast_entities(state: &Arc<AppState>) {    if settings_repo::get_string(&state.pool, "app_mode", "client")
+async fn recover_unsynced_broadcast_entities(state: &Arc<AppState>) {
+    if settings_repo::get_string(&state.pool, "app_mode", "client")
         .await
         .ok()
         .as_deref()
@@ -283,16 +285,20 @@ async fn deliver_item(
             Ok(status)
         }
         "ack" | "recall" => {
-            let to = item
-                .target_device_id
-                .clone()
-                .ok_or((ErrorCode::Validation, format!("{} 缺少目标设备", item.op_type)))?;
+            let to = item.target_device_id.clone().ok_or((
+                ErrorCode::Validation,
+                format!("{} 缺少目标设备", item.op_type),
+            ))?;
             let base_url = item
                 .target_base_url
                 .clone()
                 .ok_or((ErrorCode::Net, format!("{} 缺少目标地址", item.op_type)))?;
-            let payload: Value = serde_json::from_str(&item.payload)
-                .map_err(|e| (ErrorCode::Validation, format!("{} 载荷非法: {}", item.op_type, e)))?;
+            let payload: Value = serde_json::from_str(&item.payload).map_err(|e| {
+                (
+                    ErrorCode::Validation,
+                    format!("{} 载荷非法: {}", item.op_type, e),
+                )
+            })?;
             let status = client::deliver(
                 state,
                 &to,

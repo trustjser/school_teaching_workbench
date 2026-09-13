@@ -101,15 +101,18 @@ pub async fn student_batch_import(
             }
         }
 
-        let ensured = crate::db::repo::directory_repo::ensure_classes(&state.pool, year_id, &refs).await?;
+        let ensured =
+            crate::db::repo::directory_repo::ensure_classes(&state.pool, year_id, &refs).await?;
         for grade_id in &ensured.created_grade_ids {
             if let Some(g) = crate::db::repo::grade_repo::get(&state.pool, grade_id).await? {
-                outbox::enqueue_entity(&state.pool, "grade", &g.id, "upsert", &g, None, None).await?;
+                outbox::enqueue_entity(&state.pool, "grade", &g.id, "upsert", &g, None, None)
+                    .await?;
             }
         }
         for class_id in &ensured.created_class_ids {
             if let Some(c) = crate::db::repo::class_repo::get(&state.pool, class_id).await? {
-                outbox::enqueue_entity(&state.pool, "class", &c.id, "upsert", &c, None, None).await?;
+                outbox::enqueue_entity(&state.pool, "class", &c.id, "upsert", &c, None, None)
+                    .await?;
             }
         }
         for row in rows.iter_mut() {

@@ -14,7 +14,14 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.77.2"
+  # 工具链唯一来源，release.yml 与 src-tauri/Cargo.toml 的 rust-version 需同步。
+  #
+  # 为什么不能再用 1.77.2：Cargo.lock 的依赖树 MSRV 已涨到 1.88
+  # （darling 0.23 / time 0.3.55 / plist 1.10.1 / icu 2.3 等，且 40+ 个包为 edition 2024，
+  # 光 edition2024 就要求 Cargo >= 1.85）。低于 1.88 会在解析依赖时报
+  # `feature 'edition2024' is required ... not stabilized in this version of Cargo`。
+  # 升级依赖后若 CI 报同类错误，先把此值提上去。
+  RUST_TOOLCHAIN: "1.96.1"
 
 jobs:
   # ---------- 前端：类型检查 + 静态边界检查 + 双端构建 ----------
@@ -58,7 +65,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.77.2"
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: clippy, rustfmt
 
       - name: Cache cargo
@@ -88,5 +95,5 @@ jobs:
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
       - name: Cargo test
-        # 当前无 #[test]，仅作占位以便后续接入单元测试。
+        # lib 层单元测试（设置迁移 / 换届 / 同步 worker 等）。
         run: cargo test --manifest-path src-tauri/Cargo.toml

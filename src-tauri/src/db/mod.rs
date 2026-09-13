@@ -840,7 +840,10 @@ CREATE TABLE pending_queue (
             .unwrap()
             .expect("pending_queue 建表 SQL");
         assert!(sql.contains("school_year"), "新 CHECK 必须包含 school_year");
-        assert!(sql.contains("'recall'"), "新 CHECK 必须包含 recall（撤回指令）");
+        assert!(
+            sql.contains("'recall'"),
+            "新 CHECK 必须包含 recall（撤回指令）"
+        );
         assert!(
             !table_exists(db, "pending_queue_new").await.unwrap(),
             "不得残留 pending_queue_new"
@@ -904,10 +907,7 @@ CREATE TABLE pending_queue (
         .await
         .expect("读回撤回指令");
         assert_eq!(op, "recall");
-        assert_eq!(
-            endpoint, "/api/v1/broadcast/recall",
-            "op_type 决定投递端点"
-        );
+        assert_eq!(endpoint, "/api/v1/broadcast/recall", "op_type 决定投递端点");
 
         pool.close().await;
         std::fs::remove_dir_all(&dir).ok();

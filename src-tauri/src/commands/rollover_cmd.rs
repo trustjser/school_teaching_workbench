@@ -11,7 +11,9 @@ use tauri::State;
 
 use crate::config::constants::Events;
 use crate::db::models::{AppMode, ClassroomAssignment};
-use crate::db::repo::rollover_repo::{execute_excel, preview_excel, RolloverExcelReport, RolloverExcelRequest};
+use crate::db::repo::rollover_repo::{
+    execute_excel, preview_excel, RolloverExcelReport, RolloverExcelRequest,
+};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::sync::outbox;
@@ -32,7 +34,9 @@ pub async fn rollover_from_excel(
     let report = execute_excel(&state.pool, &request).await?;
 
     // 补发离线队列：新学年、新年级、新班级、落位学生。
-    if let Some(y) = crate::db::repo::school_year_repo::get(&state.pool, &report.new_school_year_id).await? {
+    if let Some(y) =
+        crate::db::repo::school_year_repo::get(&state.pool, &report.new_school_year_id).await?
+    {
         outbox::enqueue_entity(&state.pool, "school_year", &y.id, "upsert", &y, None, None).await?;
     }
     for g in &report.created_grades {
@@ -45,11 +49,14 @@ pub async fn rollover_from_excel(
         outbox::enqueue_entity(&state.pool, "student", &s.id, "upsert", s, None, None).await?;
     }
 
-    let _ = state.app.emit(Events::SCHOOL_YEAR_CHANGED, serde_json::json!({}));
-    let _ = state.app.emit(Events::CLASS_CHANGED, serde_json::json!({}));
     let _ = state
         .app
-        .emit(Events::DATA_IMPORTED, serde_json::json!({ "type": "rollover" }));
+        .emit(Events::SCHOOL_YEAR_CHANGED, serde_json::json!({}));
+    let _ = state.app.emit(Events::CLASS_CHANGED, serde_json::json!({}));
+    let _ = state.app.emit(
+        Events::DATA_IMPORTED,
+        serde_json::json!({ "type": "rollover" }),
+    );
     Ok(report)
 }
 
@@ -133,11 +140,21 @@ pub async fn client_switch_binding(
         .filter(|c| c.deleted_at.is_none() && c.school_year_id.as_deref() == Some(year_id))
         .ok_or_else(|| AppError::validation("目标班级尚未同步到本机，请先刷新目录"))?;
 
-    crate::db::repo::settings_repo::set_raw(&state.pool, "school_year_id", Some(year_id), "string").await?;
-    crate::db::repo::settings_repo::set_raw(&state.pool, "class_id", Some(class_id), "string").await?;
-    crate::db::repo::settings_repo::set_raw(&state.pool, "bound_class_id", Some(class_id), "string").await?;
+    crate::db::repo::settings_repo::set_raw(&state.pool, "school_year_id", Some(year_id), "string")
+        .await?;
+    crate::db::repo::settings_repo::set_raw(&state.pool, "class_id", Some(class_id), "string")
+        .await?;
+    crate::db::repo::settings_repo::set_raw(
+        &state.pool,
+        "bound_class_id",
+        Some(class_id),
+        "string",
+    )
+    .await?;
 
-    let _ = state.app.emit(Events::CLASS_CHANGED, serde_json::json!({ "id": class_id }));
+    let _ = state
+        .app
+        .emit(Events::CLASS_CHANGED, serde_json::json!({ "id": class_id }));
     Ok(SwitchBindingResult {
         school_year_id: year.id.clone(),
         school_year_name: year.school_year_name,

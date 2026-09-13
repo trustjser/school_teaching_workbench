@@ -98,7 +98,11 @@ pub struct BatchCreateResult {
 pub async fn batch_create(
     pool: &SqlitePool,
     req: BatchCreateRequest,
-) -> AppResult<BatchCreateResult> {    let has_grades = req.grades.iter().any(|g| !g.grade_name.trim().is_empty() || g.grade_id.is_some());
+) -> AppResult<BatchCreateResult> {
+    let has_grades = req
+        .grades
+        .iter()
+        .any(|g| !g.grade_name.trim().is_empty() || g.grade_id.is_some());
     if !has_grades && req.classes.is_empty() {
         return Err(AppError::validation("至少要创建一个年级或班级"));
     }
@@ -149,8 +153,18 @@ pub async fn batch_create(
                         .unwrap_or_default()
                         .to_string(),
                     school_year_name: name.to_string(),
-                    start_date: input.start_date.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| s.to_string()),
-                    end_date: input.end_date.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                    start_date: input
+                        .start_date
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string()),
+                    end_date: input
+                        .end_date
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string()),
                     sort_order: input.sort_order,
                     remark: None,
                     created_at: now,
@@ -200,9 +214,17 @@ pub async fn batch_create(
             continue; // 空行：只为了占 key 的输入，跳过
         }
         if resolved.contains_key(&input.key) {
-            return Err(AppError::validation(&format!("年级关联键重复：{}", input.key)));
+            return Err(AppError::validation(&format!(
+                "年级关联键重复：{}",
+                input.key
+            )));
         }
-        let grade = if let Some(gid) = input.grade_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let grade = if let Some(gid) = input
+            .grade_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             let row: Option<(String, String, String)> = sqlx::query_as(
                 "SELECT id, grade_no, grade_name FROM grades WHERE id = ? AND deleted_at IS NULL",
             )
@@ -212,7 +234,11 @@ pub async fn batch_create(
             match row {
                 Some((id, grade_no, grade_name)) => {
                     grades_reused += 1;
-                    ResolvedGrade { id, grade_no, grade_name }
+                    ResolvedGrade {
+                        id,
+                        grade_no,
+                        grade_name,
+                    }
                 }
                 None => return Err(AppError::validation(&format!("指定的年级不存在：{}", gid))),
             }
@@ -226,7 +252,11 @@ pub async fn batch_create(
             match row {
                 Some((id, grade_no, grade_name)) => {
                     grades_reused += 1;
-                    ResolvedGrade { id, grade_no, grade_name }
+                    ResolvedGrade {
+                        id,
+                        grade_no,
+                        grade_name,
+                    }
                 }
                 None => {
                     let id = new_id();
@@ -263,7 +293,11 @@ pub async fn batch_create(
                         sync_state: "pending".to_string(),
                         dirty: true,
                     });
-                    ResolvedGrade { id, grade_no: grade_no.to_string(), grade_name: name.to_string() }
+                    ResolvedGrade {
+                        id,
+                        grade_no: grade_no.to_string(),
+                        grade_name: name.to_string(),
+                    }
                 }
             }
         };
@@ -282,10 +316,17 @@ pub async fn batch_create(
             classes_skipped += 1;
             continue;
         }
-        let grade = resolved
-            .get(&input.grade_key)
-            .ok_or_else(|| AppError::validation(&format!("班级「{}」引用了未定义的年级键：{}", class_name, input.grade_key)))?;
-        let class_no = input.class_no.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let grade = resolved.get(&input.grade_key).ok_or_else(|| {
+            AppError::validation(&format!(
+                "班级「{}」引用了未定义的年级键：{}",
+                class_name, input.grade_key
+            ))
+        })?;
+        let class_no = input
+            .class_no
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
         let dedup_key = format!(
             "{}|{}|{}|{}",
             school_year_id,
@@ -345,7 +386,12 @@ pub async fn batch_create(
             grade_name: Some(grade.grade_name.clone()),
             class_no: class_no.map(|s| s.to_string()),
             class_name: class_name.to_string(),
-            head_teacher: input.head_teacher.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+            head_teacher: input
+                .head_teacher
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string()),
             sort_order: input.sort_order,
             remark: None,
             created_at: now,
@@ -548,7 +594,8 @@ mod tests {
     use crate::db::{create_pool, run_migrations};
 
     async fn fresh_pool() -> SqlitePool {
-        let dir = std::env::temp_dir().join(format!("lanwb_directory_batch_{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("lanwb_directory_batch_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         let pool = create_pool(&dir.join("test.db")).await.expect("pool");
         run_migrations(&pool).await.expect("migrations");
@@ -610,24 +657,34 @@ mod tests {
     #[tokio::test]
     async fn batch_create_makes_year_grades_classes_in_one_shot() {
         let pool = fresh_pool().await;
-        let report = batch_create(&pool, sample_request("2027届")).await.expect("batch create");
+        let report = batch_create(&pool, sample_request("2027届"))
+            .await
+            .expect("batch create");
         assert!(report.school_year_created);
         assert_eq!(report.grades_created, 2);
         assert_eq!(report.classes_created, 3);
         assert_eq!(report.classes_skipped, 0);
 
-        let classes = class_repo::list_by_year(&pool, &report.school_year_id).await.expect("classes");
+        let classes = class_repo::list_by_year(&pool, &report.school_year_id)
+            .await
+            .expect("classes");
         assert_eq!(classes.len(), 3);
         // 冗余年级字段在事务内填充
-        assert!(classes.iter().all(|c| c.grade_name.as_deref() == Some("一年级")
-            || c.grade_name.as_deref() == Some("二年级")));
+        assert!(classes
+            .iter()
+            .all(|c| c.grade_name.as_deref() == Some("一年级")
+                || c.grade_name.as_deref() == Some("二年级")));
     }
 
     #[tokio::test]
     async fn batch_create_is_idempotent_on_rerun() {
         let pool = fresh_pool().await;
-        let first = batch_create(&pool, sample_request("2027届")).await.expect("first");
-        let second = batch_create(&pool, sample_request("2027届")).await.expect("second");
+        let first = batch_create(&pool, sample_request("2027届"))
+            .await
+            .expect("first");
+        let second = batch_create(&pool, sample_request("2027届"))
+            .await
+            .expect("second");
         assert!(!second.school_year_created);
         assert_eq!(second.grades_created, 0);
         assert_eq!(second.grades_reused, 2);
@@ -635,7 +692,9 @@ mod tests {
         assert_eq!(second.classes_skipped, 3);
         assert_eq!(second.school_year_id, first.school_year_id);
 
-        let classes = class_repo::list_by_year(&pool, &first.school_year_id).await.expect("classes");
+        let classes = class_repo::list_by_year(&pool, &first.school_year_id)
+            .await
+            .expect("classes");
         assert_eq!(classes.len(), 3, "重复执行不得产生重复班级");
     }
 
@@ -680,13 +739,21 @@ mod tests {
         let pool = fresh_pool().await;
         let year = school_year_repo::upsert(
             &pool,
-            SchoolYear { school_year_no: "2026".into(), school_year_name: "2026学年".into(), ..Default::default() },
+            SchoolYear {
+                school_year_no: "2026".into(),
+                school_year_name: "2026学年".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("year");
         let grade = grade_repo::upsert(
             &pool,
-            Grade { grade_no: "3".into(), grade_name: "三年级".into(), ..Default::default() },
+            Grade {
+                grade_no: "3".into(),
+                grade_name: "三年级".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("grade");
@@ -714,7 +781,9 @@ mod tests {
         assert_eq!(report.grades_created, 0);
         assert_eq!(report.grades_reused, 1);
         assert_eq!(report.classes_created, 1);
-        let classes = class_repo::list_by_year(&pool, &year.id).await.expect("classes");
+        let classes = class_repo::list_by_year(&pool, &year.id)
+            .await
+            .expect("classes");
         assert_eq!(classes.len(), 1);
         assert_eq!(classes[0].grade_name.as_deref(), Some("三年级"));
     }
@@ -724,23 +793,40 @@ mod tests {
         let pool = fresh_pool().await;
         let year = school_year_repo::upsert(
             &pool,
-            SchoolYear { school_year_no: "2026".into(), school_year_name: "2026学年".into(), ..Default::default() },
+            SchoolYear {
+                school_year_no: "2026".into(),
+                school_year_name: "2026学年".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("year");
 
         let refs = vec![
-            EnsureClassRef { grade_name: "一年级".into(), class_name: "一年级1班".into() },
-            EnsureClassRef { grade_name: "一年级".into(), class_name: "一年级2班".into() },
-            EnsureClassRef { grade_name: "二年级".into(), class_name: "二年级1班".into() },
+            EnsureClassRef {
+                grade_name: "一年级".into(),
+                class_name: "一年级1班".into(),
+            },
+            EnsureClassRef {
+                grade_name: "一年级".into(),
+                class_name: "一年级2班".into(),
+            },
+            EnsureClassRef {
+                grade_name: "二年级".into(),
+                class_name: "二年级1班".into(),
+            },
         ];
-        let first = ensure_classes(&pool, &year.id, &refs).await.expect("ensure");
+        let first = ensure_classes(&pool, &year.id, &refs)
+            .await
+            .expect("ensure");
         assert_eq!(first.grades_created, 2);
         assert_eq!(first.classes_created, 3);
         assert_eq!(first.class_map.len(), 3);
 
         // 幂等重跑：不再新建。
-        let second = ensure_classes(&pool, &year.id, &refs).await.expect("ensure again");
+        let second = ensure_classes(&pool, &year.id, &refs)
+            .await
+            .expect("ensure again");
         assert_eq!(second.grades_created, 0);
         assert_eq!(second.classes_created, 0);
         // 映射指向同一批班级。
@@ -753,7 +839,9 @@ mod tests {
             assert_eq!(&found.2, class_id);
         }
 
-        let classes = class_repo::list_by_year(&pool, &year.id).await.expect("classes");
+        let classes = class_repo::list_by_year(&pool, &year.id)
+            .await
+            .expect("classes");
         assert_eq!(classes.len(), 3);
         assert!(classes.iter().all(|c| c.grade_id.is_some()));
     }
@@ -763,7 +851,11 @@ mod tests {
         let pool = fresh_pool().await;
         let year = school_year_repo::upsert(
             &pool,
-            SchoolYear { school_year_no: "2026".into(), school_year_name: "2026学年".into(), ..Default::default() },
+            SchoolYear {
+                school_year_no: "2026".into(),
+                school_year_name: "2026学年".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("year");

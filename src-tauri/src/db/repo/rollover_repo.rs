@@ -14,7 +14,7 @@ use sqlx::SqlitePool;
 
 use crate::db::models::{Class, Grade, Student, StudentImportRow};
 use crate::db::repo::{
-    classroom_repo, class_repo, directory_repo, grade_repo, new_id, now_ms, school_year_repo,
+    class_repo, classroom_repo, directory_repo, grade_repo, new_id, now_ms, school_year_repo,
     student_repo,
 };
 use crate::error::{AppError, AppResult};
@@ -137,7 +137,10 @@ pub async fn preview_excel(
 
     // 目标学年按名幂等。
     let existing_year = school_year_repo::find_by_name(pool, name).await?;
-    let year_id = existing_year.as_ref().map(|y| y.id.clone()).unwrap_or_default();
+    let year_id = existing_year
+        .as_ref()
+        .map(|y| y.id.clone())
+        .unwrap_or_default();
 
     // Excel (年级, 班级) 引用去重。
     let mut refs: Vec<crate::db::repo::directory_repo::EnsureClassRef> = Vec::new();
@@ -167,7 +170,12 @@ pub async fn preview_excel(
     };
     let existing_keys: std::collections::HashSet<(String, String)> = existing_classes
         .iter()
-        .map(|c| (c.grade_name.clone().unwrap_or_default(), c.class_name.clone()))
+        .map(|c| {
+            (
+                c.grade_name.clone().unwrap_or_default(),
+                c.class_name.clone(),
+            )
+        })
         .collect();
     let ref_keys: std::collections::HashSet<(String, String)> = refs
         .iter()
@@ -192,9 +200,11 @@ pub async fn preview_excel(
                 c.grade_name.clone().unwrap_or_default(),
                 c.class_name.clone(),
             )) {
-                directory
-                    .untouched_classes
-                    .push(format!("{}{}", c.grade_name.clone().unwrap_or_default(), c.class_name));
+                directory.untouched_classes.push(format!(
+                    "{}{}",
+                    c.grade_name.clone().unwrap_or_default(),
+                    c.class_name
+                ));
             }
         }
     }
@@ -202,7 +212,8 @@ pub async fn preview_excel(
     // 行校验（row_index 对齐 Excel 1-based 行号：首行表头，数据从 2 起）。
     let mut errors: Vec<RolloverRowError> = Vec::new();
     let mut seen_no: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
-    let mut seen_seat: std::collections::HashMap<(String, i64), String> = std::collections::HashMap::new();
+    let mut seen_seat: std::collections::HashMap<(String, i64), String> =
+        std::collections::HashMap::new();
     for (i, r) in req.rows.iter().enumerate() {
         let row_index = (i + 2) as i64;
         let grade = r.grade.as_deref().map(str::trim).unwrap_or_default();
@@ -260,7 +271,12 @@ pub async fn preview_excel(
         let excel_class_names: std::collections::HashSet<String> = req
             .rows
             .iter()
-            .filter_map(|r| r.class_name.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+            .filter_map(|r| {
+                r.class_name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+            })
             .map(str::to_string)
             .collect();
         build_binding_suggestions(
@@ -305,7 +321,10 @@ async fn build_binding_suggestions(
         .map(|c| (c.id.as_str(), c.class_name.as_str()))
         .collect();
     let mut out: Vec<RolloverBindingSuggestion> = Vec::new();
-    for a in assignments.iter().filter(|a| a.school_year_id == source_year_id) {
+    for a in assignments
+        .iter()
+        .filter(|a| a.school_year_id == source_year_id)
+    {
         let Some(room) = rooms.iter().find(|r| r.id == a.classroom_id) else {
             continue;
         };
@@ -317,11 +336,7 @@ async fn build_binding_suggestions(
                 .iter()
                 .find(|c| c.class_name == n)
                 .map(|c| (Some(c.id.clone()), c.class_name.clone()))
-                .or_else(|| {
-                    excel_class_names
-                        .contains(n)
-                        .then(|| (None, n.to_string()))
-                })
+                .or_else(|| excel_class_names.contains(n).then(|| (None, n.to_string())))
         });
         out.push(RolloverBindingSuggestion {
             classroom_id: room.id.clone(),
@@ -428,7 +443,11 @@ pub async fn execute_excel(
         // 合法行在 preview_excel 已校验；此处按同口径 trim 后跳过残行（防御）。
         let grade = r.grade.as_deref().map(str::trim).unwrap_or_default();
         let class = r.class_name.as_deref().map(str::trim).unwrap_or_default();
-        if grade.is_empty() || class.is_empty() || r.student_no.trim().is_empty() || r.name.trim().is_empty() {
+        if grade.is_empty()
+            || class.is_empty()
+            || r.student_no.trim().is_empty()
+            || r.name.trim().is_empty()
+        {
             continue;
         }
         // class_id 从事务内的目录预置结果解析（pool 读不到未提交的新建班级）。
@@ -513,7 +532,12 @@ pub async fn execute_excel(
         // 两者皆无 → 暂不绑定（跳过，保留旧绑定语义由执行记录页仲裁）。
         let class_id: String = if let Some(id) = c.class_id.as_deref().filter(|s| !s.is_empty()) {
             id.to_string()
-        } else if let Some(cname) = c.class_name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        } else if let Some(cname) = c
+            .class_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             let matched: Vec<&str> = ensured
                 .class_map
                 .iter()
@@ -605,8 +629,13 @@ pub async fn execute_excel(
 
     // ---- 6. 收尾：created_grades/created_classes 已在事务内填齐（审计快照一致）；
     //          权威当前年：事务外单条幂等写；失败重跑自愈。 ----
-    crate::db::repo::settings_repo::set_raw(pool, "current_school_year_id", Some(&year_id), "string")
-        .await?;
+    crate::db::repo::settings_repo::set_raw(
+        pool,
+        "current_school_year_id",
+        Some(&year_id),
+        "string",
+    )
+    .await?;
 
     Ok(report)
 }
@@ -659,10 +688,10 @@ pub async fn append_rebind_audit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::repo::{class_repo, grade_repo, school_year_repo};
-    use crate::db::{create_pool, run_migrations};
     use crate::db::models::{Classroom, Grade, SchoolYear, StudentImportRow};
     use crate::db::repo::rollover_repo::{preview_excel, RolloverExcelRequest};
+    use crate::db::repo::{class_repo, grade_repo, school_year_repo};
+    use crate::db::{create_pool, run_migrations};
 
     async fn fresh_pool() -> SqlitePool {
         let dir = std::env::temp_dir().join(format!("lanwb_rollover_{}", uuid::Uuid::new_v4()));
@@ -725,13 +754,47 @@ mod tests {
 
         let src_year = school_year_repo::upsert(
             &pool,
-            SchoolYear { school_year_no: "2025".into(), school_year_name: "2025学年".into(), ..Default::default() },
+            SchoolYear {
+                school_year_no: "2025".into(),
+                school_year_name: "2025学年".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("src year");
-        let g1 = grade_repo::upsert(&pool, Grade { grade_no: "1".into(), grade_name: "一年级".into(), sort_order: 1, ..Default::default() }).await.expect("g1");
-        let g2 = grade_repo::upsert(&pool, Grade { grade_no: "2".into(), grade_name: "二年级".into(), sort_order: 2, ..Default::default() }).await.expect("g2");
-        let g3 = grade_repo::upsert(&pool, Grade { grade_no: "3".into(), grade_name: "三年级".into(), sort_order: 3, ..Default::default() }).await.expect("g3");
+        let g1 = grade_repo::upsert(
+            &pool,
+            Grade {
+                grade_no: "1".into(),
+                grade_name: "一年级".into(),
+                sort_order: 1,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("g1");
+        let g2 = grade_repo::upsert(
+            &pool,
+            Grade {
+                grade_no: "2".into(),
+                grade_name: "二年级".into(),
+                sort_order: 2,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("g2");
+        let g3 = grade_repo::upsert(
+            &pool,
+            Grade {
+                grade_no: "3".into(),
+                grade_name: "三年级".into(),
+                sort_order: 3,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("g3");
 
         let mut src_class_ids = std::collections::HashMap::new();
         for (grade, no, name) in [
@@ -759,7 +822,11 @@ mod tests {
         // 目标学年目录：一年级1班 / 二年级1班。
         let new_year = school_year_repo::upsert(
             &pool,
-            SchoolYear { school_year_no: "2026".into(), school_year_name: "2026-2027学年".into(), ..Default::default() },
+            SchoolYear {
+                school_year_no: "2026".into(),
+                school_year_name: "2026-2027学年".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("new year");
@@ -789,7 +856,9 @@ mod tests {
             ("教室C", "三年级1班"),
             ("教室D", "二年级1班"),
         ] {
-            let r = classroom_repo::upsert(&pool, room(room_name)).await.expect("room");
+            let r = classroom_repo::upsert(&pool, room(room_name))
+                .await
+                .expect("room");
             classroom_repo::assign(&pool, &r.id, &src_year.id, &src_class_ids[class_name])
                 .await
                 .expect("assign");
@@ -824,21 +893,31 @@ mod tests {
         assert_eq!(a.match_kind, "conflict");
         assert_eq!(a.old_class.as_deref(), Some("一年级1班"));
         assert_eq!(a.suggested_class.as_deref(), Some("一年级1班"));
-        assert_eq!(a.suggested_class_id.as_deref(), Some(new_class_ids["一年级1班"].as_str()));
+        assert_eq!(
+            a.suggested_class_id.as_deref(),
+            Some(new_class_ids["一年级1班"].as_str())
+        );
         assert_eq!(b.match_kind, "conflict");
         assert_eq!(b.suggested_class.as_deref(), Some("一年级1班"));
 
         assert_eq!(d.match_kind, "auto");
         assert_eq!(d.old_class.as_deref(), Some("二年级1班"));
         assert_eq!(d.suggested_class.as_deref(), Some("二年级1班"));
-        assert_eq!(d.suggested_class_id.as_deref(), Some(new_class_ids["二年级1班"].as_str()));
+        assert_eq!(
+            d.suggested_class_id.as_deref(),
+            Some(new_class_ids["二年级1班"].as_str())
+        );
 
         assert_eq!(c.match_kind, "none");
         assert_eq!(c.old_class.as_deref(), Some("三年级1班"));
         assert_eq!(c.suggested_class, None);
         assert_eq!(c.suggested_class_id, None);
 
-        let kinds: Vec<&str> = report.binding_suggestions.iter().map(|s| s.match_kind.as_str()).collect();
+        let kinds: Vec<&str> = report
+            .binding_suggestions
+            .iter()
+            .map(|s| s.match_kind.as_str())
+            .collect();
         assert_eq!(kinds.iter().filter(|k| **k == "auto").count(), 1);
         assert_eq!(kinds.iter().filter(|k| **k == "conflict").count(), 2);
         assert_eq!(kinds.iter().filter(|k| **k == "none").count(), 1);
@@ -852,7 +931,7 @@ mod tests {
             "2026-2027学年",
             vec![
                 row("S1", "张三", "一年级", "一年级1班", Some(1)),
-                row("S2", "李四", "", "一年级1班", None),      // 缺年级 → 错误行
+                row("S2", "李四", "", "一年级1班", None), // 缺年级 → 错误行
                 row("S1", "王五", "一年级", "一年级1班", None), // 同班同学号重复 → 错误行
             ],
         );
@@ -912,13 +991,14 @@ mod tests {
             .iter()
             .map(|c| c["id"].as_str().expect("class id"))
             .collect();
-        assert!(
-            !audited_class_ids.is_empty(),
-            "审计快照应记录新建班级"
-        );
+        assert!(!audited_class_ids.is_empty(), "审计快照应记录新建班级");
         assert_eq!(
             audited_class_ids,
-            report.created_classes.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            report
+                .created_classes
+                .iter()
+                .map(|c| c.id.as_str())
+                .collect::<Vec<_>>(),
             "审计快照的 created_classes 应与返回值一致"
         );
         assert_eq!(
@@ -939,16 +1019,51 @@ mod tests {
 
         let src_year = school_year_repo::upsert(
             &pool,
-            SchoolYear { school_year_no: "2025".into(), school_year_name: "2025学年".into(), ..Default::default() },
+            SchoolYear {
+                school_year_no: "2025".into(),
+                school_year_name: "2025学年".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("src year");
-        let g1 = grade_repo::upsert(&pool, Grade { grade_no: "1".into(), grade_name: "一年级".into(), sort_order: 1, ..Default::default() }).await.expect("g1");
-        let g2 = grade_repo::upsert(&pool, Grade { grade_no: "2".into(), grade_name: "二年级".into(), sort_order: 2, ..Default::default() }).await.expect("g2");
-        let g3 = grade_repo::upsert(&pool, Grade { grade_no: "3".into(), grade_name: "三年级".into(), sort_order: 3, ..Default::default() }).await.expect("g3");
+        let g1 = grade_repo::upsert(
+            &pool,
+            Grade {
+                grade_no: "1".into(),
+                grade_name: "一年级".into(),
+                sort_order: 1,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("g1");
+        let g2 = grade_repo::upsert(
+            &pool,
+            Grade {
+                grade_no: "2".into(),
+                grade_name: "二年级".into(),
+                sort_order: 2,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("g2");
+        let g3 = grade_repo::upsert(
+            &pool,
+            Grade {
+                grade_no: "3".into(),
+                grade_name: "三年级".into(),
+                sort_order: 3,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("g3");
 
         let mut src_class_ids = std::collections::HashMap::new();
-        for (grade, name) in [(&g1, "一年级1班"), (&g2, "二年级1班"), (&g3, "三年级1班")] {
+        for (grade, name) in [(&g1, "一年级1班"), (&g2, "二年级1班"), (&g3, "三年级1班")]
+        {
             let c = class_repo::upsert(
                 &pool,
                 Class {
@@ -975,7 +1090,9 @@ mod tests {
             ("教室C", "三年级1班"),
             ("教室D", "二年级1班"),
         ] {
-            let r = classroom_repo::upsert(&pool, room(room_name)).await.expect("room");
+            let r = classroom_repo::upsert(&pool, room(room_name))
+                .await
+                .expect("room");
             classroom_repo::assign(&pool, &r.id, &src_year.id, &src_class_ids[class_name])
                 .await
                 .expect("assign");
@@ -1005,9 +1122,16 @@ mod tests {
         };
         for name in ["教室A", "教室B"] {
             let s = find(name);
-            assert_eq!(s.match_kind, "conflict", "{name}：同名被两教室建议应 conflict");
+            assert_eq!(
+                s.match_kind, "conflict",
+                "{name}：同名被两教室建议应 conflict"
+            );
             assert_eq!(s.suggested_class_id, None, "{name}：目标学年未建不应有 id");
-            assert_eq!(s.suggested_class.as_deref(), Some("一年级1班"), "{name}：应按名给出建议");
+            assert_eq!(
+                s.suggested_class.as_deref(),
+                Some("一年级1班"),
+                "{name}：应按名给出建议"
+            );
         }
         let d = find("教室D");
         assert_eq!(d.match_kind, "auto");
@@ -1018,7 +1142,11 @@ mod tests {
         assert_eq!(c.suggested_class, None);
         assert_eq!(c.suggested_class_id, None);
 
-        let kinds: Vec<&str> = report.binding_suggestions.iter().map(|s| s.match_kind.as_str()).collect();
+        let kinds: Vec<&str> = report
+            .binding_suggestions
+            .iter()
+            .map(|s| s.match_kind.as_str())
+            .collect();
         assert_eq!(kinds.iter().filter(|k| **k == "auto").count(), 1);
         assert_eq!(kinds.iter().filter(|k| **k == "conflict").count(), 2);
         assert_eq!(kinds.iter().filter(|k| **k == "none").count(), 1);
@@ -1032,11 +1160,25 @@ mod tests {
 
         let src_year = school_year_repo::upsert(
             &pool,
-            SchoolYear { school_year_no: "2025".into(), school_year_name: "2025学年".into(), ..Default::default() },
+            SchoolYear {
+                school_year_no: "2025".into(),
+                school_year_name: "2025学年".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("src year");
-        let g1 = grade_repo::upsert(&pool, Grade { grade_no: "1".into(), grade_name: "一年级".into(), sort_order: 1, ..Default::default() }).await.expect("g1");
+        let g1 = grade_repo::upsert(
+            &pool,
+            Grade {
+                grade_no: "1".into(),
+                grade_name: "一年级".into(),
+                sort_order: 1,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("g1");
         let src_class = class_repo::upsert(
             &pool,
             Class {
@@ -1051,7 +1193,9 @@ mod tests {
         )
         .await
         .expect("src class");
-        let r = classroom_repo::upsert(&pool, room("教室A")).await.expect("room");
+        let r = classroom_repo::upsert(&pool, room("教室A"))
+            .await
+            .expect("room");
         classroom_repo::assign(&pool, &r.id, &src_year.id, &src_class.id)
             .await
             .expect("assign");
@@ -1081,11 +1225,12 @@ mod tests {
         .await
         .expect("assignments");
         assert_eq!(rows.len(), 1, "应恰好落库一条新学年绑定");
-        let bound: (String, String) = sqlx::query_as("SELECT class_name, school_year_id FROM classes WHERE id = ?")
-            .bind(&rows[0].0)
-            .fetch_one(&pool)
-            .await
-            .expect("bound class");
+        let bound: (String, String) =
+            sqlx::query_as("SELECT class_name, school_year_id FROM classes WHERE id = ?")
+                .bind(&rows[0].0)
+                .fetch_one(&pool)
+                .await
+                .expect("bound class");
         assert_eq!(bound.0, "一年级1班", "按名字解析到的班级应正确");
         assert_eq!(bound.1, report.new_school_year_id, "绑定班级应属于新学年");
 
@@ -1103,10 +1248,9 @@ mod tests {
                 .expect("summary");
         let audited: serde_json::Value =
             serde_json::from_str(&summary_json).expect("summary_json 反序列化");
-        let audited_bindings: Vec<(String, String)> = serde_json::from_value(
-            audited["appliedBindings"].clone(),
-        )
-        .expect("appliedBindings 反序列化");
+        let audited_bindings: Vec<(String, String)> =
+            serde_json::from_value(audited["appliedBindings"].clone())
+                .expect("appliedBindings 反序列化");
         assert_eq!(
             audited_bindings, report.applied_bindings,
             "审计快照的 applied_bindings 应与返回值一致"
@@ -1119,11 +1263,17 @@ mod tests {
         let pool = fresh_pool().await;
         let src_year = school_year_repo::upsert(
             &pool,
-            SchoolYear { school_year_no: "2025".into(), school_year_name: "2025学年".into(), ..Default::default() },
+            SchoolYear {
+                school_year_no: "2025".into(),
+                school_year_name: "2025学年".into(),
+                ..Default::default()
+            },
         )
         .await
         .expect("src year");
-        let r = classroom_repo::upsert(&pool, room("教室A")).await.expect("room");
+        let r = classroom_repo::upsert(&pool, room("教室A"))
+            .await
+            .expect("room");
 
         let req = RolloverExcelRequest {
             source_school_year_id: Some(src_year.id.clone()),
@@ -1150,7 +1300,6 @@ mod tests {
             "失败执行不得留下半个学年"
         );
     }
-
 
     #[tokio::test]
     async fn execute_excel_rejects_rows_with_errors() {

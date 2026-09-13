@@ -990,7 +990,10 @@ mod tests {
         assert_eq!(reopened.status, "active");
 
         // 只改这三列：标题等业务字段不受影响。
-        let after = get(&pool, "task-local").await.expect("读回任务").expect("存在");
+        let after = get(&pool, "task-local")
+            .await
+            .expect("读回任务")
+            .expect("存在");
         assert_eq!(after.title, "听写");
         assert_eq!(after.scope, "class");
 
@@ -1009,11 +1012,19 @@ mod tests {
             let err = set_status(&pool, "task-local", bad)
                 .await
                 .expect_err(&format!("{} 应被拒绝", bad));
-            assert_eq!(err.code, crate::error::ErrorCode::Validation, "{} 应返回校验错误", bad);
+            assert_eq!(
+                err.code,
+                crate::error::ErrorCode::Validation,
+                "{} 应返回校验错误",
+                bad
+            );
         }
 
         // 被拒绝的调用不能留下副作用。
-        let after = get(&pool, "task-local").await.expect("读回任务").expect("存在");
+        let after = get(&pool, "task-local")
+            .await
+            .expect("读回任务")
+            .expect("存在");
         assert_eq!(after.status, "active");
         assert_eq!(after.sync_state, "synced", "非法调用不应把任务置脏");
 
@@ -1149,12 +1160,25 @@ async fn ended_task_views_survive_rollover_grade_rewrites() {
         .execute(&pool).await.expect("插入记录");
 
     let matrix = matrix_for_class(&pool, "task-h", None).await.expect("矩阵");
-    let ids: Vec<&str> = matrix.students.iter().map(|s| s.student_id.as_str()).collect();
-    assert_eq!(ids, vec!["stu-1", "stu-2"], "已结束任务名单 = 有记录的学生（含已转出），排除无记录的新学生");
+    let ids: Vec<&str> = matrix
+        .students
+        .iter()
+        .map(|s| s.student_id.as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        vec!["stu-1", "stu-2"],
+        "已结束任务名单 = 有记录的学生（含已转出），排除无记录的新学生"
+    );
 
-    let rows = progress_list(&pool, "task-h", None, None).await.expect("进度");
+    let rows = progress_list(&pool, "task-h", None, None)
+        .await
+        .expect("进度");
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].class_name, "一(1)班", "分组标签用任务自身的班级（历史口径）");
+    assert_eq!(
+        rows[0].class_name, "一(1)班",
+        "分组标签用任务自身的班级（历史口径）"
+    );
     assert_eq!(rows[0].total, 2);
     assert_eq!(rows[0].final_count, 1);
     assert_eq!(rows[0].pending_count, 1);

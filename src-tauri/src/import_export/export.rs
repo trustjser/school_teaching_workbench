@@ -190,7 +190,9 @@ fn write_exception_sheet(
     fmt: &Format,
     rows: &[ExceptionStudentRow],
 ) -> AppResult<()> {
-    let headers = ["学号", "姓名", "年级", "班级", "状态", "日期", "时段", "备注"];
+    let headers = [
+        "学号", "姓名", "年级", "班级", "状态", "日期", "时段", "备注",
+    ];
     for (c, h) in headers.iter().copied().enumerate() {
         ws.write_string_with_format(0, c as u16, h, fmt)
             .map_err(xlsx_err)?;

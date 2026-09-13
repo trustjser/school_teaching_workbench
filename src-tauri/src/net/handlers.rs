@@ -639,7 +639,10 @@ mod tests {
             ..Default::default()
         };
         let payload = serde_json::to_value(&task).expect("广播事件负载可序列化");
-        assert_eq!(payload.get("id").and_then(|v| v.as_str()), Some("broadcast-1"));
+        assert_eq!(
+            payload.get("id").and_then(|v| v.as_str()),
+            Some("broadcast-1")
+        );
         assert_eq!(payload.get("title").and_then(|v| v.as_str()), Some("上访"));
     }
 }

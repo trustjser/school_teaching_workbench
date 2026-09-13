@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "局域网分布式教务与班级协同工作台"
 authors = ["LAN Workbench Team"]
 edition = "2021"
-rust-version = "1.77.2"
+# 依赖树 MSRV：Cargo.lock 里多个包（darling 0.23 / time 0.3.55 / plist 1.10.1 / icu 2.3 …）
+# 要求 >= 1.88，且大量包为 edition 2024（需 Cargo >= 1.85）。
+# 声明出来是为了让过旧的工具链报「requires rustc 1.88 or newer」这句人话，
+# 而不是去解析依赖时才抛出难懂的 `feature edition2024 is required`。
+# CI / release 实际使用的工具链见 .github/workflows/*.yml 的 RUST_TOOLCHAIN。
+rust-version = "1.88"
 
 [lib]
 name = "lan_workbench_lib"
